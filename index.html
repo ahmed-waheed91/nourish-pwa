@@ -237,36 +237,6 @@
 <script>
 /* ================= DATA ================= */
 
-const DEFAULT_MEALS = [
-  { id:'breakfast', name:'Breakfast', subtitle:'Usual breakfast (full recipe, permanently updated)', items:[
-    {name:'Protein Bread, 30g', kcal:78, p:9.6, c:11.1, f:0.8, fib:1.8, sugar:0.6, sodium:129},
-    {name:'Blanched almonds, 7 (~8g)', kcal:48, p:2, c:2, f:4, fib:1, sugar:0, sodium:0},
-    {name:'Boiled eggs, 2 (no salt)', kcal:144, p:13, c:1, f:10, fib:0, sugar:1, sodium:130},
-    {name:'Plain Greek yogurt, 70g', kcal:44, p:7, c:3.1, f:0.3, fib:0, sugar:3.1, sodium:29},
-    {name:'Mixed seeds, 5g', kcal:28, p:1, c:1, f:2.2, fib:0.5, sugar:0.1, sodium:1},
-    {name:'Honey, 5g', kcal:17, p:0, c:4.2, f:0, fib:0, sugar:3.1, sodium:1},
-  ]},
-  { id:'lunch', name:'Lunch', subtitle:'Haleem, chapati, Caramel Coffee', items:[
-    {name:'Haleem, 84g (no visible oil, est.)', kcal:126, p:7.6, c:13.4, f:4.2, fib:2.1, sugar:0.8, sodium:294},
-    {name:'Chapati, default 90g', kcal:213, p:7.3, c:40, f:4, fib:5.3, sugar:0.7, sodium:187},
-    {name:'Caramel Coffee', kcal:251, p:7.3, c:34.1, f:7.3, fib:0, sugar:21.4, sodium:185},
-  ]},
-  { id:'snack1', name:'Snack', subtitle:'Red orange, pears', items:[
-    {name:'Red orange, cut, 147g', kcal:71, p:1.3, c:17.6, f:0, fib:2.9, sugar:13.7, sodium:0},
-    {name:'Pears, 128g', kcal:73, p:0.4, c:18.7, f:0.1, fib:3.3, sugar:12.2, sodium:1.4},
-  ]},
-  { id:'dinner', name:'Dinner', subtitle:'Homemade chicken sandwich (80g chicken)', items:[
-    {name:'Arabic bread, 37g', kcal:102, p:3.3, c:19.9, f:0.4, fib:0.9, sugar:0.4, sodium:196},
-    {name:'Ketchup, 9g', kcal:9, p:0, c:2.2, f:0, fib:0, sugar:2, sodium:81},
-    {name:'Mixed vegetables, 27g (est.)', kcal:6, p:0.3, c:1.2, f:0.1, fib:0.4, sugar:0.5, sodium:1},
-    {name:'Pickles, 5g', kcal:0.7, p:0, c:0.2, f:0, fib:0.1, sugar:0.1, sodium:46},
-    {name:'Chicken breast, boneless, 80g', kcal:132, p:24.8, c:0, f:2.9, fib:0, sugar:0, sodium:56},
-    {name:'Develey Remoulade sauce, 10g', kcal:38, p:0.3, c:1, f:3.6, fib:0, sugar:0.6, sodium:71},
-  ]},
-  { id:'snack2', name:'Snack', subtitle:'Chocolala Belgian chocolates', items:[
-    {name:'Belgian chocolates, 3 pieces (~18g, est.)', kcal:99, p:1.3, c:10.4, f:5.8, fib:0, sugar:10.1, sodium:4},
-  ]},
-];
 function mealKcal(meal){ return Math.round(meal.items.reduce((a,it)=>a+it.kcal,0)*10)/10; }
 function computeConsumedTotals(meals){
   const t = { calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sodium:0 };
@@ -400,7 +370,7 @@ function dayData(i){
 function dotColor(ok){ return ok ? 'var(--good)' : 'var(--warning)'; }
 function esc(s){ return String(s); }
 
-const LOCAL_STORAGE_KEY = 'nourish_backup_v1';
+const LOCAL_STORAGE_KEY = 'nourish_backup_v2';
 function saveFileToDevice(filename, text){
   const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -467,8 +437,8 @@ const App = {
   state: {
     view: 'mobile',
     screen: 'today',
-    today: { expandedStat:null, expandedMeal:'breakfast', waterMl:1000, notesOpen:false, weightKg:84.0,
-      meals: DEFAULT_MEALS.map(m => ({ id:m.id, name:m.name, subtitle:m.subtitle, items:m.items.map(it=>({...it})) })) },
+    today: { expandedStat:null, expandedMeal:null, waterMl:0, notesOpen:false, weightKg:null, confirmRemoveKey:null,
+      meals: [] },
     targets: defaultTargets(),
     addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', lookupQuery:'', lookupResult:null },
     memory: {
@@ -489,13 +459,15 @@ const App = {
 
   toggleStat(id){ const t=this.state.today; t.expandedStat = t.expandedStat===id ? null : id; this.render(); },
   toggleMeal(id){ const t=this.state.today; t.expandedMeal = t.expandedMeal===id ? null : id; this.render(); },
-  removeMealItem(mealId, idx){
+  requestRemoveItem(mealId, idx){ this.state.today.confirmRemoveKey = mealId+':'+idx; this.render(); },
+  cancelRemoveItem(){ this.state.today.confirmRemoveKey = null; this.render(); },
+  confirmRemoveItem(mealId, idx){
     const meal = this.state.today.meals.find(m => m.id === mealId);
-    if (!meal) return;
-    meal.items.splice(idx, 1);
+    if (meal) meal.items.splice(idx, 1);
+    this.state.today.confirmRemoveKey = null;
     this.render();
   },
-  addWater(ml){ this.state.today.waterMl += ml; this.render(); },
+  addWater(ml){ this.state.today.waterMl = Math.max(0, this.state.today.waterMl + ml); this.render(); },
   toggleNotes(){ this.state.today.notesOpen = !this.state.today.notesOpen; this.render(); },
   saveWeight(){
     const v = parseFloat(document.getElementById('weight-input')?.value);
@@ -821,9 +793,18 @@ function renderToolbar(){
 
 /* ================= RENDER: STAGE ================= */
 
+let __lastStageKey = null;
 function renderStage(){
   const s = App.state;
   const stage = document.getElementById('stage');
+  const stageKey = s.view + ':' + s.screen;
+  const samePlace = __lastStageKey === stageKey;
+  const scrollSelectors = ['.scroll-area', '.d-center', '.d-aside'];
+  const prevScroll = samePlace ? scrollSelectors.map(sel => {
+    const el = stage.querySelector(sel);
+    return el ? el.scrollTop : null;
+  }) : null;
+
   if (s.view === 'desktop'){
     stage.innerHTML = renderDesktop();
   } else {
@@ -837,6 +818,15 @@ function renderStage(){
     else inner = renderExport();
     stage.innerHTML = `<div class="phone">${inner}</div>`;
   }
+
+  if (prevScroll){
+    scrollSelectors.forEach((sel, i) => {
+      if (prevScroll[i] == null) return;
+      const el = stage.querySelector(sel);
+      if (el) el.scrollTop = prevScroll[i];
+    });
+  }
+  __lastStageKey = stageKey;
 }
 
 function bottomNav(active){
@@ -897,7 +887,8 @@ function renderToday(){
   const stats = buildTodayStats(consumed, st.expandedStat);
 
   const weightTarget = targetInfo('weight');
-  const weightStatus = statusFor('weight', st.weightKg);
+  const hasWeight = typeof st.weightKg === 'number';
+  const weightStatus = hasWeight ? statusFor('weight', st.weightKg) : null;
 
   return `
     <div class="scroll-area" style="padding:20px 18px 100px 18px;">
@@ -966,7 +957,11 @@ function renderToday(){
         <button onclick="App.setScreen('addfood')" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">+ Log food</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
-        ${st.meals.map(meal => {
+        ${st.meals.length===0 ? `
+          <div class="card pad" style="text-align:center;color:var(--muted);font-size:13px;">
+            Nothing logged today yet.<br/>Tap <strong style="color:var(--ink-2);">+ Log food</strong> above to get started.
+          </div>
+        ` : st.meals.map(meal => {
           const open = st.expandedMeal === meal.id;
           return `
           <div class="card" style="overflow:hidden;">
@@ -982,7 +977,19 @@ function renderToday(){
             </div>
             ${open ? `
               <div style="padding:0 14px 12px 14px;border-top:1px solid var(--border);">
-                ${meal.items.length===0 ? `<div style="padding:12px 0;font-size:12px;color:var(--muted);">Nothing logged here yet.</div>` : meal.items.map((item,idx) => `
+                ${meal.items.length===0 ? `<div style="padding:12px 0;font-size:12px;color:var(--muted);">Nothing logged here yet.</div>` : meal.items.map((item,idx) => {
+                  const removeKey = meal.id+':'+idx;
+                  if (st.confirmRemoveKey === removeKey){
+                    return `
+                    <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+                      <div style="font-size:12px;font-weight:700;margin-bottom:8px;">Remove &ldquo;${item.name}&rdquo;?</div>
+                      <div style="display:flex;gap:8px;">
+                        <button onclick="event.stopPropagation();App.cancelRemoveItem()" style="flex:1;padding:7px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+                        <button onclick="event.stopPropagation();App.confirmRemoveItem('${meal.id}',${idx})" style="flex:1;padding:7px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Remove</button>
+                      </div>
+                    </div>`;
+                  }
+                  return `
                   <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
                     <div style="font-size:12.5px;min-width:0;">
                       <div style="font-weight:600;">${item.name}</div>
@@ -990,12 +997,12 @@ function renderToday(){
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;padding-left:10px;">
                       <div class="num" style="font-size:12.5px;font-weight:700;">${item.kcal}</div>
-                      <button onclick="event.stopPropagation();App.removeMealItem('${meal.id}',${idx})" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:2px;">
+                      <button onclick="event.stopPropagation();App.requestRemoveItem('${meal.id}',${idx})" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:2px;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                       </button>
                     </div>
-                  </div>
-                `).join('')}
+                  </div>`;
+                }).join('')}
               </div>
             ` : ''}
           </div>`;
@@ -1012,6 +1019,7 @@ function renderToday(){
           <div style="height:100%;width:${waterPct}%;border-radius:5px;background:var(--brand);"></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;">
+          <button onclick="App.addWater(-250)" ${st.waterMl<=0?'disabled':''} style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid var(--border);font-family:inherit;opacity:${st.waterMl<=0?'0.5':'1'};">− 250 ml</button>
           <button onclick="App.addWater(250)" style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">+ 250 ml</button>
           <button onclick="App.addWater(500)" style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">+ 500 ml</button>
         </div>
@@ -1020,22 +1028,26 @@ function renderToday(){
       <div class="card pad" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Weight</div>
-          <div class="pill ${weightStatus==='good'?'pill-good':(weightStatus==='warning'?'pill-warn':'pill-crit')}">${statusLabelFor('weight', App.state.today.weightKg)}</div>
+          ${hasWeight ? `<div class="pill ${weightStatus==='good'?'pill-good':(weightStatus==='warning'?'pill-warn':'pill-crit')}">${statusLabelFor('weight', st.weightKg)}</div>` : ''}
         </div>
-        <div class="num disp" style="font-size:22px;font-weight:800;">${st.weightKg.toFixed(1)} kg <span style="font-size:12px;font-weight:600;color:var(--ink-2);">goal ${weightTarget.label}</span></div>
+        <div class="num disp" style="font-size:22px;font-weight:800;">${hasWeight ? st.weightKg.toFixed(1)+' kg' : '<span style="font-size:14px;color:var(--muted);font-weight:600;">Not logged today</span>'} <span style="font-size:12px;font-weight:600;color:var(--ink-2);">goal ${weightTarget.label}</span></div>
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <input id="weight-input" type="number" step="0.1" value="${st.weightKg}" style="flex:1;text-align:left;"/>
+          <input id="weight-input" type="number" step="0.1" placeholder="e.g. 84.0" value="${hasWeight ? st.weightKg : ''}" style="flex:1;text-align:left;"/>
           <button onclick="App.saveWeight()" style="flex-shrink:0;padding:9px 16px;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">Save</button>
         </div>
       </div>
 
+      ${st.meals.length > 0 ? `
       <div class="card" style="overflow:hidden;">
         <div class="accordion-head pad" onclick="App.toggleNotes()">
           <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Notes &amp; accuracy</div>
           <div class="chev ${st.notesOpen?'open':''}"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         </div>
-        ${st.notesOpen ? `<div style="padding:0 16px 14px 16px;font-size:12.5px;color:var(--ink-2);line-height:1.5;">Sugar ran 20.4g over — Caramel Coffee and today's fruit were the main sources. Fiber and fat are both under target; protein is short mainly from lighter portions at breakfast and dinner. Haleem has no verified reference, so its figure is a rough estimate — the least certain value logged today.</div>` : ''}
+        ${st.notesOpen ? `<div style="padding:0 16px 14px 16px;font-size:12.5px;color:var(--ink-2);line-height:1.5;">
+          ${stats.filter(s => s.status !== 'good').map(s => `${s.label}: ${s.detail}`).join(' ') || 'Everything logged so far is within range.'}
+        </div>` : ''}
       </div>
+      ` : ''}
     </div>
 
     <button class="fab" onclick="App.setScreen('addfood')" title="Log food">
@@ -1553,7 +1565,12 @@ function renderTrends(){
   const isWeight = cat.id === 'weight';
   const liveConsumed = computeConsumedTotals(App.state.today.meals);
   const liveRealFor = (id) => {
-    if (id === 'weight') return App.state.today.weightKg;
+    if (id === 'weight') {
+      const w = App.state.today.weightKg;
+      if (typeof w === 'number') return w;
+      const wt = App.state.targets.weight;
+      return (wt.low + wt.high) / 2;
+    }
     if (id === 'water') return App.state.today.waterMl / 1000;
     return liveConsumed[id];
   };
