@@ -946,6 +946,16 @@ const App = {
         y += 10;
       }
 
+      if (entry.note && entry.note.trim()){
+        y = ensureRoom(y, 16);
+        doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...brand);
+        doc.text('Notes', margin, y);
+        y += 7;
+        doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...ink);
+        const wrappedNote = doc.splitTextToSize(entry.note.trim(), contentW);
+        wrappedNote.forEach(line => { y = ensureRoom(y, 5); doc.text(line, margin, y); y += 5; });
+      }
+
       filename = `nourish-daily-${entry.isToday ? todayISO() : entry.date}.pdf`;
     } else {
       const start = st.offset*7;
@@ -1393,7 +1403,7 @@ function renderToday(){
         <div style="font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Today's notes</div>
         <textarea id="daily-note-input" placeholder="Anything worth remembering about today — how you felt, what to adjust next time..." style="width:100%;min-height:70px;padding:10px 11px;border-radius:10px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;resize:vertical;">${(st.dailyNote||'').replace(/</g,'&lt;')}</textarea>
         <button onclick="App.saveDailyNote()" style="margin-top:8px;padding:9px 16px;border-radius:10px;background:${st.noteSaved?'var(--good)':'var(--brand-tint)'};color:${st.noteSaved?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${st.noteSaved?'Saved ✓':'Save note'}</button>
-        <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.4;">Saved with this day's log for your own reference.</div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.4;">Included in your PDF export for this day.</div>
       </div>
     </div>
 
