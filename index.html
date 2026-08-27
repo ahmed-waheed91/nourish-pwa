@@ -846,6 +846,7 @@ const App = {
     this.state.library.activeTab = kind;
     this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', scanned:false, photo:null, ocrRunning:false, ocrFailed:false };
     this.state.library.composer = null;
+    __scrollTopNext = true;
     this.render();
   },
   editMemoryItem(kind, id){
@@ -858,9 +859,10 @@ const App = {
       kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium,
       scanned:false, photo:item.photo||null, ocrRunning:false, ocrFailed:false,
     };
+    __scrollTopNext = true;
     this.render();
   },
-  closeForm(){ this.state.library.form = null; this.render(); },
+  closeForm(){ this.state.library.form = null; __scrollTopNext = true; this.render(); },
   handlePhotoSelect(inputEl){
     const file = inputEl.files && inputEl.files[0];
     if (!file) return;
@@ -933,9 +935,10 @@ const App = {
       this.state.library.composer = { editId:null, name:'', desc:'', components:[], manualOpen:false };
     }
     this.state.library.form = null;
+    __scrollTopNext = true;
     this.render();
   },
-  closeComposer(){ this.state.library.composer = null; this.render(); },
+  closeComposer(){ this.state.library.composer = null; __scrollTopNext = true; this.render(); },
   syncComposerDom(){
     // captures whatever's currently typed/adjusted before a mid-flow render redraws the form
     // from state — without this, name/description/weight edits get silently wiped whenever
@@ -1506,13 +1509,16 @@ function renderToolbar(){
 /* ================= RENDER: STAGE ================= */
 
 let __lastStageKey = null;
+let __scrollTopNext = false;
 function renderStage(){
   const s = App.state;
   const stage = document.getElementById('stage');
   const stageKey = s.view + ':' + s.screen;
   const samePlace = __lastStageKey === stageKey;
+  const forceTop = __scrollTopNext;
+  __scrollTopNext = false;
   const scrollSelectors = ['.scroll-area', '.d-center', '.d-aside'];
-  const prevScroll = samePlace ? scrollSelectors.map(sel => {
+  const prevScroll = (samePlace && !forceTop) ? scrollSelectors.map(sel => {
     const el = stage.querySelector(sel);
     return el ? el.scrollTop : null;
   }) : null;
@@ -1536,6 +1542,11 @@ function renderStage(){
       if (prevScroll[i] == null) return;
       const el = stage.querySelector(sel);
       if (el) el.scrollTop = prevScroll[i];
+    });
+  } else if (forceTop){
+    scrollSelectors.forEach(sel => {
+      const el = stage.querySelector(sel);
+      if (el) el.scrollTop = 0;
     });
   }
   __lastStageKey = stageKey;
