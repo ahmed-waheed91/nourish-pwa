@@ -251,6 +251,52 @@ function computeConsumedTotals(meals){
   return { calories:Math.round(t.calories), protein:round1(t.protein), carbs:round1(t.carbs), fat:round1(t.fat), fiber:round1(t.fiber), sugar:round1(t.sugar), sodium:Math.round(t.sodium) };
 }
 
+/* ---------- Composite Saved Foods (multi-component, per-100g scalable "meals") ---------- */
+function isComponentLive(comp){
+  if (!comp.refId) return false;
+  const list = App.state.memory[comp.refKind] || [];
+  return list.some(x => x.id === comp.refId);
+}
+function resolveComponentPer100(comp){
+  if (comp.refId){
+    const list = App.state.memory[comp.refKind] || [];
+    const live = list.find(x => x.id === comp.refId);
+    if (live){
+      const fresh = { kcal:live.kcalPer100, p:live.p, c:live.c, f:live.f, fib:live.fib, sugar:live.sugar, sodium:live.sodium };
+      // keep the frozen fallback (name, unit, values) fresh for as long as the link resolves
+      comp.per100 = fresh; comp.name = live.name; comp.unit = live.unit || comp.unit;
+      return fresh;
+    }
+  }
+  return comp.per100;
+}
+function computeComponentScaled(comp){
+  const per100 = resolveComponentPer100(comp);
+  const scale = (comp.weight||0)/100;
+  const round1 = n => Math.round(n*scale*10)/10;
+  return {
+    name: comp.name, weight: comp.weight, unit: comp.unit||'g',
+    kcal: Math.round((per100.kcal||0)*scale), p:round1(per100.p||0), c:round1(per100.c||0), f:round1(per100.f||0),
+    fib:round1(per100.fib||0), sugar:round1(per100.sugar||0), sodium:Math.round((per100.sodium||0)*scale),
+  };
+}
+function computeCompositeTotal(food){
+  const scaledList = (food.components||[]).map(computeComponentScaled);
+  const total = scaledList.reduce((acc,c) => ({
+    kcal:acc.kcal+c.kcal, p:acc.p+c.p, c:acc.c+c.c, f:acc.f+c.f, fib:acc.fib+c.fib, sugar:acc.sugar+c.sugar, sodium:acc.sodium+c.sodium,
+  }), {kcal:0,p:0,c:0,f:0,fib:0,sugar:0,sodium:0});
+  return { scaledList, total };
+}
+function refreshCompositeFoodTotals(){
+  const round1 = n => Math.round(n*10)/10;
+  (App.state.memory.foods||[]).forEach(food => {
+    if (!Array.isArray(food.components)) return;
+    const { total } = computeCompositeTotal(food);
+    food.kcal = Math.round(total.kcal); food.p = round1(total.p); food.c = round1(total.c); food.f = round1(total.f);
+    food.fib = round1(total.fib); food.sugar = round1(total.sugar); food.sodium = Math.round(total.sodium);
+  });
+}
+
 const SAVED_FOODS = [
   { id:'usual_breakfast', name:'Usual Breakfast', updated:'Aug 25, 2026', kcal:359, p:32.6, c:22.5, f:17.4, fib:3.3, sugar:8.0, sodium:290,
     recipe:'30g Protein Bread + 7 blanched almonds + 2 boiled eggs (no salt) + 70g Plain Greek Yogurt + 5g mixed seeds + 5g honey' },
@@ -568,14 +614,14 @@ const App = {
     dayHistory: [],
     storageAlert: null,
     targets: defaultTargets(),
-    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', lookupQuery:'', lookupResult:null, lookupLoading:false },
+    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', lookupQuery:'', lookupResult:null, lookupLoading:false, expandedSavedId:null },
     memory: {
       foods: SAVED_FOODS.map(x => ({...x})),
       ingredients: INGREDIENTS.map(x => ({...x})),
       usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
     builtinFoodsSeeded: true,
-    library: { activeTab:'foods', openId:null, form:null, confirmDeleteKey:null, confirmMoveKey:null, boneEntries:[{total:170,bone:24},{total:190,bone:38},{total:125,bone:34},{total:76,bone:22}] },
+    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, boneEntries:[{total:170,bone:24},{total:190,bone:38},{total:125,bone:34},{total:76,bone:22}] },
     history: { view:'day', openIdx:null, selectedDayNum:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[] },
@@ -790,7 +836,7 @@ const App = {
     this.render();
   },
 
-  setLibraryTab(id){ this.state.library.activeTab = id; this.state.library.form = null; this.render(); },
+  setLibraryTab(id){ this.state.library.activeTab = id; this.state.library.form = null; this.state.library.composer = null; this.render(); },
   toggleLibraryOpen(id){ const l=this.state.library; l.openId = l.openId===id ? null : id; this.render(); },
 
   genId(name){
@@ -799,6 +845,7 @@ const App = {
   openAddForm(kind){
     this.state.library.activeTab = kind;
     this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', scanned:false, photo:null, ocrRunning:false, ocrFailed:false };
+    this.state.library.composer = null;
     this.render();
   },
   editMemoryItem(kind, id){
@@ -873,6 +920,158 @@ const App = {
     this.state.library.form = null;
     this.render();
   },
+
+  openComposer(editId){
+    if (editId){
+      const food = this.state.memory.foods.find(x => x.id === editId);
+      if (!food || !Array.isArray(food.components)) return;
+      this.state.library.composer = {
+        editId, name:food.name, desc:food.recipe||'',
+        components: food.components.map(c => ({...c, per100:{...c.per100}})), manualOpen:false,
+      };
+    } else {
+      this.state.library.composer = { editId:null, name:'', desc:'', components:[], manualOpen:false };
+    }
+    this.state.library.form = null;
+    this.render();
+  },
+  closeComposer(){ this.state.library.composer = null; this.render(); },
+  composerToggleManual(){
+    const c = this.state.library.composer;
+    if (!c) return;
+    c.manualOpen = !c.manualOpen;
+    this.render();
+  },
+  composerAddComponentFromRef(refKind, refId){
+    const c = this.state.library.composer;
+    if (!c) return;
+    const item = this.state.memory[refKind].find(x => x.id === refId);
+    if (!item) return;
+    const per100 = { kcal:item.kcalPer100, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium };
+    c.components.push({ id: makeId(item.name), refKind, refId, name:item.name, unit:item.unit||'g', weight:100, per100 });
+    this.render();
+  },
+  composerAddManualComponent(){
+    const c = this.state.library.composer;
+    if (!c) return;
+    const val = id => (document.getElementById(id)?.value ?? '').trim();
+    const num = id => parseFloat(document.getElementById(id)?.value) || 0;
+    const name = val('composer-manual-name') || 'Untitled ingredient';
+    const unit = document.querySelector('input[name="composer-manual-unit"]:checked')?.value || 'g';
+    const per100 = { kcal:num('composer-manual-kcal'), p:num('composer-manual-p'), c:num('composer-manual-c'), f:num('composer-manual-f'), fib:num('composer-manual-fib'), sugar:num('composer-manual-sugar'), sodium:num('composer-manual-sodium') };
+    const saveStandalone = document.getElementById('composer-manual-savestandalone')?.checked;
+    let refKind = null, refId = null;
+    if (saveStandalone){
+      refId = this.genId(name);
+      refKind = 'ingredients';
+      this.state.memory.ingredients.push({ id:refId, name, source:'Manual entry', unit, kcalPer100:per100.kcal, kcal:per100.kcal, ...per100 });
+    }
+    c.components.push({ id: makeId(name), refKind, refId, name, unit, weight:100, per100 });
+    c.manualOpen = false;
+    this.render();
+  },
+  composerRemoveComponent(componentId){
+    const c = this.state.library.composer;
+    if (!c) return;
+    c.components = c.components.filter(x => x.id !== componentId);
+    this.render();
+  },
+  composerScaleRow(componentId, inputEl){
+    const c = this.state.library.composer;
+    if (!c) return;
+    const comp = c.components.find(x => x.id === componentId);
+    if (!comp) return;
+    const w = parseFloat(inputEl.value) || 0;
+    const per100 = resolveComponentPer100(comp);
+    const kcalEl = document.getElementById('comp-kcal-'+componentId);
+    if (kcalEl) kcalEl.textContent = Math.round((per100.kcal||0)*w/100) + ' kcal';
+    this.composerRecalcTotal();
+  },
+  composerRecalcTotal(){
+    const c = this.state.library.composer;
+    if (!c) return;
+    let total = 0;
+    c.components.forEach(comp => {
+      const w = parseFloat(document.getElementById('comp-weight-'+comp.id)?.value) || 0;
+      const per100 = resolveComponentPer100(comp);
+      total += (per100.kcal||0)*w/100;
+    });
+    const el = document.getElementById('composer-total');
+    if (el) el.textContent = Math.round(total);
+  },
+  saveComposer(){
+    const c = this.state.library.composer;
+    if (!c || c.components.length === 0) return;
+    const name = (document.getElementById('composer-name')?.value || '').trim() || 'Untitled meal';
+    const descInput = (document.getElementById('composer-desc')?.value || '').trim();
+    const finalComponents = c.components.map(comp => {
+      const w = parseFloat(document.getElementById('comp-weight-'+comp.id)?.value) || 0;
+      const per100 = resolveComponentPer100(comp);
+      return { id:comp.id, refKind:comp.refKind, refId:comp.refId, name:comp.name, unit:comp.unit, weight:w, per100 };
+    });
+    const autoDesc = finalComponents.map(fc => `${fc.weight}${fc.unit} ${fc.name}`).join(', ');
+    const desc = descInput || autoDesc;
+    const { total } = computeCompositeTotal({ components:finalComponents });
+    const round1 = n => Math.round(n*10)/10;
+    const data = {
+      name, recipe:desc, components:finalComponents, updated:'Just now', photo:null,
+      kcal:Math.round(total.kcal), p:round1(total.p), c:round1(total.c), f:round1(total.f),
+      fib:round1(total.fib), sugar:round1(total.sugar), sodium:Math.round(total.sodium),
+    };
+    if (c.editId){
+      const idx = this.state.memory.foods.findIndex(x => x.id === c.editId);
+      if (idx > -1) this.state.memory.foods[idx] = { ...this.state.memory.foods[idx], ...data };
+    } else {
+      data.id = this.genId(name);
+      this.state.memory.foods.push(data);
+    }
+    this.state.library.composer = null;
+    this.render();
+  },
+  toggleAddFoodSavedExpand(id){
+    const st = this.state.addfood;
+    st.expandedSavedId = st.expandedSavedId === id ? null : id;
+    this.render();
+  },
+  scaleComposedComponent(foodId, componentId, inputEl){
+    const food = this.state.memory.foods.find(x => x.id === foodId);
+    if (!food || !Array.isArray(food.components)) return;
+    const comp = food.components.find(x => x.id === componentId);
+    if (!comp) return;
+    const w = parseFloat(inputEl.value) || 0;
+    const per100 = resolveComponentPer100(comp);
+    const kcalEl = document.getElementById(`cf-kcal-${foodId}-${componentId}`);
+    if (kcalEl) kcalEl.textContent = Math.round((per100.kcal||0)*w/100) + ' kcal';
+    let total = 0;
+    food.components.forEach(c => {
+      const cw = c.id === componentId ? w : (parseFloat(document.getElementById(`cf-weight-${foodId}-${c.id}`)?.value) || 0);
+      const cPer100 = resolveComponentPer100(c);
+      total += (cPer100.kcal||0)*cw/100;
+    });
+    const totalEl = document.getElementById(`cf-total-${foodId}`);
+    if (totalEl) totalEl.textContent = Math.round(total);
+  },
+  addComposedFoodToMeal(foodId){
+    const food = this.state.memory.foods.find(x => x.id === foodId);
+    if (!food || !Array.isArray(food.components)) return;
+    const meal = this.getOrCreateMeal(this.state.addfood.targetMeal);
+    food.components.forEach(comp => {
+      const w = parseFloat(document.getElementById(`cf-weight-${foodId}-${comp.id}`)?.value) || comp.weight || 0;
+      const per100 = resolveComponentPer100(comp);
+      const scale = w/100;
+      const round1 = n => Math.round(n*scale*10)/10;
+      meal.items.push({
+        name: `${comp.name}, ${w}${comp.unit||'g'}`,
+        kcal: Math.round((per100.kcal||0)*scale), p:round1(per100.p||0), c:round1(per100.c||0), f:round1(per100.f||0),
+        fib:round1(per100.fib||0), sugar:round1(per100.sugar||0), sodium:Math.round((per100.sodium||0)*scale),
+      });
+    });
+    this.state.addfood.flashId = foodId;
+    this.state.addfood.expandedSavedId = null;
+    this.render();
+    this.setScreen('today');
+  },
+
   requestMove(kind, id){ this.state.library.confirmMoveKey = kind+':'+id; this.render(); },
   cancelMove(){ this.state.library.confirmMoveKey = null; this.render(); },
   confirmMove(fromKind, id){
@@ -1256,6 +1455,7 @@ const App = {
   setDesktopMeal(id){ const d=this.state.desktop; d.openMeal = d.openMeal===id ? null : id; this.render(); },
 
   render(){
+    refreshCompositeFoodTotals();
     renderToolbar();
     renderStage();
     this.saveLocal();
@@ -1580,6 +1780,43 @@ function renderAddFood(){
   if (st.activeTab === 'saved'){
     list = `<div id="addfood-list" style="display:flex;flex-direction:column;gap:8px;">
       ${App.state.memory.foods.map(f => {
+        if (Array.isArray(f.components)){
+          const expanded = st.expandedSavedId === f.id;
+          return `
+          <div data-name="${f.name.toLowerCase()}" class="card pad-sm">
+            <div onclick="App.toggleAddFoodSavedExpand('${f.id}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+              <div style="min-width:0;">
+                <div style="font-size:13.5px;font-weight:700;">${f.name}</div>
+                <div style="font-size:11.5px;color:var(--muted);margin-top:1px;">${f.recipe.length>46 ? f.recipe.slice(0,46)+'…' : f.recipe}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;padding-left:8px;">
+                <div class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.kcal} kcal</div>
+                <div class="chev ${expanded?'open':''}"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              </div>
+            </div>
+            ${expanded ? `
+              <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">
+                ${f.components.map(comp => {
+                  const per100 = resolveComponentPer100(comp);
+                  const kcal = Math.round((per100.kcal||0)*(comp.weight||0)/100);
+                  return `
+                  <div>
+                    <div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">${comp.name}</div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <input id="cf-weight-${f.id}-${comp.id}" type="number" value="${comp.weight}" oninput="App.scaleComposedComponent('${f.id}','${comp.id}', this)" style="width:0;flex:1;text-align:left;"/>
+                      <div style="font-size:12px;color:var(--muted);">${comp.unit||'g'}</div>
+                      <div id="cf-kcal-${f.id}-${comp.id}" class="num" style="font-size:13px;font-weight:700;color:var(--brand-dark);flex-shrink:0;">${kcal} kcal</div>
+                    </div>
+                  </div>`;
+                }).join('')}
+                <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px;">
+                  <div style="font-size:12.5px;font-weight:700;">Total: <span id="cf-total-${f.id}">${f.kcal}</span> kcal</div>
+                  <button onclick="App.addComposedFoodToMeal('${f.id}')" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===f.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+                </div>
+              </div>
+            ` : ''}
+          </div>`;
+        }
         const sel = !!st.selected[f.id];
         return `
         <div data-name="${f.name.toLowerCase()}" onclick="App.toggleSelected('${f.id}')" class="pad-sm" style="display:flex;align-items:center;justify-content:space-between;background:var(--card);border:1.5px solid ${sel?'var(--brand)':'var(--border)'};border-radius:13px;cursor:pointer;">
@@ -1777,19 +2014,119 @@ function renderMemoryForm(f){
     </div>
   `;
 }
+function renderComposerComponentRow(comp){
+  const per100 = resolveComponentPer100(comp);
+  const kcal = Math.round((per100.kcal||0)*(comp.weight||0)/100);
+  const live = isComponentLive(comp);
+  return `
+    <div class="card pad-sm" style="margin-bottom:6px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:700;">${comp.name}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:1px;">${live ? 'Linked — updates if you edit it later' : 'Fixed values'}</div>
+        </div>
+        <button onclick="App.composerRemoveComponent('${comp.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;flex-shrink:0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+        <input id="comp-weight-${comp.id}" type="number" value="${comp.weight}" oninput="App.composerScaleRow('${comp.id}', this)" style="width:0;flex:1;text-align:left;"/>
+        <div style="font-size:12px;color:var(--muted);">${comp.unit||'g'}</div>
+        <div id="comp-kcal-${comp.id}" class="num" style="font-size:13px;font-weight:700;color:var(--brand-dark);flex-shrink:0;">${kcal} kcal</div>
+      </div>
+    </div>`;
+}
+function renderComposerManualForm(){
+  const fields = [['composer-manual-kcal','Calories (kcal)'],['composer-manual-p','Protein (g)'],['composer-manual-c','Carbs (g)'],['composer-manual-f','Fat (g)'],['composer-manual-fib','Fiber (g)'],['composer-manual-sugar','Sugar (g)'],['composer-manual-sodium','Sodium (mg)']];
+  return `
+    <div class="card pad-sm" style="margin-top:8px;border:1px dashed var(--border);">
+      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Ingredient name</label>
+      <input id="composer-manual-name" type="text" placeholder="e.g. Haleem" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
+      <div style="display:flex;gap:14px;margin-bottom:10px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;"><input type="radio" name="composer-manual-unit" value="g" checked/> per 100 g</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;"><input type="radio" name="composer-manual-unit" value="ml"/> per 100 ml</label>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:8px;margin-bottom:10px;">
+        ${fields.map(([id,label]) => `
+          <div>
+            <label style="display:block;font-size:10.5px;color:var(--muted);margin-bottom:3px;">${label}</label>
+            <input id="${id}" type="number" step="0.1" style="width:100%;text-align:left;"/>
+          </div>
+        `).join('')}
+      </div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:10px;">
+        <input type="checkbox" id="composer-manual-savestandalone" checked/> Also save as a standalone ingredient for future use
+      </label>
+      <button onclick="App.composerAddManualComponent()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Add component</button>
+    </div>`;
+}
+function renderComposerForm(c){
+  const isEdit = !!c.editId;
+  const pickList = [
+    ...App.state.memory.ingredients.map(x => ({...x, refKind:'ingredients'})),
+    ...App.state.memory.usda.map(x => ({...x, refKind:'usda'})),
+  ];
+  const { total } = computeCompositeTotal({ components:c.components });
+  return `
+    <div class="card pad" style="margin-bottom:10px;border:1.5px solid var(--brand);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="font-size:13.5px;font-weight:800;">${isEdit ? 'Edit saved meal' : 'Build a saved meal from ingredients'}</div>
+        <button onclick="App.closeComposer()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Meal name</label>
+      <input id="composer-name" type="text" value="${String(c.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Haleem with Roti" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
+      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Description</label>
+      <input id="composer-desc" type="text" value="${String(c.desc||'').replace(/"/g,'&quot;')}" placeholder="Auto-generated from components — edit if you like" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:14px;font-family:inherit;"/>
+
+      <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Components</div>
+      ${c.components.length === 0 ? `<div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">No components yet — add one below.</div>` : c.components.map(renderComposerComponentRow).join('')}
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 2px;border-top:1px solid var(--border);margin-bottom:14px;">
+        <div style="font-size:12.5px;font-weight:700;">Total</div>
+        <div class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);"><span id="composer-total">${Math.round(total.kcal)}</span> kcal</div>
+      </div>
+
+      <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Add a component</div>
+      <div class="search" style="margin-bottom:8px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input placeholder="Search your ingredients &amp; USDA list" oninput="App.filterRows('composer-pick-list', this.value)"/>
+      </div>
+      <div id="composer-pick-list" style="max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+        ${pickList.map(item => `
+          <div data-name="${item.name.toLowerCase()}" onclick="App.composerAddComponentFromRef('${item.refKind}','${item.id}')" class="pad-sm" style="display:flex;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer;">
+            <div style="font-size:12.5px;font-weight:600;">${item.name}</div>
+            <div class="num" style="font-size:11.5px;color:var(--muted);flex-shrink:0;padding-left:8px;">${item.kcalPer100} kcal/100${item.unit||'g'}</div>
+          </div>
+        `).join('')}
+      </div>
+      <button onclick="App.composerToggleManual()" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:9px 0;border-radius:10px;border:1.5px dashed rgba(11,11,11,0.20);background:transparent;color:var(--brand-dark);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+        Can't find it? Add a new ingredient
+      </button>
+      ${c.manualOpen ? renderComposerManualForm() : ''}
+
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button onclick="App.closeComposer()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="App.saveComposer()" style="flex:2;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;font-size:13px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">${isEdit ? 'Save changes' : 'Save meal'}</button>
+      </div>
+    </div>
+  `;
+}
 function photoThumb(item){
   return item.photo ? `<img src="${item.photo}" style="width:30px;height:30px;object-fit:cover;border-radius:7px;border:1px solid var(--border);flex-shrink:0;"/>` : '';
 }
 const ROW_ACTION_BTN = 'background:none;border:none;cursor:pointer;color:var(--muted);padding:8px;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;';
 function memoryRowActions(kind, item){
-  const canMove = kind === 'foods' || kind === 'ingredients';
+  const isComposite = kind === 'foods' && Array.isArray(item.components);
+  const canMove = (kind === 'foods' || kind === 'ingredients') && !isComposite;
   const moveTo = kind === 'foods' ? 'Ingredients' : 'Saved foods';
+  const editCall = isComposite ? `App.openComposer('${item.id}')` : `App.editMemoryItem('${kind}','${item.id}')`;
   return `
     ${canMove ? `
     <button onclick="event.stopPropagation();App.requestMove('${kind}','${item.id}')" title="Move to ${moveTo}" style="${ROW_ACTION_BTN}">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 8h12m0 0l-4-4m4 4l-4 4M17 16H5m0 0l4 4m-4-4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>` : ''}
-    <button onclick="event.stopPropagation();App.editMemoryItem('${kind}','${item.id}')" style="${ROW_ACTION_BTN}">
+    <button onclick="event.stopPropagation();${editCall}" style="${ROW_ACTION_BTN}">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
     </button>
     <button onclick="event.stopPropagation();App.requestDelete('${kind}','${item.id}')" style="${ROW_ACTION_BTN}">
@@ -1827,11 +2164,21 @@ function renderLibrary(){
 
   let body = '';
   if (st.activeTab === 'foods'){
-    body = `${formHere('foods')}${st.form && st.form.kind==='foods' ? '' : addMemoryButton('foods','Add a saved food')}<div id="lib-list" style="display:flex;flex-direction:column;gap:8px;">
+    const showAddButtons = !st.form && !st.composer;
+    body = `${formHere('foods')}${st.composer ? renderComposerForm(st.composer) : ''}${showAddButtons ? `
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        ${addMemoryButton('foods','Add a saved food')}
+      </div>
+      <button onclick="App.openComposer()" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px 0;border-radius:12px;border:1.5px dashed rgba(11,11,11,0.20);background:transparent;color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;margin-bottom:10px;font-family:inherit;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Build from ingredients
+      </button>
+    ` : ''}<div id="lib-list" style="display:flex;flex-direction:column;gap:8px;">
       ${App.state.memory.foods.map(f => {
         if (st.confirmDeleteKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmCard('foods', f)}</div>`;
         if (st.confirmMoveKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmMoveCard('foods', f)}</div>`;
         const open = st.openId === f.id;
+        const isComposite = Array.isArray(f.components);
         return `
         <div data-name="${f.name.toLowerCase()}" class="card" style="overflow:hidden;">
           <div class="accordion-head pad-sm" onclick="App.toggleLibraryOpen('${f.id}')">
@@ -1839,7 +2186,7 @@ function renderLibrary(){
               ${photoThumb(f)}
               <div style="min-width:0;">
                 <div style="font-size:13.5px;font-weight:700;">${f.name}</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:1px;">Updated ${f.updated}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:1px;">${isComposite ? 'Built from ingredients' : 'Updated '+f.updated}</div>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;padding-left:8px;">
@@ -1850,7 +2197,19 @@ function renderLibrary(){
           </div>
           ${open ? `
             <div style="padding:0 13px 13px 13px;border-top:1px solid var(--border);">
-              <div style="font-size:11px;color:var(--muted);margin:10px 0 6px 0;">${f.recipe}</div>
+              ${isComposite ? `
+                <div style="display:flex;flex-direction:column;gap:6px;margin:10px 0;">
+                  ${f.components.map(comp => {
+                    const per100 = resolveComponentPer100(comp);
+                    const kcal = Math.round((per100.kcal||0)*(comp.weight||0)/100);
+                    const live = isComponentLive(comp);
+                    return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;background:var(--surface);border-radius:8px;padding:7px 10px;">
+                      <div>${comp.name} · ${comp.weight}${comp.unit||'g'}${live?'':' <span style="color:var(--muted);">(fixed)</span>'}</div>
+                      <div class="num" style="font-weight:700;flex-shrink:0;padding-left:8px;">${kcal} kcal</div>
+                    </div>`;
+                  }).join('')}
+                </div>
+              ` : `<div style="font-size:11px;color:var(--muted);margin:10px 0 6px 0;">${f.recipe}</div>`}
               <div style="display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:6px;">
                 ${macrosArrayFrom(f).map(([l,v]) => `
                   <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;">
