@@ -2154,6 +2154,20 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('service-worker.js').catch(() => {});
   });
 }
+
+// A standalone PWA can sit suspended in the background across midnight without
+// being reloaded, so the boot-time rollover check above never re-runs on its own.
+// Re-check whenever the app comes back to the foreground.
+function recheckDayOnResume(){
+  const before = App.state.dayLog.currentDate;
+  App.checkDayRollover();
+  if (App.state.dayLog.currentDate !== before) App.render();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') recheckDayOnResume();
+});
+window.addEventListener('pageshow', recheckDayOnResume);
+window.addEventListener('focus', recheckDayOnResume);
 </script>
 </body>
 </html>
