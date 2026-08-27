@@ -936,9 +936,25 @@ const App = {
     this.render();
   },
   closeComposer(){ this.state.library.composer = null; this.render(); },
+  syncComposerDom(){
+    // captures whatever's currently typed/adjusted before a mid-flow render redraws the form
+    // from state — without this, name/description/weight edits get silently wiped whenever
+    // another composer action (add/remove component, toggle manual form) triggers a re-render.
+    const c = this.state.library.composer;
+    if (!c) return;
+    const nameEl = document.getElementById('composer-name');
+    const descEl = document.getElementById('composer-desc');
+    if (nameEl) c.name = nameEl.value;
+    if (descEl) c.desc = descEl.value;
+    c.components.forEach(comp => {
+      const wEl = document.getElementById('comp-weight-'+comp.id);
+      if (wEl){ const w = parseFloat(wEl.value); if (!isNaN(w)) comp.weight = w; }
+    });
+  },
   composerToggleManual(){
     const c = this.state.library.composer;
     if (!c) return;
+    this.syncComposerDom();
     c.manualOpen = !c.manualOpen;
     this.render();
   },
@@ -947,6 +963,7 @@ const App = {
     if (!c) return;
     const item = this.state.memory[refKind].find(x => x.id === refId);
     if (!item) return;
+    this.syncComposerDom();
     const per100 = { kcal:item.kcalPer100, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium };
     c.components.push({ id: makeId(item.name), refKind, refId, name:item.name, unit:item.unit||'g', weight:100, per100 });
     this.render();
@@ -954,6 +971,7 @@ const App = {
   composerAddManualComponent(){
     const c = this.state.library.composer;
     if (!c) return;
+    this.syncComposerDom();
     const val = id => (document.getElementById(id)?.value ?? '').trim();
     const num = id => parseFloat(document.getElementById(id)?.value) || 0;
     const name = val('composer-manual-name') || 'Untitled ingredient';
@@ -973,6 +991,7 @@ const App = {
   composerRemoveComponent(componentId){
     const c = this.state.library.composer;
     if (!c) return;
+    this.syncComposerDom();
     c.components = c.components.filter(x => x.id !== componentId);
     this.render();
   },
@@ -2054,10 +2073,11 @@ function renderComposerManualForm(){
           </div>
         `).join('')}
       </div>
-      <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:10px;">
-        <input type="checkbox" id="composer-manual-savestandalone" checked/> Also save as a standalone ingredient for future use
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:4px;">
+        <input type="checkbox" id="composer-manual-savestandalone" checked/> Also save to my permanent Ingredients list
       </label>
-      <button onclick="App.composerAddManualComponent()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Add component</button>
+      <div style="font-size:10.5px;color:var(--muted);margin-bottom:10px;line-height:1.4;">Leave this ticked to reuse it in other meals later, or untick to use it just this once. Either way, you still need to tap the button below to add it — filling this form alone doesn't save anything yet.</div>
+      <button onclick="App.composerAddManualComponent()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Add this to the meal</button>
     </div>`;
 }
 function renderComposerForm(c){
