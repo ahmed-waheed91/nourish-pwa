@@ -454,7 +454,7 @@ const App = {
       ingredients: INGREDIENTS.map(x => ({...x})),
       usda: USDA_FOODS.map(x => ({...x})),
     },
-    library: { activeTab:'foods', openId:null, form:null, confirmDeleteKey:null, boneEntries:[{total:170,bone:24},{total:190,bone:38},{total:125,bone:34},{total:76,bone:22}] },
+    library: { activeTab:'foods', openId:null, form:null, confirmDeleteKey:null, confirmMoveKey:null, boneEntries:[{total:170,bone:24},{total:190,bone:38},{total:125,bone:34},{total:76,bone:22}] },
     history: { view:'day', openIdx:null, selectedDayNum:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null },
@@ -703,7 +703,9 @@ const App = {
     this.state.library.form = null;
     this.render();
   },
-  moveMemoryItem(fromKind, id){
+  requestMove(kind, id){ this.state.library.confirmMoveKey = kind+':'+id; this.render(); },
+  cancelMove(){ this.state.library.confirmMoveKey = null; this.render(); },
+  confirmMove(fromKind, id){
     const toKind = fromKind === 'foods' ? 'ingredients' : 'foods';
     const fromList = this.state.memory[fromKind];
     const idx = fromList.findIndex(x => x.id === id);
@@ -718,7 +720,7 @@ const App = {
     fromList.splice(idx, 1);
     toList.push(moved);
     if (this.state.library.openId === id) this.state.library.openId = null;
-    if (this.state.library.confirmDeleteKey === fromKind+':'+id) this.state.library.confirmDeleteKey = null;
+    this.state.library.confirmMoveKey = null;
     this.state.library.activeTab = toKind;
     this.render();
   },
@@ -1328,18 +1330,19 @@ function renderMemoryForm(f){
 function photoThumb(item){
   return item.photo ? `<img src="${item.photo}" style="width:30px;height:30px;object-fit:cover;border-radius:7px;border:1px solid var(--border);flex-shrink:0;"/>` : '';
 }
+const ROW_ACTION_BTN = 'background:none;border:none;cursor:pointer;color:var(--muted);padding:8px;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;';
 function memoryRowActions(kind, item){
   const canMove = kind === 'foods' || kind === 'ingredients';
   const moveTo = kind === 'foods' ? 'Ingredients' : 'Saved foods';
   return `
     ${canMove ? `
-    <button onclick="event.stopPropagation();App.moveMemoryItem('${kind}','${item.id}')" title="Move to ${moveTo}" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px;">
+    <button onclick="event.stopPropagation();App.requestMove('${kind}','${item.id}')" title="Move to ${moveTo}" style="${ROW_ACTION_BTN}">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 8h12m0 0l-4-4m4 4l-4 4M17 16H5m0 0l4 4m-4-4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>` : ''}
-    <button onclick="event.stopPropagation();App.editMemoryItem('${kind}','${item.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px;">
+    <button onclick="event.stopPropagation();App.editMemoryItem('${kind}','${item.id}')" style="${ROW_ACTION_BTN}">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
     </button>
-    <button onclick="event.stopPropagation();App.requestDelete('${kind}','${item.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px;">
+    <button onclick="event.stopPropagation();App.requestDelete('${kind}','${item.id}')" style="${ROW_ACTION_BTN}">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   `;
@@ -1350,6 +1353,16 @@ function memoryConfirmCard(kind, item){
     <div style="display:flex;gap:8px;">
       <button onclick="App.cancelDelete()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
       <button onclick="App.confirmDelete('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Delete</button>
+    </div>
+  </div>`;
+}
+function memoryConfirmMoveCard(kind, item){
+  const moveTo = kind === 'foods' ? 'Ingredients' : 'Saved foods';
+  return `<div class="card pad-sm" style="border-color:var(--brand);">
+    <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Move &ldquo;${item.name}&rdquo; to ${moveTo}?</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="App.cancelMove()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+      <button onclick="App.confirmMove('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Move</button>
     </div>
   </div>`;
 }
@@ -1367,6 +1380,7 @@ function renderLibrary(){
     body = `${formHere('foods')}${st.form && st.form.kind==='foods' ? '' : addMemoryButton('foods','Add a saved food')}<div id="lib-list" style="display:flex;flex-direction:column;gap:8px;">
       ${App.state.memory.foods.map(f => {
         if (st.confirmDeleteKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmCard('foods', f)}</div>`;
+        if (st.confirmMoveKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmMoveCard('foods', f)}</div>`;
         const open = st.openId === f.id;
         return `
         <div data-name="${f.name.toLowerCase()}" class="card" style="overflow:hidden;">
@@ -1404,6 +1418,7 @@ function renderLibrary(){
     body = `${formHere('ingredients')}${st.form && st.form.kind==='ingredients' ? '' : addMemoryButton('ingredients','Add an ingredient')}<div id="lib-list" style="display:flex;flex-direction:column;gap:8px;">
       ${App.state.memory.ingredients.map(ing => {
         if (st.confirmDeleteKey === 'ingredients:'+ing.id) return `<div data-name="${ing.name.toLowerCase()}">${memoryConfirmCard('ingredients', ing)}</div>`;
+        if (st.confirmMoveKey === 'ingredients:'+ing.id) return `<div data-name="${ing.name.toLowerCase()}">${memoryConfirmMoveCard('ingredients', ing)}</div>`;
         return `
         <div data-name="${ing.name.toLowerCase()}" class="card pad-sm">
           <div style="display:flex;align-items:center;justify-content:space-between;">
