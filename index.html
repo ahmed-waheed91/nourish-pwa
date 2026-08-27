@@ -235,6 +235,7 @@
 </div>
 
 <script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/jspdf.plugin.autotable.min.js"></script>
 <script>
 /* ================= DATA ================= */
 
@@ -438,6 +439,42 @@ function detailFor(id, value){
   return value >= t.value ? `At or above the ≥${t.value}${info.unit} floor.` : `${round1(t.value-value)} ${info.unit} under the floor.`;
 }
 
+/* ---------- PDF report phrasing (mirrors the user's original manual report format) ---------- */
+function pdfTargetRangeLabel(id){
+  const t = App.state.targets[id];
+  if (t.kind === 'range') return `${t.low}–${t.high} ${t.unit}`;
+  if (t.kind === 'ceiling') return `< ${t.value} ${t.unit}`;
+  return `≥ ${t.value} ${t.unit}`;
+}
+function pdfDetailLabel(id, value){
+  const t = App.state.targets[id];
+  const round1 = n => Math.round(n*10)/10;
+  if (t.kind === 'range'){
+    if (value < t.low) return `Under by ${round1(t.low-value)} ${t.unit}`;
+    if (value > t.high) return `Over by ${round1(value-t.high)} ${t.unit}`;
+    return 'In range';
+  }
+  if (t.kind === 'ceiling') return value <= t.value ? 'In range' : `Over by ${round1(value-t.value)} ${t.unit}`;
+  return value >= t.value ? 'In range' : `Under by ${round1(t.value-value)} ${t.unit}`;
+}
+function pdfStatusLabel(status){ return status === 'good' ? 'OK' : (status === 'warning' ? 'Under' : 'Over'); }
+function pdfNoteLine(label, id, value){
+  const t = App.state.targets[id];
+  const round1 = n => Math.round(n*10)/10;
+  const u = t.unit;
+  let phrase;
+  if (t.kind === 'ceiling'){
+    phrase = value <= t.value ? `inside the ${t.value.toLocaleString()} ${u} ceiling` : `above the ${t.value.toLocaleString()} ${u} ceiling by ${round1(value-t.value)} ${u}`;
+  } else if (t.kind === 'floor'){
+    phrase = value >= t.value ? `at or above the ≥${t.value.toLocaleString()}${u} floor` : `below the ≥${t.value.toLocaleString()}${u} floor by ${round1(t.value-value)} ${u}`;
+  } else {
+    if (value < t.low) phrase = `below the ${t.low.toLocaleString()}–${t.high.toLocaleString()} ${u} range by ${round1(t.low-value)} ${u}`;
+    else if (value > t.high) phrase = `above the ${t.low.toLocaleString()}–${t.high.toLocaleString()} ${u} range by ${round1(value-t.high)} ${u}`;
+    else phrase = `within the ${t.low.toLocaleString()}–${t.high.toLocaleString()} ${u} range`;
+  }
+  return `${label}: ${value.toLocaleString()} ${u}, ${phrase}.`;
+}
+
 /* ================= APP STATE ================= */
 
 const App = {
@@ -445,7 +482,7 @@ const App = {
     view: 'mobile',
     screen: 'today',
     today: { expandedStat:null, expandedMeal:null, waterMl:0, notesOpen:false, weightKg:null, confirmRemoveKey:null,
-      meals: [] },
+      dailyNote:'', noteSaved:false, meals: [] },
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
     storageAlert: null,
@@ -486,6 +523,13 @@ const App = {
   },
   addWater(ml){ this.state.today.waterMl = Math.max(0, this.state.today.waterMl + ml); this.render(); },
   toggleNotes(){ this.state.today.notesOpen = !this.state.today.notesOpen; this.render(); },
+  saveDailyNote(){
+    const v = document.getElementById('daily-note-input')?.value ?? '';
+    this.state.today.dailyNote = v;
+    this.state.today.noteSaved = true;
+    this.render();
+    setTimeout(() => { this.state.today.noteSaved = false; this.render(); }, 1400);
+  },
   saveWeight(){
     const v = parseFloat(document.getElementById('weight-input')?.value);
     if (!v) return;
@@ -526,12 +570,12 @@ const App = {
     if (this.state.dayLog.currentDate === real) return;
     const old = this.state.dayLog.currentDate;
     const t = this.state.today;
-    const hadActivity = t.meals.length > 0 || t.waterMl > 0 || t.weightKg != null;
+    const hadActivity = t.meals.length > 0 || t.waterMl > 0 || t.weightKg != null || t.dailyNote.trim() !== '';
     if (hadActivity){
       const consumed = computeConsumedTotals(t.meals);
-      this.state.dayHistory.push({ date: old, ...consumed, waterMl: t.waterMl, weightKg: t.weightKg, meals: JSON.parse(JSON.stringify(t.meals)) });
+      this.state.dayHistory.push({ date: old, ...consumed, waterMl: t.waterMl, weightKg: t.weightKg, meals: JSON.parse(JSON.stringify(t.meals)), note: t.dailyNote });
     }
-    t.meals = []; t.waterMl = 0; t.weightKg = null;
+    t.meals = []; t.waterMl = 0; t.weightKg = null; t.dailyNote = '';
     t.expandedMeal = null; t.expandedStat = null; t.notesOpen = false; t.confirmRemoveKey = null;
     this.state.dayLog.currentDate = real;
     this.saveLocal();
@@ -542,7 +586,7 @@ const App = {
       date: this.state.dayLog.currentDate, calories:consumed.calories, protein:consumed.protein,
       carbs:consumed.carbs, fat:consumed.fat, fiber:consumed.fiber, sugar:consumed.sugar, sodium:consumed.sodium,
       waterMl: this.state.today.waterMl, weightKg: this.state.today.weightKg, isToday: true,
-      meals: this.state.today.meals,
+      meals: this.state.today.meals, note: this.state.today.dailyNote,
     };
     const past = this.state.dayHistory.slice().reverse().map(h => ({ ...h, isToday:false }));
     return [todayEntry, ...past];
@@ -760,6 +804,7 @@ const App = {
       boneEntries: this.state.library.boneEntries,
       waterMl: this.state.today.waterMl,
       weightKg: this.state.today.weightKg,
+      dailyNote: this.state.today.dailyNote,
       targets: this.state.targets,
       meals: this.state.today.meals,
       dayLog: this.state.dayLog,
@@ -808,82 +853,187 @@ const App = {
       if (!entry){ st.dataStatus = 'Nothing logged for this day — nothing to export.'; this.render(); return; }
       const dateLabel = entry.isToday ? formatFullDate(this.state.dayLog.currentDate) : formatFullDate(entry.date);
       exportLabel = entry.isToday ? 'Today' : formatShortDate(entry.date);
+      const gold=[212,161,61], terracotta=[181,86,61], navy=[58,71,80], brandTint=[228,239,234];
 
-      doc.setFillColor(...brand);
-      doc.rect(0, 0, pageW, 28, 'F');
-      doc.setTextColor(255,255,255);
-      doc.setFont('helvetica','bold'); doc.setFontSize(16);
-      doc.text('Daily Nutrition Report', margin, 14);
-      doc.setFont('helvetica','normal'); doc.setFontSize(10);
-      doc.text(dateLabel, margin, 21);
+      // Header — plain white background, centered black title, left date, green rule
+      doc.setTextColor(...ink);
+      doc.setFont('helvetica','bold'); doc.setFontSize(20);
+      doc.text('Daily Nutrition Report', pageW/2, 20, { align:'center' });
+      doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(...ink2);
+      doc.text(dateLabel, margin, 30);
+      doc.setDrawColor(...brand); doc.setLineWidth(0.6);
+      doc.line(margin, 35, pageW-margin, 35);
+      doc.setLineWidth(0.1);
 
-      let y = 42;
-      const rows = [
-        ['Calories', `${Math.round(entry.calories)} kcal`, statusFor('calories', entry.calories)],
-        ['Protein', `${entry.protein} g`, statusFor('protein', entry.protein)],
-        ['Carbs', `${entry.carbs} g`, statusFor('carbs', entry.carbs)],
-        ['Fat', `${entry.fat} g`, statusFor('fat', entry.fat)],
-        ['Fiber', `${entry.fiber} g`, statusFor('fiber', entry.fiber)],
-        ['Sugar', `${entry.sugar} g`, statusFor('sugar', entry.sugar)],
-        ['Sodium', `${entry.sodium} mg`, statusFor('sodium', entry.sodium)],
-        ['Water', `${formatLiters(entry.waterMl)} L`, statusFor('water', entry.waterMl/1000)],
+      let y = 45;
+      doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...brand);
+      doc.text('Daily Summary', margin, y);
+      y += 4;
+
+      const summaryDefs = [
+        ['Calories', 'calories', entry.calories, `${Math.round(entry.calories)} kcal`],
+        ['Protein', 'protein', entry.protein, `${entry.protein} g`],
+        ['Carbs', 'carbs', entry.carbs, `${entry.carbs} g`],
+        ['Fat', 'fat', entry.fat, `${entry.fat} g`],
+        ['Fiber', 'fiber', entry.fiber, `${entry.fiber} g`],
+        ['Sugar', 'sugar', entry.sugar, `${entry.sugar} g`],
+        ['Sodium', 'sodium', entry.sodium, `${entry.sodium} mg`],
+        ['Water', 'water', entry.waterMl/1000, `${formatLiters(entry.waterMl)} L`],
       ];
-      if (entry.weightKg != null) rows.push(['Weight', `${entry.weightKg} kg`, statusFor('weight', entry.weightKg)]);
+      const statusList = summaryDefs.map(([,id,value]) => statusFor(id, value));
+      const summaryRows = summaryDefs.map(([label,id,value,consumedStr], i) => [
+        label, consumedStr, pdfTargetRangeLabel(id), pdfDetailLabel(id, value), pdfStatusLabel(statusList[i]),
+      ]);
 
-      rows.forEach(([labelText, value, status]) => {
-        doc.setDrawColor(...border);
-        doc.line(margin, y+2.5, pageW-margin, y+2.5);
-        doc.setFont('helvetica','normal'); doc.setFontSize(10.5); doc.setTextColor(...ink2);
-        doc.text(labelText, margin, y);
-        doc.setFont('helvetica','bold'); doc.setTextColor(...ink);
-        doc.text(value, pageW-margin-24, y, { align:'right' });
-        doc.setFillColor(...statusColorFor(status));
-        doc.roundedRect(pageW-margin-20, y-4, 20, 5.5, 1.5, 1.5, 'F');
-        doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(7.5);
-        doc.text(statusTextFor(status), pageW-margin-10, y-0.3, { align:'center' });
-        y += 9;
+      doc.autoTable({
+        startY: y,
+        margin: { left: margin, right: margin },
+        head: [['', 'Consumed', 'Target Range', 'Detail', 'Status']],
+        body: summaryRows,
+        theme: 'grid',
+        styles: { font:'helvetica', fontSize:9, cellPadding:3, textColor: ink, lineColor: border, lineWidth:0.15, halign:'center' },
+        headStyles: { fillColor: brand, textColor:[255,255,255], fontStyle:'bold', halign:'center' },
+        columnStyles: { 0: { halign:'left', fontStyle:'bold' } },
+        didParseCell: (data) => {
+          if (data.section === 'body' && data.column.index === 4){
+            data.cell.styles.textColor = statusColorFor(statusList[data.row.index]);
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
       });
+      y = doc.lastAutoTable.finalY + 8;
 
-      y += 5;
+      // Macro split bar — green/gold/terracotta, labels below each segment
       const macroCals = { protein: entry.protein*4, carbs: entry.carbs*4, fat: entry.fat*9 };
       const macroTotal = Math.max(1, macroCals.protein+macroCals.carbs+macroCals.fat);
+      const pPct = Math.round(macroCals.protein/macroTotal*100), cPct = Math.round(macroCals.carbs/macroTotal*100), fPct = Math.round(macroCals.fat/macroTotal*100);
+      const segs = [[brand, macroCals.protein, `Protein ${pPct}%`], [gold, macroCals.carbs, `Carbs ${cPct}%`], [terracotta, macroCals.fat, `Fat ${fPct}%`]];
       let barX = margin;
-      [[protein, macroCals.protein],[carbs, macroCals.carbs],[fat, macroCals.fat]].forEach(([color, val]) => {
+      doc.setFontSize(8.5); doc.setFont('helvetica','normal');
+      segs.forEach(([color, val, label]) => {
         const w = (val/macroTotal)*contentW;
         doc.setFillColor(...color);
         doc.rect(barX, y, w, 6, 'F');
+        doc.setTextColor(...ink2);
+        doc.text(label, barX + w/2, y + 11, { align:'center' });
         barX += w;
       });
-      y += 11;
-      doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...muted);
-      doc.text('Macro split — protein / carbs / fat', margin, y);
-      y += 12;
+      y += 17;
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...muted);
+      doc.text('Macro split by share of calories (protein & carbs = 4 kcal/g, fat = 9 kcal/g)', margin, y);
+      y += 10;
+
+      // Meal breakdown — one bordered item table per meal, dark header, tinted total row
+      y = ensureRoom(y, 10);
+      doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...brand);
+      doc.text('Meal Breakdown', margin, y);
+      y += 7;
 
       if (entry.meals && entry.meals.length){
-        y = ensureRoom(y, 10);
-        doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(...ink);
-        doc.text(entry.isToday ? 'Meals logged today' : 'Meals logged', margin, y);
-        y += 8;
         entry.meals.forEach(meal => {
-          y = ensureRoom(y, 8);
-          doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...brandDark);
-          doc.text(`${meal.name} — ${Math.round(mealKcal(meal))} kcal`, margin, y);
-          y += 6;
-          meal.items.forEach(item => {
-            y = ensureRoom(y, 6);
-            doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...ink2);
-            doc.text(item.name, margin+4, y, { maxWidth: contentW-40 });
-            doc.setFont('helvetica','bold'); doc.setTextColor(...ink);
-            doc.text(`${Math.round(item.kcal)} kcal`, pageW-margin, y, { align:'right' });
-            y += 5.5;
-          });
+          y = ensureRoom(y, 20);
+          doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(...ink);
+          doc.text(meal.name, margin, y);
           y += 3;
+          const mt = computeConsumedTotals([meal]);
+          const body = meal.items.map(item => [item.name, Math.round(item.kcal), item.p, item.c, item.f, item.fib, item.sugar, Math.round(item.sodium||0)]);
+          body.push(['Meal total', mt.calories, mt.protein, mt.carbs, mt.fat, mt.fiber, mt.sugar, mt.sodium]);
+          doc.autoTable({
+            startY: y,
+            margin: { left: margin, right: margin },
+            head: [['Item','Cal','Prot (g)','Carb (g)','Fat (g)','Fib (g)','Sug (g)','Sod (mg)']],
+            body,
+            theme: 'grid',
+            styles: { font:'helvetica', fontSize:8.5, cellPadding:2.2, textColor: ink, lineColor: border, lineWidth:0.15, halign:'center' },
+            headStyles: { fillColor: navy, textColor:[255,255,255], fontStyle:'bold', halign:'center' },
+            columnStyles: { 0: { halign:'left' } },
+            didParseCell: (data) => {
+              if (data.section === 'body' && data.row.index === body.length - 1){
+                data.cell.styles.fillColor = brandTint;
+                data.cell.styles.fontStyle = 'bold';
+              }
+            },
+          });
+          y = doc.lastAutoTable.finalY + 8;
         });
       } else {
-        y = ensureRoom(y, 8);
         doc.setFont('helvetica','italic'); doc.setFontSize(9); doc.setTextColor(...muted);
         doc.text("Item-level detail isn't stored for this day — totals only.", margin, y);
+        y += 10;
       }
+
+      // Water Intake
+      y = ensureRoom(y, 16);
+      doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...brand);
+      doc.text('Water Intake', margin, y);
+      y += 7;
+      const wTarget = App.state.targets.water;
+      const wVal = entry.waterMl/1000;
+      const wDiff = Math.round(Math.abs(wVal - (wVal < wTarget.low ? wTarget.low : wTarget.high)) * 10) / 10;
+      const waterSentence = wVal < wTarget.low
+        ? `Logged: ${formatLiters(entry.waterMl)} L against the ${wTarget.low}–${wTarget.high}L range — ${wDiff} L under the target.`
+        : (wVal > wTarget.high
+          ? `Logged: ${formatLiters(entry.waterMl)} L against the ${wTarget.low}–${wTarget.high}L range — ${wDiff} L over the target.`
+          : `Logged: ${formatLiters(entry.waterMl)} L — within the ${wTarget.low}–${wTarget.high}L target range.`);
+      doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...ink);
+      doc.text(waterSentence, margin, y, { maxWidth: contentW });
+      y += 12;
+
+      // Notes & Observations — mechanical per-nutrient lines + optional user free-text
+      y = ensureRoom(y, 16);
+      doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...brand);
+      doc.text('Notes & Observations', margin, y);
+      y += 7;
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...ink);
+      const noteLines = [
+        pdfNoteLine('Calories', 'calories', entry.calories),
+        pdfNoteLine('Protein', 'protein', entry.protein),
+        pdfNoteLine('Carbs', 'carbs', entry.carbs),
+        pdfNoteLine('Fat', 'fat', entry.fat),
+        pdfNoteLine('Fiber', 'fiber', entry.fiber),
+        pdfNoteLine('Sugar', 'sugar', entry.sugar),
+        pdfNoteLine('Sodium', 'sodium', entry.sodium),
+      ];
+      noteLines.forEach(line => {
+        y = ensureRoom(y, 6);
+        const wrapped = doc.splitTextToSize(`•  ${line}`, contentW);
+        doc.text(wrapped, margin, y);
+        y += wrapped.length * 4.6;
+      });
+      if (entry.note && entry.note.trim()){
+        y = ensureRoom(y, 10);
+        y += 3;
+        doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(...ink);
+        doc.text('Your notes:', margin, y);
+        y += 5;
+        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...ink2);
+        const wrappedNote = doc.splitTextToSize(entry.note.trim(), contentW);
+        wrappedNote.forEach(line => { y = ensureRoom(y, 5); doc.text(line, margin, y); y += 4.6; });
+      }
+      y += 6;
+
+      // Footer — target ranges summary + disclaimer
+      y = ensureRoom(y, 16);
+      doc.setDrawColor(...border); doc.setLineWidth(0.1);
+      doc.line(margin, y, pageW-margin, y);
+      y += 6;
+      const ct = App.state.targets;
+      const rangeStr = t => `${t.low.toLocaleString()}–${t.high.toLocaleString()}${t.unit}`;
+      const footerLine = 'Target ranges: ' + [
+        `<${ct.calories.value.toLocaleString()} kcal`,
+        `${rangeStr(ct.protein)} protein`,
+        `${rangeStr(ct.carbs)} carbs`,
+        `${rangeStr(ct.fat)} fat`,
+        `≥${ct.fiber.value}g fiber`,
+        `<${ct.sugar.value}g sugar`,
+        `<${ct.sodium.value.toLocaleString()}mg sodium`,
+        `${ct.water.low}–${ct.water.high}L water`,
+      ].join(' • ');
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...muted);
+      doc.text(footerLine, pageW/2, y, { align:'center', maxWidth: contentW });
+      y += 5;
+      doc.setFont('helvetica','italic');
+      doc.text('Values are best estimates. Weighing and label data improve accuracy.', pageW/2, y, { align:'center' });
 
       filename = `nourish-daily-${entry.isToday ? todayISO() : entry.date}.pdf`;
     } else {
@@ -967,6 +1117,7 @@ const App = {
       if (Array.isArray(data.boneEntries)) this.state.library.boneEntries = data.boneEntries;
       if (typeof data.waterMl === 'number') this.state.today.waterMl = data.waterMl;
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
+      if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
@@ -1018,6 +1169,7 @@ const App = {
       if (Array.isArray(data.boneEntries)) this.state.library.boneEntries = data.boneEntries;
       if (typeof data.waterMl === 'number') this.state.today.waterMl = data.waterMl;
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
+      if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
@@ -1325,6 +1477,13 @@ function renderToday(){
         </div>` : ''}
       </div>
       ` : ''}
+
+      <div class="card pad" style="margin-top:14px;">
+        <div style="font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Today's notes</div>
+        <textarea id="daily-note-input" placeholder="Anything worth remembering about today — how you felt, what to adjust next time..." style="width:100%;min-height:70px;padding:10px 11px;border-radius:10px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;resize:vertical;">${(st.dailyNote||'').replace(/</g,'&lt;')}</textarea>
+        <button onclick="App.saveDailyNote()" style="margin-top:8px;padding:9px 16px;border-radius:10px;background:${st.noteSaved?'var(--good)':'var(--brand-tint)'};color:${st.noteSaved?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${st.noteSaved?'Saved ✓':'Save note'}</button>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.4;">Included in your PDF export for this day, under Notes &amp; Observations.</div>
+      </div>
     </div>
 
     <button class="fab" onclick="App.setScreen('addfood')" title="Log food">

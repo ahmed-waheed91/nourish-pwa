@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nourish-v2';
+const CACHE_NAME = 'nourish-v3';
 const PRECACHE = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const PRECACHE = [
   './icons/apple-touch-icon.png',
   './icons/favicon-32.png',
   './vendor/jspdf.umd.min.js',
+  './vendor/jspdf.plugin.autotable.min.js',
 ];
 
 self.addEventListener('install', (event) => {
