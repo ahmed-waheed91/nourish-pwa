@@ -448,6 +448,7 @@ const App = {
       meals: [] },
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
+    storageAlert: null,
     targets: defaultTargets(),
     addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', lookupQuery:'', lookupResult:null },
     memory: {
@@ -528,7 +529,7 @@ const App = {
     const hadActivity = t.meals.length > 0 || t.waterMl > 0 || t.weightKg != null;
     if (hadActivity){
       const consumed = computeConsumedTotals(t.meals);
-      this.state.dayHistory.push({ date: old, ...consumed, waterMl: t.waterMl, weightKg: t.weightKg });
+      this.state.dayHistory.push({ date: old, ...consumed, waterMl: t.waterMl, weightKg: t.weightKg, meals: JSON.parse(JSON.stringify(t.meals)) });
     }
     t.meals = []; t.waterMl = 0; t.weightKg = null;
     t.expandedMeal = null; t.expandedStat = null; t.notesOpen = false; t.confirmRemoveKey = null;
@@ -541,6 +542,7 @@ const App = {
       date: this.state.dayLog.currentDate, calories:consumed.calories, protein:consumed.protein,
       carbs:consumed.carbs, fat:consumed.fat, fiber:consumed.fiber, sugar:consumed.sugar, sodium:consumed.sodium,
       waterMl: this.state.today.waterMl, weightKg: this.state.today.weightKg, isToday: true,
+      meals: this.state.today.meals,
     };
     const past = this.state.dayHistory.slice().reverse().map(h => ({ ...h, isToday:false }));
     return [todayEntry, ...past];
@@ -857,12 +859,12 @@ const App = {
       doc.text('Macro split — protein / carbs / fat', margin, y);
       y += 12;
 
-      if (entry.isToday && this.state.today.meals.length){
+      if (entry.meals && entry.meals.length){
         y = ensureRoom(y, 10);
         doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(...ink);
-        doc.text('Meals logged today', margin, y);
+        doc.text(entry.isToday ? 'Meals logged today' : 'Meals logged', margin, y);
         y += 8;
-        this.state.today.meals.forEach(meal => {
+        entry.meals.forEach(meal => {
           y = ensureRoom(y, 8);
           doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...brandDark);
           doc.text(`${meal.name} — ${Math.round(mealKcal(meal))} kcal`, margin, y);
@@ -877,10 +879,10 @@ const App = {
           });
           y += 3;
         });
-      } else if (!entry.isToday){
+      } else {
         y = ensureRoom(y, 8);
         doc.setFont('helvetica','italic'); doc.setFontSize(9); doc.setTextColor(...muted);
-        doc.text("Item-level detail isn't stored for past days — totals only.", margin, y);
+        doc.text("Item-level detail isn't stored for this day — totals only.", margin, y);
       }
 
       filename = `nourish-daily-${entry.isToday ? todayISO() : entry.date}.pdf`;
@@ -979,7 +981,33 @@ const App = {
   saveLocal(){
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(this.buildBackupPayload()));
-    } catch (e) { /* storage unavailable — app still works, just won't persist */ }
+    } catch (e) {
+      this.freeSpaceAndRetry();
+    }
+  },
+  freeSpaceAndRetry(){
+    let freedCount = 0;
+    for (;;){
+      const payload = JSON.stringify(this.buildBackupPayload());
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, payload);
+        if (freedCount > 0){
+          this.state.storageAlert = `This device's storage was full, so your ${freedCount} oldest logged day${freedCount>1?'s':''} ${freedCount>1?'were':'was'} automatically removed to make room (oldest data goes first, like a security-camera drive). Export a backup regularly to keep permanent history.`;
+        }
+        return;
+      } catch (e){
+        if (this.state.dayHistory.length === 0){
+          this.state.storageAlert = "Storage is full and couldn't be freed automatically. Try removing photos from Memory items, or export/clear old data manually.";
+          return;
+        }
+        this.state.dayHistory.shift();
+        freedCount++;
+      }
+    }
+  },
+  dismissStorageAlert(){ this.state.storageAlert = null; this.render(); },
+  storageUsageBytes(){
+    try { return JSON.stringify(this.buildBackupPayload()).length; } catch (e) { return 0; }
   },
   loadLocal(){
     try {
@@ -1142,6 +1170,17 @@ function renderToday(){
           <div style="width:38px;height:38px;border-radius:12px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">A</div>
         </div>
       </div>
+
+      ${App.state.storageAlert ? `
+        <div class="card pad-sm" style="border-color:var(--warning);background:var(--warning-tint);margin-bottom:14px;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+            <div style="font-size:12px;color:var(--warning);line-height:1.45;font-weight:600;">${App.state.storageAlert}</div>
+            <button onclick="App.dismissStorageAlert()" style="background:none;border:none;cursor:pointer;color:var(--warning);padding:2px;flex-shrink:0;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+      ` : ''}
 
       <div style="background:var(--brand);border-radius:20px;padding:20px;color:#fff;margin-bottom:14px;">
         <div style="display:flex;align-items:baseline;justify-content:space-between;">
@@ -2082,6 +2121,26 @@ function renderExport(){
       ` : `<div style="text-align:center;color:var(--muted);font-size:12px;padding:10px 0 22px 0;">No reports exported yet.</div>`}
 
       <div style="height:1px;background:var(--border);margin-bottom:20px;"></div>
+
+      ${(() => {
+        const usedBytes = App.storageUsageBytes();
+        const capBytes = 5 * 1024 * 1024;
+        const pct = Math.min(100, Math.round((usedBytes/capBytes)*100));
+        const usedLabel = usedBytes < 1024*1024 ? `${Math.round(usedBytes/1024)} KB` : `${(usedBytes/1024/1024).toFixed(2)} MB`;
+        const warn = pct >= 80;
+        return `
+          <div class="card pad-sm" style="margin-bottom:14px;${warn?'border-color:var(--warning);':''}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <div style="font-size:12.5px;font-weight:700;">Device storage used</div>
+              <div class="num" style="font-size:12px;font-weight:700;color:${warn?'var(--warning)':'var(--ink-2)'};">${usedLabel} of ~5 MB</div>
+            </div>
+            <div style="height:6px;border-radius:3px;background:var(--surface);overflow:hidden;">
+              <div style="height:100%;width:${pct}%;background:${warn?'var(--warning)':'var(--brand)'};"></div>
+            </div>
+            ${warn ? `<div style="font-size:11px;color:var(--warning);margin-top:8px;line-height:1.4;">Getting close to this device's storage limit — export a backup below, and Nourish will automatically free space by removing the oldest logged days if it's ever needed.</div>` : `<div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.4;">~5 MB is a typical browser limit for this device, confirmed by testing — not a guarantee. At current usage this is years of runway.</div>`}
+          </div>
+        `;
+      })()}
 
       <div style="font-size:15px;font-weight:700;margin-bottom:4px;">Data backup</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Your memory and settings live only on this device. Export a backup before switching phones, then import it on the new one.</div>
