@@ -330,6 +330,46 @@ Roti" = Haleem 150g + Chapati 100g), not just a single fixed number.
    `__scrollTopNext` flag (see Architecture decisions above) that scrolls to top instead, set
    before `render()` in `openAddForm`/`editMemoryItem`/`closeForm`/`openComposer`/`closeComposer`.
 
+## Limited Edition App — DONE, shipped as "BilliFit"
+
+Ahmed wanted a second, functionally-identical copy of this app with only cosmetic differences (app
+name, icon, color scheme, backgrounds). Decided (2026-08-27): a **separate GitHub repo + separate
+GitHub Pages deployment**, not a password-gated toggle inside this app — a runtime popup can't
+change the installed Home Screen name/icon (the browser reads `manifest.json` at install time,
+before any in-page password check runs), and serving both "flavors" from one URL would mean one
+shared `localStorage` origin, not two isolated copies.
+
+- **Shipped as "BilliFit"** — live at `https://ahmed-waheed91.github.io/billifit-pwa/`, source at
+  `https://github.com/ahmed-waheed91/billifit-pwa`. Full detail on exactly what was changed (color
+  tokens, icon, cat background art, font) lives in **that repo's own `plan.md`** — don't duplicate
+  it here, read it there if working on BilliFit.
+- **A real cross-app conflict was found and fixed before the first push, worth remembering for any
+  future fork of either app**: GitHub Pages project sites for the same username are all one
+  origin (`ahmed-waheed91.github.io`, differing only by path), and browsers scope `localStorage`
+  to origin, not path. This repo's `LOCAL_STORAGE_KEY` (`'nourish_backup_v2'`) is NOT automatically
+  isolated from a same-origin sibling app just because it lives in a different repo — a naive copy
+  would silently share/overwrite data with this app on the same phone. BilliFit's key was changed
+  to `'billifit_backup_v1'` specifically to avoid this. **If this app's own storage key ever
+  changes, or another fork is made, re-check this.**
+- **Pushing a brand-new repo needs to be done by Ahmed directly, not by the assistant.** Claude
+  Code's own safety classifier blocked `gh repo create ... --push` when the assistant attempted it
+  — independent of normal chat-level permission approval, and not something the assistant can
+  inspect or override. Ahmed ran it himself in his own terminal instead (needed `gh auth login`
+  there first, and `cd /d` instead of `cd` in `cmd.exe` to cross drive letters). Expect this for
+  any future new repo.
+
+**Naming convention for all future discussion/work, starting now:**
+- **"Original App"** = this app, this repo (`nourish-pwa`, this `pwa/` folder) — the **primary
+  source**. All real functional development happens here first.
+- **"Limited Edition App"** = "BilliFit" (`billifit-pwa` repo) — name/icon/colors/backgrounds
+  differ, but logic/features/data model must stay identical to Original App.
+- Whenever a change is requested, **explicitly confirm which one it targets** before touching
+  anything — default assumption should never be silent. Functional changes belong in Original App
+  and then get ported across (cherry-pick/copy) to Limited Edition; purely cosmetic changes belong
+  only in Limited Edition and should **not** be ported back.
+- **Shipped 2026-08-27.** See the "DONE, shipped as BilliFit" heading above for the live URL and
+  what to read next if working on it.
+
 ## Explicitly NOT implemented / open yet
 
 - No new feature is queued — all four requested features are complete. Ask the user what's next.
