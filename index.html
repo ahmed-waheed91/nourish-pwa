@@ -458,22 +458,6 @@ function pdfDetailLabel(id, value){
   return value >= t.value ? 'In range' : `Under by ${round1(t.value-value)} ${t.unit}`;
 }
 function pdfStatusLabel(status){ return status === 'good' ? 'OK' : (status === 'warning' ? 'Under' : 'Over'); }
-function pdfNoteLine(label, id, value){
-  const t = App.state.targets[id];
-  const round1 = n => Math.round(n*10)/10;
-  const u = t.unit;
-  let phrase;
-  if (t.kind === 'ceiling'){
-    phrase = value <= t.value ? `inside the ${t.value.toLocaleString()} ${u} ceiling` : `above the ${t.value.toLocaleString()} ${u} ceiling by ${round1(value-t.value)} ${u}`;
-  } else if (t.kind === 'floor'){
-    phrase = value >= t.value ? `at or above the ≥${t.value.toLocaleString()}${u} floor` : `below the ≥${t.value.toLocaleString()}${u} floor by ${round1(t.value-value)} ${u}`;
-  } else {
-    if (value < t.low) phrase = `below the ${t.low.toLocaleString()}–${t.high.toLocaleString()} ${u} range by ${round1(t.low-value)} ${u}`;
-    else if (value > t.high) phrase = `above the ${t.low.toLocaleString()}–${t.high.toLocaleString()} ${u} range by ${round1(value-t.high)} ${u}`;
-    else phrase = `within the ${t.low.toLocaleString()}–${t.high.toLocaleString()} ${u} range`;
-  }
-  return `${label}: ${value.toLocaleString()} ${u}, ${phrase}.`;
-}
 
 /* ================= APP STATE ================= */
 
@@ -962,79 +946,6 @@ const App = {
         y += 10;
       }
 
-      // Water Intake
-      y = ensureRoom(y, 16);
-      doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...brand);
-      doc.text('Water Intake', margin, y);
-      y += 7;
-      const wTarget = App.state.targets.water;
-      const wVal = entry.waterMl/1000;
-      const wDiff = Math.round(Math.abs(wVal - (wVal < wTarget.low ? wTarget.low : wTarget.high)) * 10) / 10;
-      const waterSentence = wVal < wTarget.low
-        ? `Logged: ${formatLiters(entry.waterMl)} L against the ${wTarget.low}–${wTarget.high}L range — ${wDiff} L under the target.`
-        : (wVal > wTarget.high
-          ? `Logged: ${formatLiters(entry.waterMl)} L against the ${wTarget.low}–${wTarget.high}L range — ${wDiff} L over the target.`
-          : `Logged: ${formatLiters(entry.waterMl)} L — within the ${wTarget.low}–${wTarget.high}L target range.`);
-      doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...ink);
-      doc.text(waterSentence, margin, y, { maxWidth: contentW });
-      y += 12;
-
-      // Notes & Observations — mechanical per-nutrient lines + optional user free-text
-      y = ensureRoom(y, 16);
-      doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...brand);
-      doc.text('Notes & Observations', margin, y);
-      y += 7;
-      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...ink);
-      const noteLines = [
-        pdfNoteLine('Calories', 'calories', entry.calories),
-        pdfNoteLine('Protein', 'protein', entry.protein),
-        pdfNoteLine('Carbs', 'carbs', entry.carbs),
-        pdfNoteLine('Fat', 'fat', entry.fat),
-        pdfNoteLine('Fiber', 'fiber', entry.fiber),
-        pdfNoteLine('Sugar', 'sugar', entry.sugar),
-        pdfNoteLine('Sodium', 'sodium', entry.sodium),
-      ];
-      noteLines.forEach(line => {
-        y = ensureRoom(y, 6);
-        const wrapped = doc.splitTextToSize(`•  ${line}`, contentW);
-        doc.text(wrapped, margin, y);
-        y += wrapped.length * 4.6;
-      });
-      if (entry.note && entry.note.trim()){
-        y = ensureRoom(y, 10);
-        y += 3;
-        doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(...ink);
-        doc.text('Your notes:', margin, y);
-        y += 5;
-        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...ink2);
-        const wrappedNote = doc.splitTextToSize(entry.note.trim(), contentW);
-        wrappedNote.forEach(line => { y = ensureRoom(y, 5); doc.text(line, margin, y); y += 4.6; });
-      }
-      y += 6;
-
-      // Footer — target ranges summary + disclaimer
-      y = ensureRoom(y, 16);
-      doc.setDrawColor(...border); doc.setLineWidth(0.1);
-      doc.line(margin, y, pageW-margin, y);
-      y += 6;
-      const ct = App.state.targets;
-      const rangeStr = t => `${t.low.toLocaleString()}–${t.high.toLocaleString()}${t.unit}`;
-      const footerLine = 'Target ranges: ' + [
-        `<${ct.calories.value.toLocaleString()} kcal`,
-        `${rangeStr(ct.protein)} protein`,
-        `${rangeStr(ct.carbs)} carbs`,
-        `${rangeStr(ct.fat)} fat`,
-        `≥${ct.fiber.value}g fiber`,
-        `<${ct.sugar.value}g sugar`,
-        `<${ct.sodium.value.toLocaleString()}mg sodium`,
-        `${ct.water.low}–${ct.water.high}L water`,
-      ].join(' • ');
-      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...muted);
-      doc.text(footerLine, pageW/2, y, { align:'center', maxWidth: contentW });
-      y += 5;
-      doc.setFont('helvetica','italic');
-      doc.text('Values are best estimates. Weighing and label data improve accuracy.', pageW/2, y, { align:'center' });
-
       filename = `nourish-daily-${entry.isToday ? todayISO() : entry.date}.pdf`;
     } else {
       const start = st.offset*7;
@@ -1482,7 +1393,7 @@ function renderToday(){
         <div style="font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Today's notes</div>
         <textarea id="daily-note-input" placeholder="Anything worth remembering about today — how you felt, what to adjust next time..." style="width:100%;min-height:70px;padding:10px 11px;border-radius:10px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;resize:vertical;">${(st.dailyNote||'').replace(/</g,'&lt;')}</textarea>
         <button onclick="App.saveDailyNote()" style="margin-top:8px;padding:9px 16px;border-radius:10px;background:${st.noteSaved?'var(--good)':'var(--brand-tint)'};color:${st.noteSaved?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${st.noteSaved?'Saved ✓':'Save note'}</button>
-        <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.4;">Included in your PDF export for this day, under Notes &amp; Observations.</div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.4;">Saved with this day's log for your own reference.</div>
       </div>
     </div>
 
