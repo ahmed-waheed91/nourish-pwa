@@ -30,6 +30,12 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
+  if (req.url.includes('api.nal.usda.gov')) {
+    // live USDA lookups: always hit the network, never cache/serve stale nutrition data
+    event.respondWith(fetch(req));
+    return;
+  }
+
   if (req.mode === 'navigate') {
     // network-first for the app shell so updates are picked up when online,
     // fall back to the cached shell when offline

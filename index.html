@@ -314,7 +314,7 @@ const COMMON_FOODS = [
   { name:'Mutton, cooked', per100:{kcal:234,p:33.43,c:0.08,f:11.09,fib:0,sugar:0,sodium:135}, pieceG:null },
 ];
 
-function parseFoodQuery(raw){
+function parseQuantity(raw){
   const q = (raw||'').trim().toLowerCase();
   if (!q) return null;
   const m = q.match(/^(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|milliliter|milliliters)?\s+(.+)$/);
@@ -326,26 +326,77 @@ function parseFoodQuery(raw){
   } else {
     name = q; count = 1;
   }
-  const nameNorm = name.replace(/e?s$/,'');
-  const food = COMMON_FOODS.find(f => f.name.toLowerCase() === name)
-    || COMMON_FOODS.find(f => f.name.toLowerCase().split(',')[0] === nameNorm)
-    || COMMON_FOODS.find(f => f.name.toLowerCase().includes(nameNorm) || nameNorm.includes(f.name.toLowerCase().split(',')[0]));
-  if (!food) return { notFound:true, query:raw };
+  return { grams, count, name, nameNorm: name.replace(/e?s$/,''), unitIsMl: !!(m && m[2] && m[2][0]==='m') };
+}
+function computeFromPer100(per100, name, parsed, pieceG){
+  const { grams, count, unitIsMl } = parsed;
   let usedGrams, basis;
-  if (grams != null){ usedGrams = grams; basis = `${grams}${m[2] && m[2][0]==='m' ? 'ml' : 'g'}`; }
+  if (grams != null){ usedGrams = grams; basis = `${grams}${unitIsMl ? 'ml' : 'g'}`; }
   else {
-    const pieceG = food.pieceG || 100;
-    usedGrams = count * pieceG;
-    basis = food.pieceG ? `${count} × ~${pieceG}g` : `${count} × 100g (no standard piece size)`;
+    const pg = pieceG || 100;
+    usedGrams = count * pg;
+    basis = pieceG ? `${count} × ~${pg}g` : `${count} × 100g (no standard piece size)`;
   }
   const scale = usedGrams/100;
-  const r = food.per100;
   const round1 = n => Math.round(n*scale*10)/10;
   return {
-    notFound:false, name:food.name, grams:usedGrams, basis,
-    kcal:Math.round(r.kcal*scale), p:round1(r.p), c:round1(r.c), f:round1(r.f),
-    fib:round1(r.fib), sugar:round1(r.sugar), sodium:Math.round(r.sodium*scale),
+    notFound:false, name, grams:usedGrams, basis, per100,
+    kcal:Math.round(per100.kcal*scale), p:round1(per100.p), c:round1(per100.c), f:round1(per100.f),
+    fib:round1(per100.fib), sugar:round1(per100.sugar), sodium:Math.round(per100.sodium*scale),
   };
+}
+function findLocalFood(name, nameNorm){
+  const common = COMMON_FOODS.find(f => f.name.toLowerCase() === name)
+    || COMMON_FOODS.find(f => f.name.toLowerCase().split(',')[0] === nameNorm)
+    || COMMON_FOODS.find(f => f.name.toLowerCase().includes(nameNorm) || nameNorm.includes(f.name.toLowerCase().split(',')[0]));
+  if (common) return { name:common.name, per100:common.per100, pieceG:common.pieceG, alreadySaved:false };
+
+  const usda = App.state.memory.usda;
+  const saved = usda.find(u => u.name.toLowerCase() === name)
+    || usda.find(u => u.name.toLowerCase().split(',')[0] === nameNorm)
+    || usda.find(u => u.name.toLowerCase().includes(nameNorm) || nameNorm.includes(u.name.toLowerCase().split(',')[0]));
+  if (saved){
+    return {
+      name: saved.name,
+      per100: { kcal:saved.kcalPer100, p:saved.p, c:saved.c, f:saved.f, fib:saved.fib, sugar:saved.sugar, sodium:saved.sodium },
+      pieceG: null, alreadySaved:true,
+    };
+  }
+  return null;
+}
+
+/* ---------- Live USDA FoodData Central lookup ---------- */
+/* API key lives only in this device's localStorage (Settings screen) — never hardcoded/committed. */
+const USDA_NUTRIENT_IDS = { p:1003, c:1005, f:1004, fib:1079, sugar:2000, sodium:1093 };
+const USDA_KCAL_IDS = [1008, 2047, 2048]; // Energy; Foundation-tier foods use the Atwater-factor ids instead of 1008
+const USDA_DATA_TYPE_TIERS = ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'];
+async function fetchUsdaFood(name, apiKey){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    let food = null;
+    for (const tier of USDA_DATA_TYPE_TIERS){
+      const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(name)}&pageSize=3&dataType=${encodeURIComponent(tier)}`;
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error('bad response');
+      const data = await res.json();
+      if (data.foods && data.foods.length){ food = data.foods[0]; break; }
+    }
+    if (!food) return { notFound:true };
+    const per100 = { kcal:0, p:0, c:0, f:0, fib:0, sugar:0, sodium:0 };
+    const kcalById = {};
+    (food.foodNutrients||[]).forEach(n => {
+      Object.keys(USDA_NUTRIENT_IDS).forEach(key => { if (n.nutrientId === USDA_NUTRIENT_IDS[key]) per100[key] = n.value || 0; });
+      if (USDA_KCAL_IDS.includes(n.nutrientId)) kcalById[n.nutrientId] = n.value || 0;
+    });
+    const kcalId = USDA_KCAL_IDS.find(id => kcalById[id] != null);
+    per100.kcal = kcalId != null ? kcalById[kcalId] : 0;
+    return { notFound:false, name:food.description, per100, fdcId:food.fdcId };
+  } catch (e){
+    return { noConnection:true };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const RULE_NOTES = [
@@ -471,7 +522,7 @@ const App = {
     dayHistory: [],
     storageAlert: null,
     targets: defaultTargets(),
-    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', lookupQuery:'', lookupResult:null },
+    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', lookupQuery:'', lookupResult:null, lookupLoading:false },
     memory: {
       foods: SAVED_FOODS.map(x => ({...x})),
       ingredients: INGREDIENTS.map(x => ({...x})),
@@ -483,6 +534,7 @@ const App = {
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[] },
     desktop: { openMeal:'lunch' },
     settingsStatus: null,
+    usdaApiKey: '', usdaKeyStatus: null,
   },
 
   setView(v){ this.state.view = v; this.render(); },
@@ -513,6 +565,14 @@ const App = {
     this.state.today.noteSaved = true;
     this.render();
     setTimeout(() => { this.state.today.noteSaved = false; this.render(); }, 1400);
+  },
+  saveUsdaKey(){
+    const v = (document.getElementById('usda-key-input')?.value || '').trim();
+    this.state.usdaApiKey = v;
+    this.state.usdaKeyStatus = v ? 'API key saved ✓' : 'API key cleared';
+    this.saveLocal();
+    this.render();
+    setTimeout(() => { this.state.usdaKeyStatus = null; this.render(); }, 1800);
   },
   saveWeight(){
     const v = parseFloat(document.getElementById('weight-input')?.value);
@@ -630,22 +690,52 @@ const App = {
     });
   },
 
-  runLookup(){
-    const q = document.getElementById('lookup-input')?.value || '';
-    this.state.addfood.lookupQuery = q;
-    this.state.addfood.lookupResult = parseFoodQuery(q);
+  async runLookup(){
+    const raw = document.getElementById('lookup-input')?.value || '';
+    const st = this.state.addfood;
+    st.lookupQuery = raw;
+    const parsed = parseQuantity(raw);
+    if (!parsed){ st.lookupResult = null; st.lookupLoading = false; this.render(); return; }
+
+    const local = findLocalFood(parsed.name, parsed.nameNorm);
+    if (local){
+      st.lookupResult = { ...computeFromPer100(local.per100, local.name, parsed, local.pieceG), source:'local', alreadySaved:local.alreadySaved };
+      st.lookupLoading = false;
+      this.render();
+      return;
+    }
+
+    if (!this.state.usdaApiKey){
+      st.lookupResult = { missingKey:true, query:raw };
+      st.lookupLoading = false;
+      this.render();
+      return;
+    }
+
+    st.lookupLoading = true;
+    st.lookupResult = null;
+    this.render();
+    const apiRes = await fetchUsdaFood(parsed.name, this.state.usdaApiKey);
+    if (st.lookupQuery !== raw) return; // query changed while waiting on the network
+    st.lookupLoading = false;
+    if (apiRes.noConnection){
+      st.lookupResult = { noConnection:true, query:raw };
+    } else if (apiRes.notFound){
+      st.lookupResult = { notFound:true, query:raw };
+    } else {
+      st.lookupResult = { ...computeFromPer100(apiRes.per100, apiRes.name, parsed, null), source:'api', fdcId:apiRes.fdcId };
+    }
     this.render();
   },
   saveLookupToMemory(){
     const r = this.state.addfood.lookupResult;
-    if (!r || r.notFound) return;
-    const food = COMMON_FOODS.find(f => f.name === r.name);
-    if (!food) return;
-    const already = this.state.memory.usda.some(x => x.name.toLowerCase() === food.name.toLowerCase());
+    if (!r || r.notFound || r.noConnection || r.saved || r.alreadySaved) return;
+    const already = this.state.memory.usda.some(x => x.name.toLowerCase() === r.name.toLowerCase());
     if (!already){
-      const per = food.per100;
+      const per = r.per100;
       this.state.memory.usda.push({
-        id:this.genId(food.name), name:food.name, fdc:'USDA · common food', unit:'g',
+        id:this.genId(r.name), name:r.name, unit:'g',
+        fdc: r.source==='api' ? `FDC ${r.fdcId}` : 'USDA · common food',
         kcal:per.kcal, kcalPer100:per.kcal, p:per.p, c:per.c, f:per.f, fib:per.fib, sugar:per.sugar, sodium:per.sodium,
       });
     }
@@ -789,6 +879,7 @@ const App = {
       waterMl: this.state.today.waterMl,
       weightKg: this.state.today.weightKg,
       dailyNote: this.state.today.dailyNote,
+      usdaApiKey: this.state.usdaApiKey,
       targets: this.state.targets,
       meals: this.state.today.meals,
       dayLog: this.state.dayLog,
@@ -1039,6 +1130,7 @@ const App = {
       if (typeof data.waterMl === 'number') this.state.today.waterMl = data.waterMl;
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
+      if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
@@ -1091,6 +1183,7 @@ const App = {
       if (typeof data.waterMl === 'number') this.state.today.waterMl = data.waterMl;
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
+      if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
@@ -1464,15 +1557,25 @@ function renderAddFood(){
   } else {
     const r = st.lookupResult;
     let resultHtml = '';
-    if (r && r.notFound){
-      resultHtml = `<div style="margin-top:10px;padding:10px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:11.5px;font-weight:600;line-height:1.4;">Couldn't find &ldquo;${r.query}&rdquo; in this demo's list. Try: apple, banana, grapes, orange, strawberries, watermelon, tomato, potato, broccoli, spinach, egg, rice, almonds, cucumber, carrot, chicken breast, mutton.</div>`;
+    if (st.lookupLoading){
+      resultHtml = `<div style="margin-top:10px;padding:10px;background:var(--brand-tint);color:var(--brand-dark);border-radius:10px;font-size:11.5px;font-weight:600;">Searching USDA FoodData Central…</div>`;
+    } else if (r && r.missingKey){
+      resultHtml = `<div style="margin-top:10px;padding:12px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">
+        &ldquo;${r.query}&rdquo; isn't in your saved foods, and no USDA API key is set up yet, so live search can't run.
+        <button onclick="App.setScreen('settings')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--warning);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Add a USDA API key in Settings</button>
+      </div>`;
+    } else if (r && r.noConnection){
+      resultHtml = `<div style="margin-top:10px;padding:10px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:11.5px;font-weight:600;line-height:1.4;">Couldn't find &ldquo;${r.query}&rdquo; in your saved foods, and couldn't reach the internet to search USDA FoodData Central. Check your connection and try again.</div>`;
+    } else if (r && r.notFound){
+      resultHtml = `<div style="margin-top:10px;padding:10px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:11.5px;font-weight:600;line-height:1.4;">Couldn't find &ldquo;${r.query}&rdquo; in your saved foods or in USDA FoodData Central. Try a different spelling or a more common name.</div>`;
     } else if (r){
       resultHtml = `
         <div style="margin-top:10px;padding:12px;background:var(--brand-tint);border-radius:12px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
             <div style="font-size:13px;font-weight:800;color:var(--brand-dark);">${r.name} · ${r.basis}</div>
             <div class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);">${r.kcal} kcal</div>
           </div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:8px;">${r.source==='api' ? 'Live from USDA FoodData Central' : 'From your saved foods'}</div>
           <div style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:6px;margin-bottom:10px;">
             ${[['Prot',r.p+'g'],['Carb',r.c+'g'],['Fat',r.f+'g'],['Fib',r.fib+'g'],['Sug',r.sugar+'g'],['Sod',r.sodium+'mg']].map(([l,v]) => `
               <div style="background:#fff;border-radius:8px;padding:6px 4px;text-align:center;">
@@ -1482,7 +1585,9 @@ function renderAddFood(){
           </div>
           ${r.saved
             ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);">Saved to memory ✓ — find it in the USDA list below</div>`
-            : `<button onclick="App.saveLookupToMemory()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save to memory as USDA reference</button>`}
+            : (r.alreadySaved
+              ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);">Already in your USDA list below</div>`
+              : `<button onclick="App.saveLookupToMemory()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save to memory as USDA reference</button>`)}
         </div>`;
     }
     list = `
@@ -1493,7 +1598,7 @@ function renderAddFood(){
           <button onclick="App.runLookup()" style="padding:9px 16px;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Look up</button>
         </div>
         ${resultHtml}
-        <div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.4;">Demo dataset of common items using real USDA per-100g values. The full app would query USDA FoodData Central live for any food.</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.4;">Checks your saved foods first, then searches USDA FoodData Central live if it's not found locally. Live search needs an internet connection.</div>
       </div>
       <div id="addfood-list" style="display:flex;flex-direction:column;gap:8px;">
       ${App.state.memory.usda.map(u => `
@@ -2299,6 +2404,12 @@ function renderSettings(){
       <div style="font-size:12px;color:var(--ink-2);padding-left:34px;">Your daily targets — used across Today, Trends and Export</div>
     </div>
     <div class="scroll-area" style="padding:16px 18px 16px 18px;">
+      <div class="card pad" style="margin-bottom:14px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px;">USDA API key</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px;">Needed for live USDA FoodData Central search in Quick lookup (your saved foods still work without one). Get a free key at fdc.nal.usda.gov/api-key-signup.html — it's stored only on this device, never in the app's source code.</div>
+        <input id="usda-key-input" type="text" value="${(App.state.usdaApiKey||'').replace(/"/g,'&quot;')}" placeholder="Paste your USDA API key" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;margin-bottom:8px;"/>
+        <button onclick="App.saveUsdaKey()" style="padding:9px 16px;border-radius:10px;background:${App.state.usdaKeyStatus?'var(--good)':'var(--brand-tint)'};color:${App.state.usdaKeyStatus?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${App.state.usdaKeyStatus || 'Save key'}</button>
+      </div>
       ${fields.map(([id,label]) => settingsCard(id,label)).join('')}
       <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin-top:4px;">Changing a target here updates status colors and bands on Today, Trends and Export right away — nothing about what you've actually logged changes.</div>
     </div>
