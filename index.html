@@ -234,6 +234,7 @@
 
 </div>
 
+<script src="vendor/jspdf.umd.min.js"></script>
 <script>
 /* ================= DATA ================= */
 
@@ -457,7 +458,7 @@ const App = {
     library: { activeTab:'foods', openId:null, form:null, confirmDeleteKey:null, confirmMoveKey:null, boneEntries:[{total:170,bone:24},{total:190,bone:38},{total:125,bone:34},{total:76,bone:22}] },
     history: { view:'day', openIdx:null, selectedDayNum:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
-    exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null },
+    exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[] },
     desktop: { openMeal:'lunch' },
     settingsStatus: null,
   },
@@ -761,6 +762,7 @@ const App = {
       meals: this.state.today.meals,
       dayLog: this.state.dayLog,
       history: this.state.dayHistory,
+      recentExports: this.state.exportScreen.recentExports,
     };
   },
   exportData(){
@@ -774,6 +776,172 @@ const App = {
       this.state.exportScreen.fallbackJson = json;
       this.state.exportScreen.dataStatus = "Couldn't save directly — copy the text below instead.";
     }
+    this.render();
+  },
+  exportPdf(){
+    const st = this.state.exportScreen;
+    if (!window.jspdf || !window.jspdf.jsPDF){
+      st.dataStatus = "Couldn't load the PDF engine — try reopening the app and try again.";
+      this.render();
+      return;
+    }
+    const realDays = this.allRealDays();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'mm', format:'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 16;
+    const contentW = pageW - margin*2;
+    const brand=[28,92,75], brandDark=[18,63,52], ink=[20,24,26], ink2=[91,97,95], muted=[139,144,141];
+    const good=[12,163,12], warning=[185,121,10], critical=[208,59,59];
+    const protein=[42,120,214], carbs=[235,104,52], fat=[27,175,122], border=[225,225,222];
+    const ensureRoom = (y, needed) => { if (y + needed > pageH - 16){ doc.addPage(); return 20; } return y; };
+    const statusColorFor = s => s==='good' ? good : (s==='warning' ? warning : critical);
+    const statusTextFor = s => s==='good' ? 'OK' : (s==='warning' ? 'LOW' : 'HIGH');
+
+    let filename, exportLabel;
+
+    if (st.mode === 'day'){
+      const entry = realDays[st.offset];
+      if (!entry){ st.dataStatus = 'Nothing logged for this day — nothing to export.'; this.render(); return; }
+      const dateLabel = entry.isToday ? formatFullDate(this.state.dayLog.currentDate) : formatFullDate(entry.date);
+      exportLabel = entry.isToday ? 'Today' : formatShortDate(entry.date);
+
+      doc.setFillColor(...brand);
+      doc.rect(0, 0, pageW, 28, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFont('helvetica','bold'); doc.setFontSize(16);
+      doc.text('Daily Nutrition Report', margin, 14);
+      doc.setFont('helvetica','normal'); doc.setFontSize(10);
+      doc.text(dateLabel, margin, 21);
+
+      let y = 42;
+      const rows = [
+        ['Calories', `${Math.round(entry.calories)} kcal`, statusFor('calories', entry.calories)],
+        ['Protein', `${entry.protein} g`, statusFor('protein', entry.protein)],
+        ['Carbs', `${entry.carbs} g`, statusFor('carbs', entry.carbs)],
+        ['Fat', `${entry.fat} g`, statusFor('fat', entry.fat)],
+        ['Fiber', `${entry.fiber} g`, statusFor('fiber', entry.fiber)],
+        ['Sugar', `${entry.sugar} g`, statusFor('sugar', entry.sugar)],
+        ['Sodium', `${entry.sodium} mg`, statusFor('sodium', entry.sodium)],
+        ['Water', `${formatLiters(entry.waterMl)} L`, statusFor('water', entry.waterMl/1000)],
+      ];
+      if (entry.weightKg != null) rows.push(['Weight', `${entry.weightKg} kg`, statusFor('weight', entry.weightKg)]);
+
+      rows.forEach(([labelText, value, status]) => {
+        doc.setDrawColor(...border);
+        doc.line(margin, y+2.5, pageW-margin, y+2.5);
+        doc.setFont('helvetica','normal'); doc.setFontSize(10.5); doc.setTextColor(...ink2);
+        doc.text(labelText, margin, y);
+        doc.setFont('helvetica','bold'); doc.setTextColor(...ink);
+        doc.text(value, pageW-margin-24, y, { align:'right' });
+        doc.setFillColor(...statusColorFor(status));
+        doc.roundedRect(pageW-margin-20, y-4, 20, 5.5, 1.5, 1.5, 'F');
+        doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(7.5);
+        doc.text(statusTextFor(status), pageW-margin-10, y-0.3, { align:'center' });
+        y += 9;
+      });
+
+      y += 5;
+      const macroCals = { protein: entry.protein*4, carbs: entry.carbs*4, fat: entry.fat*9 };
+      const macroTotal = Math.max(1, macroCals.protein+macroCals.carbs+macroCals.fat);
+      let barX = margin;
+      [[protein, macroCals.protein],[carbs, macroCals.carbs],[fat, macroCals.fat]].forEach(([color, val]) => {
+        const w = (val/macroTotal)*contentW;
+        doc.setFillColor(...color);
+        doc.rect(barX, y, w, 6, 'F');
+        barX += w;
+      });
+      y += 11;
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...muted);
+      doc.text('Macro split — protein / carbs / fat', margin, y);
+      y += 12;
+
+      if (entry.isToday && this.state.today.meals.length){
+        y = ensureRoom(y, 10);
+        doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(...ink);
+        doc.text('Meals logged today', margin, y);
+        y += 8;
+        this.state.today.meals.forEach(meal => {
+          y = ensureRoom(y, 8);
+          doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...brandDark);
+          doc.text(`${meal.name} — ${Math.round(mealKcal(meal))} kcal`, margin, y);
+          y += 6;
+          meal.items.forEach(item => {
+            y = ensureRoom(y, 6);
+            doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...ink2);
+            doc.text(item.name, margin+4, y, { maxWidth: contentW-40 });
+            doc.setFont('helvetica','bold'); doc.setTextColor(...ink);
+            doc.text(`${Math.round(item.kcal)} kcal`, pageW-margin, y, { align:'right' });
+            y += 5.5;
+          });
+          y += 3;
+        });
+      } else if (!entry.isToday){
+        y = ensureRoom(y, 8);
+        doc.setFont('helvetica','italic'); doc.setFontSize(9); doc.setTextColor(...muted);
+        doc.text("Item-level detail isn't stored for past days — totals only.", margin, y);
+      }
+
+      filename = `nourish-daily-${entry.isToday ? todayISO() : entry.date}.pdf`;
+    } else {
+      const start = st.offset*7;
+      const chunk = realDays.slice(start, start+7);
+      if (!chunk.length){ st.dataStatus = 'Nothing logged for this week — nothing to export.'; this.render(); return; }
+      const oldest = chunk[chunk.length-1], newest = chunk[0];
+      const periodLabel = `${formatShortDate(oldest.date)}–${newest.isToday?'Today':formatShortDate(newest.date)}`;
+      exportLabel = periodLabel;
+
+      doc.setFillColor(...brand);
+      doc.rect(0, 0, pageW, 28, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFont('helvetica','bold'); doc.setFontSize(16);
+      doc.text('Weekly Summary', margin, 14);
+      doc.setFont('helvetica','normal'); doc.setFontSize(10);
+      doc.text(`Week of ${periodLabel}`, margin, 21);
+
+      let y = 42;
+      const avgCal = Math.round(chunk.reduce((a,d)=>a+d.calories,0)/chunk.length);
+      const avgProtein = Math.round((chunk.reduce((a,d)=>a+d.protein,0)/chunk.length)*10)/10;
+      const inRange = chunk.filter(d=>statusFor('calories', d.calories)==='good').length;
+
+      doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...ink);
+      doc.text(`Average calories: ${avgCal} kcal`, margin, y); y += 7;
+      doc.text(`Average protein: ${avgProtein} g`, margin, y); y += 7;
+      doc.text(`Days in range: ${inRange} / ${chunk.length}`, margin, y); y += 12;
+
+      const cols = [margin, margin+42, margin+80, margin+112, margin+144];
+      doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(...ink2);
+      ['Day','Calories','Protein','Carbs','Fat'].forEach((h,i) => doc.text(h, cols[i], y));
+      y += 3;
+      doc.setDrawColor(...border);
+      doc.line(margin, y, pageW-margin, y);
+      y += 6;
+
+      chunk.slice().reverse().forEach(d => {
+        y = ensureRoom(y, 6.5);
+        const dayLabel = d.isToday ? 'Today' : `${WEEKDAY_NAMES[dateFromISO(d.date).getDay()].slice(0,3)} ${formatShortDate(d.date)}`;
+        doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...ink);
+        doc.text(dayLabel, cols[0], y);
+        doc.text(`${Math.round(d.calories)} kcal`, cols[1], y);
+        doc.text(`${d.protein} g`, cols[2], y);
+        doc.text(`${d.carbs} g`, cols[3], y);
+        doc.text(`${d.fat} g`, cols[4], y);
+        y += 6.5;
+      });
+
+      filename = `nourish-weekly-${oldest.date}-to-${newest.isToday?todayISO():newest.date}.pdf`;
+    }
+
+    doc.save(filename);
+    const exports = st.recentExports || (st.recentExports = []);
+    exports.unshift({
+      filename,
+      whenISO: new Date().toISOString(),
+      label: st.mode === 'day' ? `1-Day Report · ${exportLabel}` : `Weekly Summary · ${exportLabel}`,
+    });
+    if (exports.length > 10) exports.length = 10;
+    st.dataStatus = 'PDF saved ✓ — check your Downloads folder.';
     this.render();
   },
   handleImportFile(inputEl){
@@ -801,6 +969,7 @@ const App = {
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
+      if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports;
       this.saveLocal();
       this.state.exportScreen.dataStatus = 'Import complete ✓ — your memory has been replaced with the backup.';
       this.render();
@@ -825,6 +994,7 @@ const App = {
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
+      if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports;
     } catch (e) { /* ignore corrupt/missing local data */ }
   },
 
@@ -1892,12 +2062,24 @@ function renderExport(){
         </button>
       </div>
       ${preview}
-      <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0;border-radius:13px;background:var(--brand);color:#fff;font-size:14px;font-weight:700;margin-bottom:20px;">
+      <button onclick="App.exportPdf()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:20px;">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
         Export PDF
-      </div>
+      </button>
       <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Recent exports</div>
-      <div style="text-align:center;color:var(--muted);font-size:12px;padding:10px 0 22px 0;">No reports exported yet.</div>
+      ${st.recentExports && st.recentExports.length ? `
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:22px;">
+          ${st.recentExports.map(e => `
+            <div class="card pad-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <div style="min-width:0;">
+                <div style="font-size:12.5px;font-weight:700;">${e.label}</div>
+                <div style="font-size:10.5px;color:var(--muted);margin-top:1px;">${e.filename}</div>
+              </div>
+              <div style="font-size:10px;color:var(--muted);flex-shrink:0;">${new Date(e.whenISO).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : `<div style="text-align:center;color:var(--muted);font-size:12px;padding:10px 0 22px 0;">No reports exported yet.</div>`}
 
       <div style="height:1px;background:var(--border);margin-bottom:20px;"></div>
 
