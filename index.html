@@ -470,8 +470,15 @@ const App = {
   requestRemoveItem(mealId, idx){ this.state.today.confirmRemoveKey = mealId+':'+idx; this.render(); },
   cancelRemoveItem(){ this.state.today.confirmRemoveKey = null; this.render(); },
   confirmRemoveItem(mealId, idx){
-    const meal = this.state.today.meals.find(m => m.id === mealId);
-    if (meal) meal.items.splice(idx, 1);
+    const meals = this.state.today.meals;
+    const meal = meals.find(m => m.id === mealId);
+    if (meal){
+      meal.items.splice(idx, 1);
+      if (meal.items.length === 0){
+        meals.splice(meals.indexOf(meal), 1);
+        if (this.state.today.expandedMeal === mealId) this.state.today.expandedMeal = null;
+      }
+    }
     this.state.today.confirmRemoveKey = null;
     this.render();
   },
@@ -694,6 +701,25 @@ const App = {
       list.push(data);
     }
     this.state.library.form = null;
+    this.render();
+  },
+  moveMemoryItem(fromKind, id){
+    const toKind = fromKind === 'foods' ? 'ingredients' : 'foods';
+    const fromList = this.state.memory[fromKind];
+    const idx = fromList.findIndex(x => x.id === id);
+    if (idx === -1) return;
+    const item = fromList[idx];
+    const shared = { name:item.name, kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium, photo:item.photo||null };
+    const toList = this.state.memory[toKind];
+    let moved = toKind === 'ingredients'
+      ? { ...shared, id:item.id, unit:item.unit||'g', source:'Per label', kcalPer100:item.kcal }
+      : { ...shared, id:item.id, recipe:item.recipe || `Moved from Ingredients — ${item.kcal} kcal per 100${item.unit||'g'}.`, updated:'Just now' };
+    if (toList.some(x => x.id === moved.id)) moved.id = this.genId(moved.name);
+    fromList.splice(idx, 1);
+    toList.push(moved);
+    if (this.state.library.openId === id) this.state.library.openId = null;
+    if (this.state.library.confirmDeleteKey === fromKind+':'+id) this.state.library.confirmDeleteKey = null;
+    this.state.library.activeTab = toKind;
     this.render();
   },
   requestDelete(kind, id){ this.state.library.confirmDeleteKey = kind+':'+id; this.render(); },
@@ -1303,7 +1329,13 @@ function photoThumb(item){
   return item.photo ? `<img src="${item.photo}" style="width:30px;height:30px;object-fit:cover;border-radius:7px;border:1px solid var(--border);flex-shrink:0;"/>` : '';
 }
 function memoryRowActions(kind, item){
+  const canMove = kind === 'foods' || kind === 'ingredients';
+  const moveTo = kind === 'foods' ? 'Ingredients' : 'Saved foods';
   return `
+    ${canMove ? `
+    <button onclick="event.stopPropagation();App.moveMemoryItem('${kind}','${item.id}')" title="Move to ${moveTo}" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 8h12m0 0l-4-4m4 4l-4 4M17 16H5m0 0l4 4m-4-4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>` : ''}
     <button onclick="event.stopPropagation();App.editMemoryItem('${kind}','${item.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px;">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
     </button>
