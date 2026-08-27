@@ -293,7 +293,12 @@ function detailLine(item){
   return `Per 100${unit}: ${item.kcal} kcal, ${item.p}g protein, ${item.c}g carbs, ${item.sugar}g sugar, ${item.f}g fat, ${item.fib}g fiber, ${item.sodium}mg sodium.`;
 }
 
-/* ---------- Quick lookup demo dataset (real USDA per-100g values for common items) ---------- */
+function makeId(name){
+  return (name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'item') + '_' + Math.random().toString(36).slice(2,6);
+}
+
+/* ---------- Built-in quick-reference foods (real USDA per-100g values) ---------- */
+/* Seeded into memory.usda once (see mergeCommonFoodsIntoUsda) so they show up as real, editable/deletable entries. */
 const COMMON_FOODS = [
   { name:'Apple', per100:{kcal:52,p:0.26,c:13.81,f:0.17,fib:2.4,sugar:10.39,sodium:1}, pieceG:182 },
   { name:'Banana', per100:{kcal:89,p:1.09,c:22.84,f:0.33,fib:2.6,sugar:12.23,sodium:1}, pieceG:118 },
@@ -313,6 +318,19 @@ const COMMON_FOODS = [
   { name:'Chicken breast, cooked', per100:{kcal:165,p:31,c:0,f:3.6,fib:0,sugar:0,sodium:74}, pieceG:172 },
   { name:'Mutton, cooked', per100:{kcal:234,p:33.43,c:0.08,f:11.09,fib:0,sugar:0,sodium:135}, pieceG:null },
 ];
+function mergeCommonFoodsIntoUsda(usdaList){
+  const baseName = n => n.toLowerCase().split(',')[0].trim();
+  COMMON_FOODS.forEach(food => {
+    const exists = usdaList.some(u => baseName(u.name) === baseName(food.name));
+    if (exists) return;
+    const per = food.per100;
+    usdaList.push({
+      id: makeId(food.name), name: food.name, fdc:'USDA · common food', unit:'g', pieceG: food.pieceG || null,
+      kcal: per.kcal, kcalPer100: per.kcal, p: per.p, c: per.c, f: per.f, fib: per.fib, sugar: per.sugar, sodium: per.sodium,
+    });
+  });
+  return usdaList;
+}
 
 function parseQuantity(raw){
   const q = (raw||'').trim().toLowerCase();
@@ -346,23 +364,16 @@ function computeFromPer100(per100, name, parsed, pieceG){
   };
 }
 function findLocalFood(name, nameNorm){
-  const common = COMMON_FOODS.find(f => f.name.toLowerCase() === name)
-    || COMMON_FOODS.find(f => f.name.toLowerCase().split(',')[0] === nameNorm)
-    || COMMON_FOODS.find(f => f.name.toLowerCase().includes(nameNorm) || nameNorm.includes(f.name.toLowerCase().split(',')[0]));
-  if (common) return { name:common.name, per100:common.per100, pieceG:common.pieceG, alreadySaved:false };
-
   const usda = App.state.memory.usda;
   const saved = usda.find(u => u.name.toLowerCase() === name)
     || usda.find(u => u.name.toLowerCase().split(',')[0] === nameNorm)
     || usda.find(u => u.name.toLowerCase().includes(nameNorm) || nameNorm.includes(u.name.toLowerCase().split(',')[0]));
-  if (saved){
-    return {
-      name: saved.name,
-      per100: { kcal:saved.kcalPer100, p:saved.p, c:saved.c, f:saved.f, fib:saved.fib, sugar:saved.sugar, sodium:saved.sodium },
-      pieceG: null, alreadySaved:true,
-    };
-  }
-  return null;
+  if (!saved) return null;
+  return {
+    name: saved.name,
+    per100: { kcal:saved.kcalPer100, p:saved.p, c:saved.c, f:saved.f, fib:saved.fib, sugar:saved.sugar, sodium:saved.sodium },
+    pieceG: saved.pieceG || null, alreadySaved:true,
+  };
 }
 
 /* ---------- Live USDA FoodData Central lookup ---------- */
@@ -526,8 +537,9 @@ const App = {
     memory: {
       foods: SAVED_FOODS.map(x => ({...x})),
       ingredients: INGREDIENTS.map(x => ({...x})),
-      usda: USDA_FOODS.map(x => ({...x})),
+      usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
+    builtinFoodsSeeded: true,
     library: { activeTab:'foods', openId:null, form:null, confirmDeleteKey:null, confirmMoveKey:null, boneEntries:[{total:170,bone:24},{total:190,bone:38},{total:125,bone:34},{total:76,bone:22}] },
     history: { view:'day', openIdx:null, selectedDayNum:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
@@ -638,7 +650,7 @@ const App = {
 
   getOrCreateMeal(mealName){
     const meals = this.state.today.meals;
-    let meal = meals.find(m => m.name === mealName && m.id === mealName.toLowerCase());
+    let meal = meals.find(m => m.name === mealName);
     if (!meal){
       meal = { id: mealName.toLowerCase()+'_'+Math.random().toString(36).slice(2,6), name: mealName, subtitle: 'Logged today', items: [] };
       meals.push(meal);
@@ -880,6 +892,7 @@ const App = {
       weightKg: this.state.today.weightKg,
       dailyNote: this.state.today.dailyNote,
       usdaApiKey: this.state.usdaApiKey,
+      builtinFoodsSeeded: this.state.builtinFoodsSeeded,
       targets: this.state.targets,
       meals: this.state.today.meals,
       dayLog: this.state.dayLog,
@@ -1131,11 +1144,16 @@ const App = {
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
+      this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
       if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports;
+      if (!this.state.builtinFoodsSeeded){
+        mergeCommonFoodsIntoUsda(this.state.memory.usda);
+        this.state.builtinFoodsSeeded = true;
+      }
       this.saveLocal();
       this.state.exportScreen.dataStatus = 'Import complete ✓ — your memory has been replaced with the backup.';
       this.render();
@@ -1189,6 +1207,12 @@ const App = {
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
       if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports;
+      this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
+      if (!this.state.builtinFoodsSeeded){
+        mergeCommonFoodsIntoUsda(this.state.memory.usda);
+        this.state.builtinFoodsSeeded = true;
+        this.saveLocal();
+      }
     } catch (e) { /* ignore corrupt/missing local data */ }
   },
 
