@@ -236,6 +236,7 @@
 
 <script src="vendor/jspdf.umd.min.js"></script>
 <script src="vendor/jspdf.plugin.autotable.min.js"></script>
+<script src="vendor/tesseract/tesseract.min.js"></script>
 <script>
 /* ================= DATA ================= */
 
@@ -291,6 +292,40 @@ function macrosArrayFrom(item){
 function detailLine(item){
   const unit = item.unit || 'g';
   return `Per 100${unit}: ${item.kcal} kcal, ${item.p}g protein, ${item.c}g carbs, ${item.sugar}g sugar, ${item.f}g fat, ${item.fib}g fiber, ${item.sodium}mg sodium.`;
+}
+
+/* ---------- Real OCR for label photos (Tesseract.js, fully vendored/offline) ---------- */
+function vendorUrl(rel){ return new URL(rel, document.baseURI).href; }
+async function runLabelOcr(imageDataUrl){
+  const worker = await Tesseract.createWorker('eng', Tesseract.OEM.LSTM_ONLY, {
+    workerPath: vendorUrl('vendor/tesseract/worker.min.js'),
+    corePath: vendorUrl('vendor/tesseract'),
+    langPath: vendorUrl('vendor/tesseract'),
+  });
+  try {
+    const { data } = await worker.recognize(imageDataUrl);
+    return data.text || '';
+  } finally {
+    await worker.terminate();
+  }
+}
+function parseNutritionLabelText(text){
+  const joined = text.replace(/\r/g, '');
+  const patterns = [
+    ['kcal', /calories\D{0,10}(\d+(?:\.\d+)?)/i],
+    ['p', /protein\D{0,10}(\d+(?:\.\d+)?)/i],
+    ['c', /(?:total\s+)?carbohydrate\D{0,10}(\d+(?:\.\d+)?)/i],
+    ['f', /(?:total\s+)?fat\D{0,10}(\d+(?:\.\d+)?)/i],
+    ['fib', /(?:dietary\s+)?fiber\D{0,10}(\d+(?:\.\d+)?)/i],
+    ['sugar', /sugars?\D{0,10}(\d+(?:\.\d+)?)/i],
+    ['sodium', /sodium\D{0,10}(\d+(?:\.\d+)?)/i],
+  ];
+  const result = {};
+  patterns.forEach(([key, re]) => {
+    const m = joined.match(re);
+    if (m) result[key] = parseFloat(m[1]);
+  });
+  return result;
 }
 
 function makeId(name){
@@ -763,7 +798,7 @@ const App = {
   },
   openAddForm(kind){
     this.state.library.activeTab = kind;
-    this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', scanned:false, photo:null, showReadPrompt:false };
+    this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', scanned:false, photo:null, ocrRunning:false, ocrFailed:false };
     this.render();
   },
   editMemoryItem(kind, id){
@@ -774,7 +809,7 @@ const App = {
       kind, editId:id, name:item.name, desc:item.recipe||'', unit:item.unit||'g',
       source: item.source || item.fdc || '',
       kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium,
-      scanned:false, photo:item.photo||null, showReadPrompt:false,
+      scanned:false, photo:item.photo||null, ocrRunning:false, ocrFailed:false,
     };
     this.render();
   },
@@ -785,26 +820,28 @@ const App = {
     const reader = new FileReader();
     reader.onload = (e) => {
       if (!this.state.library.form) return;
-      this.state.library.form = { ...this.state.library.form, photo:e.target.result, scanned:false, showReadPrompt:false };
+      const photo = e.target.result;
+      this.state.library.form = { ...this.state.library.form, photo, scanned:false, ocrRunning:true, ocrFailed:false };
       this.render();
-      setTimeout(() => {
-        if (this.state.library.form) {
-          this.state.library.form.showReadPrompt = true;
-          this.render();
-        }
-      }, 900);
+      runLabelOcr(photo).then(text => {
+        const f = this.state.library.form;
+        if (!f || f.photo !== photo) return; // form closed or photo replaced while OCR was running
+        const parsed = parseNutritionLabelText(text);
+        const found = Object.keys(parsed).length > 0;
+        this.state.library.form = {
+          ...f, ocrRunning:false, scanned:found, ocrFailed:!found,
+          kcal: parsed.kcal ?? f.kcal, p: parsed.p ?? f.p, c: parsed.c ?? f.c, f: parsed.f ?? f.f,
+          fib: parsed.fib ?? f.fib, sugar: parsed.sugar ?? f.sugar, sodium: parsed.sodium ?? f.sodium,
+        };
+        this.render();
+      }).catch(() => {
+        const f = this.state.library.form;
+        if (!f || f.photo !== photo) return;
+        this.state.library.form = { ...f, ocrRunning:false, ocrFailed:true };
+        this.render();
+      });
     };
     reader.readAsDataURL(file);
-  },
-  scanLabelDemo(){
-    const f = this.state.library.form;
-    if (!f) return;
-    let sample;
-    if (f.kind === 'ingredients') sample = { name:'Almarai Full Fat Milk', unit:'ml', source:'Per label (scanned)', kcal:62, p:3.2, c:4.7, f:3.3, fib:0, sugar:4.7, sodium:44 };
-    else if (f.kind === 'usda') sample = { name:'Spinach, raw', unit:'g', source:'USDA · manual entry', kcal:23, p:2.9, c:3.6, f:0.4, fib:2.2, sugar:0.4, sodium:79 };
-    else sample = { name:'Protein Shake, homemade', desc:'1 scoop whey + 300ml milk + ice, blended', kcal:220, p:28, c:14, f:5, fib:2, sugar:10, sodium:150 };
-    this.state.library.form = { ...f, ...sample, scanned:true };
-    this.render();
   },
   saveForm(){
     const f = this.state.library.form;
@@ -1709,14 +1746,9 @@ function renderMemoryForm(f){
         </label>
         ${f.photo ? `<img src="${f.photo}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"/>` : ''}
       </div>
-      ${f.photo && f.showReadPrompt && !f.scanned ? `
-        <div style="margin-bottom:12px;padding:10px;background:var(--warning-tint);border-radius:10px;font-size:11.5px;color:var(--warning);line-height:1.45;">
-          This preview can't run real label-reading — no internet access inside it. In the full app, this photo would go to a vision AI that fills in the numbers below automatically.
-          <button onclick="App.scanLabelDemo()" style="display:block;margin-top:8px;padding:7px 0;width:100%;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">See what that looks like (sample data)</button>
-        </div>
-      ` : ''}
-      ${f.photo && !f.showReadPrompt ? `<div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Reading label…</div>` : ''}
-      ${f.scanned ? `<div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Sample values filled in below — check them (or the photo above) before saving.</div>` : ''}
+      ${f.photo && f.ocrRunning ? `<div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Reading label…</div>` : ''}
+      ${f.scanned ? `<div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Values read from the photo — check them (or the photo above) before saving.</div>` : ''}
+      ${f.ocrFailed ? `<div style="font-size:11px;color:var(--warning);margin-bottom:12px;line-height:1.4;">Couldn't automatically read numbers from that photo — enter them manually below.</div>` : ''}
       <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Name</label>
       <input id="mf-name" type="text" value="${esc2(g(f.name))}" placeholder="${isFoods?'e.g. Protein Shake':'e.g. Almarai Full Fat Milk'}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
       ${isFoods ? `
