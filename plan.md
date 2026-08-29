@@ -364,9 +364,13 @@ shared `localStorage` origin, not two isolated copies.
 - **"Limited Edition App"** = "BilliFit" (`billifit-pwa` repo) — name/icon/colors/backgrounds
   differ, but logic/features/data model must stay identical to Original App.
 - Whenever a change is requested, **explicitly confirm which one it targets** before touching
-  anything — default assumption should never be silent. Functional changes belong in Original App
-  and then get ported across (cherry-pick/copy) to Limited Edition; purely cosmetic changes belong
-  only in Limited Edition and should **not** be ported back.
+  anything — default assumption should never be silent.
+- **Corrected 2026-08-28 (user's exact words): "any and all changes that change the way the app
+  functions in any shape or form are for both editions. only the Aesthetic aspect is specific to
+  the limited Edition."** So: any functional/behavioral/logic/data change applies to **both**
+  Original and Limited Edition — implement in both, it is not "Original first, port later" as a
+  separate or optional step. Only aesthetic changes (colors, icon, background art, name/branding)
+  are Limited-Edition-only and must **never** be ported back to Original.
 - **Shipped 2026-08-27.** See the "DONE, shipped as BilliFit" heading above for the live URL and
   what to read next if working on it.
 
@@ -421,10 +425,73 @@ across the user's two development machines via the same git push/pull habit as t
 confirming that a Claude Code session itself (browser or desktop) does not carry over between
 machines.
 
+## Four functional features (2026-08-28) — implemented in both apps, not yet confirmed on device
+
+Per the corrected Original-vs-Limited-Edition rule above, these are **functional** changes and were
+implemented in **both** this app and BilliFit in the same pass (not "Original first, port later").
+Built and self-verified (via `App.*` calls in the Browser-pane test tool, not real device testing
+yet) in both `pwa/index.html` and `billifit-pwa/index.html`. Ask the user to confirm each works on
+their real device before considering this fully shipped — this project's established pattern is
+build → confirm on device → move on, per feature.
+
+1. **Memory-only export/import** (Export screen → new "Share memory" section, below the existing
+   full backup section): `App.buildMemoryOnlyPayload()` exports just `{ foods, ingredients, usda }`
+   — no day history, targets, water/weight, USDA key, or PDF export log — so a Saved-foods/
+   Ingredients/USDA library can be shared with another user without handing over personal tracking
+   data. Import (`App.handleMemoryImportFile`) **merges**, never replaces: incoming items are
+   matched against existing ones by **case-insensitive name**, within the same list only. Zero
+   conflicts → merges immediately, no extra screen. Any conflicts → sets `App.state.memoryImport`
+   and shows a dedicated review screen (`renderMemoryImportReview()`, only rendered when that state
+   is set — checked at the very top of `renderExport()`) listing every conflicting item with a
+   3-way **Skip / Add as duplicate / Overwrite** choice (defaults to Skip), applied all together via
+   `App.applyMemoryImport()` — nothing is written to `state.memory` until "Apply import" is clicked,
+   so Cancel is a true no-op. Also has an **"Apply to all" bulk row**
+   (`App.setAllMemoryImportChoices(choice)`) above the conflict list — one tap sets every conflict's
+   choice at once, still individually overridable afterward — added after the user asked whether
+   bulk-resolving was possible rather than always doing it one item at a time.
+   **Overwrite preserves the existing item's `id`** (only its fields are
+   replaced) specifically so any composite Saved Food's component `refId` pointing at it keeps
+   resolving — don't change this to use the incoming item's id. Fresh items (auto-added or
+   duplicated) get a new id via `App.genId()`. Imported composite Saved Foods whose component
+   `refId`s don't exist on the receiving device (near-certain, since ids aren't shared across
+   devices) fall back to each component's cached `per100` snapshot automatically — this is the
+   existing composite-food architecture already designed for exactly this case (see "Composite
+   Saved Foods" section above), not new fallback logic.
+2. **Cross-tab search in Add Food**: previously the search box's placeholder claimed it searched
+   "saved foods, ingredients, USDA" but `filterRows()` only ever filtered whichever single tab's
+   `#addfood-list` was currently rendered — misleading. Fixed by always rendering **all three**
+   lists into the DOM at once inside `#addfood-groups` (each in its own `[data-kind]` wrapper,
+   default-hidden except the active tab), and adding `App.filterAddFoodRows(query)`: on a non-empty
+   query it shows all three groups, filters rows within each by `data-name` (same mechanism as
+   before), and reveals a small `.src-tag` label per row (Saved/Ingredient/USDA, via the new
+   `srcTag()` helper and `.pill-brand`/`.pill-neutral`/`.pill-usda` classes) so matches are
+   attributable; clearing the query reverts to normal single-tab display. **This is deliberately
+   still pure DOM manipulation, never a state-driven `render()` call** — see
+   "Render pattern" → "never wire `oninput` directly to a state-mutating `render()`" earlier in this
+   file; wiring the merged search through `render()` instead would reopen exactly that focus-loss
+   bug. The USDA tab's "Quick lookup" card (`#addfood-quicklookup`) is hidden during an active
+   search (it's a tab-specific feature, not part of the merged list) and restored when the query is
+   cleared, also handled inside `filterAddFoodRows`.
+3. **Delete a past day** (History → Day view): each non-today entry, once expanded, shows a
+   "Delete this day" button leading to an inline confirm card (`App.requestDeleteDay`/
+   `cancelDeleteDay`/`deleteDay`, mirroring the existing `memoryConfirmCard` pattern). Permanent,
+   removes the entry from `state.dayHistory` by `date` — since History/Trends/Export all read from
+   `allRealDays()` fresh on every render, the deletion disappears from all three immediately with
+   no extra invalidation needed. Today itself is never deletable this way (it isn't archived yet).
+4. **Removed the "Notes" tab from Memory & Library** entirely — Memory is now 3 tabs (Saved foods/
+   Ingredients/USDA), not 4. That tab actually held two unrelated things: hardcoded `RULE_NOTES`
+   cards (leftover AI-instruction text from when this app was manually driven via a Claude Project
+   — genuinely dead weight, per the user) and a live bone-to-total-weight-ratio calculator
+   (`boneEntries`/`addBoneEntry()`/`boneAvg`) — confirmed via full-codebase search that
+   `boneEntries` was read **only** by that calculator's own display and backup round-tripping,
+   nothing else, so removing it doesn't touch any macro/logging calculation. Both removed together
+   per explicit user confirmation once this was explained. `renderLibrary()` now defensively resets
+   `st.activeTab` back to `'foods'` if it's ever anything outside the 3 valid tabs (guards against a
+   returning user's `localStorage` still holding `activeTab:'notes'` from before this change).
+
 ## Immediate next steps (pick up here)
 
-No feature is in progress. All four requested features (PDF export, live USDA lookup, real OCR,
-composite Saved Foods) are shipped and confirmed working on the user's real device. Ask the user
-what they'd like to work on next. The one open thread to keep in mind if it comes back up: OCR
-accuracy on real-world label photos (user is still testing, explicitly asked to leave it alone for
-now).
+The four features above are implemented and self-tested in both apps but **not yet confirmed by the
+user on a real device** — that's the next step before considering them done. One open thread to
+keep in mind if it comes back up: OCR accuracy on real-world label photos (user is still testing,
+explicitly asked to leave it alone for now).

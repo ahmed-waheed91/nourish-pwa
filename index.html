@@ -139,6 +139,9 @@
   .pill-lab{ background:var(--lab-tint); color:var(--lab-c); }
   .pill-label{ background:var(--label-tint); color:var(--label-c); }
   .pill-neutral{ background:#EEEEEC; color:var(--ink-2); }
+  .pill-brand{ background:var(--brand-tint); color:var(--brand-dark); }
+  .src-tag{ display:none; margin-right:6px; vertical-align:middle; }
+  .src-tag.show{ display:inline-block; }
 
   .dot{ width:8px; height:8px; border-radius:4px; flex-shrink:0; }
 
@@ -491,12 +494,6 @@ async function fetchUsdaFood(name, apiKey){
   }
 }
 
-const RULE_NOTES = [
-  { title:'Date handling', body:'“Today,” “yesterday,” “tomorrow” always mean the real-world calendar date at the time of logging — never where the food narrative left off.' },
-  { title:'Range reporting', body:'Every target is reported as in-range vs. out-of-range, never as a single deficit or surplus number.' },
-  { title:'Weight changes rescale macros', body:'Changing a saved food’s default serving weight without rescaling every macro proportionally is treated as an error.' },
-];
-
 function dotColor(ok){ return ok ? 'var(--good)' : 'var(--warning)'; }
 function esc(s){ return String(s); }
 
@@ -621,10 +618,11 @@ const App = {
       usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
     builtinFoodsSeeded: true,
-    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, boneEntries:[{total:170,bone:24},{total:190,bone:38},{total:125,bone:34},{total:76,bone:22}] },
-    history: { view:'day', openIdx:null, selectedDayNum:null },
+    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null },
+    history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
-    exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[] },
+    exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null },
+    memoryImport: null,
     desktop: { openMeal:'lunch' },
     settingsStatus: null,
     usdaApiKey: '', usdaKeyStatus: null,
@@ -781,6 +779,25 @@ const App = {
     document.querySelectorAll('#'+containerId+' [data-name]').forEach(row => {
       row.style.display = (!q || row.getAttribute('data-name').includes(q)) ? '' : 'none';
     });
+  },
+  filterAddFoodRows(query){
+    const q = query.trim().toLowerCase();
+    const activeTab = this.state.addfood.activeTab;
+    const searching = !!q;
+    const groups = document.querySelectorAll('#addfood-groups [data-kind]');
+    groups.forEach(group => {
+      const kind = group.getAttribute('data-kind');
+      group.style.display = (searching || kind === activeTab) ? 'flex' : 'none';
+      group.querySelectorAll('[data-name]').forEach(row => {
+        row.style.display = (!q || row.getAttribute('data-name').includes(q)) ? '' : 'none';
+        row.querySelectorAll('.src-tag').forEach(tag => tag.classList.toggle('show', searching));
+      });
+    });
+    const lookup = document.getElementById('addfood-quicklookup');
+    if (lookup) lookup.style.display = (!searching && activeTab === 'usda') ? 'block' : 'none';
+    const label = document.getElementById('addfood-context-label');
+    if (label) label.textContent = searching ? 'Matching saved foods, ingredients & USDA' :
+      (activeTab==='saved' ? 'From your memory' : (activeTab==='ingredients' ? 'Raw ingredients · scale by weight' : 'USDA FoodData Central'));
   },
 
   async runLookup(){
@@ -1122,17 +1139,17 @@ const App = {
     this.state.library.confirmDeleteKey = null;
     this.render();
   },
-  addBoneEntry(){
-    const t = parseFloat(document.getElementById('bone-total-input').value);
-    const b = parseFloat(document.getElementById('bone-bone-input').value);
-    if (!t || !b) return;
-    this.state.library.boneEntries.push({total:t, bone:b});
-    this.render();
-  },
-
   setHistoryView(v){ this.state.history.view = v; this.render(); },
   toggleHistoryRow(i){ const h=this.state.history; h.openIdx = h.openIdx===i ? null : i; this.render(); },
   selectMonthDay(d){ const h=this.state.history; h.selectedDayNum = h.selectedDayNum===d ? null : d; this.render(); },
+  requestDeleteDay(date){ this.state.history.confirmDeleteDate = date; this.render(); },
+  cancelDeleteDay(){ this.state.history.confirmDeleteDate = null; this.render(); },
+  deleteDay(date){
+    this.state.dayHistory = this.state.dayHistory.filter(h => h.date !== date);
+    this.state.history.confirmDeleteDate = null;
+    this.state.history.openIdx = null;
+    this.render();
+  },
 
   setTrendCat(id){ this.state.trends.activeCat = id; this.state.trends.activePoint = null; this.render(); },
   setTrendRange(id){ this.state.trends.range = id; this.state.trends.activePoint = null; this.render(); },
@@ -1145,7 +1162,6 @@ const App = {
     return {
       app: 'Nourish', version: 1, exportedAt: new Date().toISOString(),
       memory: this.state.memory,
-      boneEntries: this.state.library.boneEntries,
       waterMl: this.state.today.waterMl,
       weightKg: this.state.today.weightKg,
       dailyNote: this.state.today.dailyNote,
@@ -1397,7 +1413,6 @@ const App = {
         return;
       }
       this.state.memory = data.memory;
-      if (Array.isArray(data.boneEntries)) this.state.library.boneEntries = data.boneEntries;
       if (typeof data.waterMl === 'number') this.state.today.waterMl = data.waterMl;
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
@@ -1417,6 +1432,115 @@ const App = {
       this.render();
     };
     reader.readAsText(file);
+  },
+  buildMemoryOnlyPayload(){
+    return { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:this.state.memory };
+  },
+  exportMemoryOnly(){
+    const json = JSON.stringify(this.buildMemoryOnlyPayload(), null, 2);
+    const stamp = new Date().toISOString().slice(0,10);
+    try {
+      saveFileToDevice(`nourish-memory-${stamp}.json`, json);
+      this.state.exportScreen.memoryFallbackJson = null;
+      this.state.exportScreen.memoryStatus = 'Memory exported ✓ — check your Downloads folder.';
+    } catch (err) {
+      this.state.exportScreen.memoryFallbackJson = json;
+      this.state.exportScreen.memoryStatus = "Couldn't save directly — copy the text below instead.";
+    }
+    this.render();
+  },
+  handleMemoryImportFile(inputEl){
+    const file = inputEl.files && inputEl.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      let data;
+      try { data = JSON.parse(e.target.result); }
+      catch (err) {
+        this.state.exportScreen.memoryStatus = "Import failed — that file isn't valid JSON.";
+        this.render();
+        return;
+      }
+      if (!data || !data.memory || !Array.isArray(data.memory.foods) || !Array.isArray(data.memory.ingredients) || !Array.isArray(data.memory.usda)){
+        this.state.exportScreen.memoryStatus = "Import failed — file doesn't look like a Nourish memory export.";
+        this.render();
+        return;
+      }
+      const kinds = ['foods','ingredients','usda'];
+      const autoAdd = { foods:[], ingredients:[], usda:[] };
+      const conflicts = [];
+      kinds.forEach(kind => {
+        const existingList = this.state.memory[kind];
+        (data.memory[kind]||[]).forEach(incoming => {
+          const match = existingList.find(x => x.name && incoming.name && x.name.trim().toLowerCase() === incoming.name.trim().toLowerCase());
+          if (match) conflicts.push({ kind, incoming, existingId:match.id, choice:'skip' });
+          else autoAdd[kind].push(incoming);
+        });
+      });
+      if (conflicts.length === 0){
+        let total = 0;
+        kinds.forEach(kind => {
+          autoAdd[kind].forEach(item => {
+            this.state.memory[kind].push({ ...item, id:this.genId(item.name||kind), updated:'Just now' });
+            total++;
+          });
+        });
+        this.state.exportScreen.memoryStatus = `Import complete ✓ — added ${total} new item${total===1?'':'s'} to your memory.`;
+        this.render();
+        return;
+      }
+      this.state.memoryImport = { fileName:file.name, autoAdd, conflicts };
+      __scrollTopNext = true;
+      this.render();
+    };
+    reader.readAsText(file);
+  },
+  setMemoryImportChoice(i, choice){
+    this.state.memoryImport.conflicts[i].choice = choice;
+    this.render();
+  },
+  setAllMemoryImportChoices(choice){
+    this.state.memoryImport.conflicts.forEach(c => c.choice = choice);
+    this.render();
+  },
+  cancelMemoryImport(){
+    this.state.memoryImport = null;
+    __scrollTopNext = true;
+    this.render();
+  },
+  applyMemoryImport(){
+    const mi = this.state.memoryImport;
+    if (!mi) return;
+    const kinds = ['foods','ingredients','usda'];
+    let added = 0, overwritten = 0, skipped = 0, duplicated = 0;
+    kinds.forEach(kind => {
+      mi.autoAdd[kind].forEach(item => {
+        this.state.memory[kind].push({ ...item, id:this.genId(item.name||kind), updated:'Just now' });
+        added++;
+      });
+    });
+    mi.conflicts.forEach(c => {
+      if (c.choice === 'skip'){ skipped++; return; }
+      if (c.choice === 'duplicate'){
+        this.state.memory[c.kind].push({ ...c.incoming, id:this.genId(c.incoming.name||c.kind), updated:'Just now' });
+        duplicated++;
+        return;
+      }
+      if (c.choice === 'overwrite'){
+        const list = this.state.memory[c.kind];
+        const idx = list.findIndex(x => x.id === c.existingId);
+        if (idx !== -1) list[idx] = { ...c.incoming, id:c.existingId, updated:'Just now' };
+        overwritten++;
+      }
+    });
+    this.state.memoryImport = null;
+    const parts = [];
+    if (added || duplicated) parts.push(`${added+duplicated} added`);
+    if (overwritten) parts.push(`${overwritten} overwritten`);
+    if (skipped) parts.push(`${skipped} skipped`);
+    this.state.exportScreen.memoryStatus = `Import complete ✓ — ${parts.join(', ')}.`;
+    __scrollTopNext = true;
+    this.render();
   },
   saveLocal(){
     try {
@@ -1455,7 +1579,6 @@ const App = {
       if (!raw) return;
       const data = JSON.parse(raw);
       if (data.memory && data.memory.foods && data.memory.ingredients && data.memory.usda) this.state.memory = data.memory;
-      if (Array.isArray(data.boneEntries)) this.state.library.boneEntries = data.boneEntries;
       if (typeof data.waterMl === 'number') this.state.today.waterMl = data.waterMl;
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
@@ -1800,89 +1923,121 @@ function renderToday(){
 }
 
 /* ---------- Add food ---------- */
+function srcTag(label, cls){
+  return `<span class="pill ${cls} src-tag">${label}</span>`;
+}
+
+function renderSavedFoodRow(f, st){
+  if (Array.isArray(f.components)){
+    const expanded = st.expandedSavedId === f.id;
+    return `
+    <div data-name="${f.name.toLowerCase()}" class="card pad-sm">
+      <div onclick="App.toggleAddFoodSavedExpand('${f.id}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+        <div style="min-width:0;">
+          <div style="font-size:13.5px;font-weight:700;">${srcTag('Saved','pill-brand')}${f.name}</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:1px;">${f.recipe.length>46 ? f.recipe.slice(0,46)+'…' : f.recipe}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;padding-left:8px;">
+          <div class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.kcal} kcal</div>
+          <div class="chev ${expanded?'open':''}"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        </div>
+      </div>
+      ${expanded ? `
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">
+          ${f.components.map(comp => {
+            const per100 = resolveComponentPer100(comp);
+            const kcal = Math.round((per100.kcal||0)*(comp.weight||0)/100);
+            return `
+            <div>
+              <div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">${comp.name}</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input id="cf-weight-${f.id}-${comp.id}" type="number" value="${comp.weight}" oninput="App.scaleComposedComponent('${f.id}','${comp.id}', this)" style="width:0;flex:1;text-align:left;"/>
+                <div style="font-size:12px;color:var(--muted);">${comp.unit||'g'}</div>
+                <div id="cf-kcal-${f.id}-${comp.id}" class="num" style="font-size:13px;font-weight:700;color:var(--brand-dark);flex-shrink:0;">${kcal} kcal</div>
+              </div>
+            </div>`;
+          }).join('')}
+          <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px;">
+            <div style="font-size:12.5px;font-weight:700;">Total: <span id="cf-total-${f.id}">${f.kcal}</span> kcal</div>
+            <button onclick="App.addComposedFoodToMeal('${f.id}')" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===f.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+          </div>
+        </div>
+      ` : ''}
+    </div>`;
+  }
+  const sel = !!st.selected[f.id];
+  return `
+  <div data-name="${f.name.toLowerCase()}" onclick="App.toggleSelected('${f.id}')" class="pad-sm" style="display:flex;align-items:center;justify-content:space-between;background:var(--card);border:1.5px solid ${sel?'var(--brand)':'var(--border)'};border-radius:13px;cursor:pointer;">
+    <div style="min-width:0;">
+      <div style="font-size:13.5px;font-weight:700;">${srcTag('Saved','pill-brand')}${f.name}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:1px;">${f.recipe.length>46 ? f.recipe.slice(0,46)+'…' : f.recipe}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;padding-left:8px;">
+      <div class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.kcal} kcal</div>
+      <div style="width:20px;height:20px;border-radius:6px;border:1.5px solid ${sel?'var(--brand)':'var(--border)'};background:${sel?'var(--brand)':'transparent'};display:flex;align-items:center;justify-content:center;">
+        ${sel ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderIngredientAddRow(ing, st){
+  return `
+  <div data-name="${ing.name.toLowerCase()}" class="card pad-sm">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="min-width:0;">
+        <div style="font-size:13.5px;font-weight:700;">${srcTag('Ingredient','pill-neutral')}${ing.name}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:1px;">${ing.kcalPer100} kcal / 100${ing.unit}</div>
+      </div>
+      <div id="kcal-${ing.id}" class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);flex-shrink:0;padding-left:8px;">${ing.kcalPer100} kcal</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+      <input id="w-ingredients-${ing.id}" type="number" value="100" oninput="App.scaleRow('${ing.id}', ${ing.kcalPer100}, this)"/>
+      <div style="font-size:12.5px;color:var(--muted);flex:1;">${ing.unit} used</div>
+      <button onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===ing.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+    </div>
+  </div>`;
+}
+
+function renderUsdaAddRow(u, st){
+  return `
+  <div data-name="${u.name.toLowerCase()}" class="card pad-sm">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="min-width:0;">
+        <div style="font-size:13.5px;font-weight:700;">${srcTag('USDA','pill-usda')}${u.name}</div>
+        <div style="margin-top:4px;"><span class="pill pill-usda">Verified · ${u.fdc}</span></div>
+      </div>
+      <div id="kcal-${u.id}" class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);flex-shrink:0;padding-left:8px;">${u.kcalPer100} kcal</div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px;">${detailLine(u)}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+      <input id="w-usda-${u.id}" type="number" value="100" oninput="App.scaleRow('${u.id}', ${u.kcalPer100}, this)"/>
+      <div style="font-size:12.5px;color:var(--muted);flex:1;">g used</div>
+      <button onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===u.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+    </div>
+  </div>`;
+}
+
 function renderAddFood(){
   const st = App.state.addfood;
   const tabs = [['saved','Saved'],['ingredients','Ingredients'],['usda','USDA']];
   const mealDefs = ['Breakfast','Lunch','Snack','Dinner'];
   const addCount = Object.values(st.selected).filter(Boolean).length;
 
-  let list = '';
-  if (st.activeTab === 'saved'){
-    list = `<div id="addfood-list" style="display:flex;flex-direction:column;gap:8px;">
-      ${App.state.memory.foods.map(f => {
-        if (Array.isArray(f.components)){
-          const expanded = st.expandedSavedId === f.id;
-          return `
-          <div data-name="${f.name.toLowerCase()}" class="card pad-sm">
-            <div onclick="App.toggleAddFoodSavedExpand('${f.id}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
-              <div style="min-width:0;">
-                <div style="font-size:13.5px;font-weight:700;">${f.name}</div>
-                <div style="font-size:11.5px;color:var(--muted);margin-top:1px;">${f.recipe.length>46 ? f.recipe.slice(0,46)+'…' : f.recipe}</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;padding-left:8px;">
-                <div class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.kcal} kcal</div>
-                <div class="chev ${expanded?'open':''}"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-              </div>
-            </div>
-            ${expanded ? `
-              <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">
-                ${f.components.map(comp => {
-                  const per100 = resolveComponentPer100(comp);
-                  const kcal = Math.round((per100.kcal||0)*(comp.weight||0)/100);
-                  return `
-                  <div>
-                    <div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">${comp.name}</div>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      <input id="cf-weight-${f.id}-${comp.id}" type="number" value="${comp.weight}" oninput="App.scaleComposedComponent('${f.id}','${comp.id}', this)" style="width:0;flex:1;text-align:left;"/>
-                      <div style="font-size:12px;color:var(--muted);">${comp.unit||'g'}</div>
-                      <div id="cf-kcal-${f.id}-${comp.id}" class="num" style="font-size:13px;font-weight:700;color:var(--brand-dark);flex-shrink:0;">${kcal} kcal</div>
-                    </div>
-                  </div>`;
-                }).join('')}
-                <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px;">
-                  <div style="font-size:12.5px;font-weight:700;">Total: <span id="cf-total-${f.id}">${f.kcal}</span> kcal</div>
-                  <button onclick="App.addComposedFoodToMeal('${f.id}')" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===f.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
-                </div>
-              </div>
-            ` : ''}
-          </div>`;
-        }
-        const sel = !!st.selected[f.id];
-        return `
-        <div data-name="${f.name.toLowerCase()}" onclick="App.toggleSelected('${f.id}')" class="pad-sm" style="display:flex;align-items:center;justify-content:space-between;background:var(--card);border:1.5px solid ${sel?'var(--brand)':'var(--border)'};border-radius:13px;cursor:pointer;">
-          <div style="min-width:0;">
-            <div style="font-size:13.5px;font-weight:700;">${f.name}</div>
-            <div style="font-size:11.5px;color:var(--muted);margin-top:1px;">${f.recipe.length>46 ? f.recipe.slice(0,46)+'…' : f.recipe}</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;padding-left:8px;">
-            <div class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.kcal} kcal</div>
-            <div style="width:20px;height:20px;border-radius:6px;border:1.5px solid ${sel?'var(--brand)':'var(--border)'};background:${sel?'var(--brand)':'transparent'};display:flex;align-items:center;justify-content:center;">
-              ${sel ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
-            </div>
-          </div>
-        </div>`;
-      }).join('')}
-    </div>`;
-  } else if (st.activeTab === 'ingredients'){
-    list = `<div id="addfood-list" style="display:flex;flex-direction:column;gap:8px;">
-      ${App.state.memory.ingredients.map(ing => `
-        <div data-name="${ing.name.toLowerCase()}" class="card pad-sm">
-          <div style="display:flex;align-items:center;justify-content:space-between;">
-            <div style="min-width:0;">
-              <div style="font-size:13.5px;font-weight:700;">${ing.name}</div>
-              <div style="font-size:11px;color:var(--muted);margin-top:1px;">${ing.kcalPer100} kcal / 100${ing.unit}</div>
-            </div>
-            <div id="kcal-${ing.id}" class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);flex-shrink:0;padding-left:8px;">${ing.kcalPer100} kcal</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-            <input id="w-ingredients-${ing.id}" type="number" value="100" oninput="App.scaleRow('${ing.id}', ${ing.kcalPer100}, this)"/>
-            <div style="font-size:12.5px;color:var(--muted);flex:1;">${ing.unit} used</div>
-            <button onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===ing.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
-          </div>
-        </div>
-      `).join('')}
-    </div>`;
-  } else {
+  const groups = `<div id="addfood-groups">
+    <div data-kind="saved" style="display:${st.activeTab==='saved'?'flex':'none'};flex-direction:column;gap:8px;">
+      ${App.state.memory.foods.map(f => renderSavedFoodRow(f, st)).join('')}
+    </div>
+    <div data-kind="ingredients" style="display:${st.activeTab==='ingredients'?'flex':'none'};flex-direction:column;gap:8px;">
+      ${App.state.memory.ingredients.map(ing => renderIngredientAddRow(ing, st)).join('')}
+    </div>
+    <div data-kind="usda" style="display:${st.activeTab==='usda'?'flex':'none'};flex-direction:column;gap:8px;">
+      ${App.state.memory.usda.map(u => renderUsdaAddRow(u, st)).join('')}
+    </div>
+  </div>`;
+
+  let quickLookup = '';
+  {
     const r = st.lookupResult;
     let resultHtml = '';
     if (st.lookupLoading){
@@ -1918,8 +2073,8 @@ function renderAddFood(){
               : `<button onclick="App.saveLookupToMemory()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save to memory as USDA reference</button>`)}
         </div>`;
     }
-    list = `
-      <div class="card pad" style="margin-bottom:12px;">
+    quickLookup = `
+      <div id="addfood-quicklookup" class="card pad" style="margin-bottom:12px;display:${st.activeTab==='usda'?'block':'none'};">
         <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Quick lookup — type an amount and a food</div>
         <div style="display:flex;gap:8px;">
           <input id="lookup-input" type="text" value="${(st.lookupQuery||'').replace(/"/g,'&quot;')}" placeholder="e.g. 1 apple, 100g grapes" onkeydown="if(event.key==='Enter')App.runLookup()" style="flex:1;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;font-family:inherit;"/>
@@ -1927,26 +2082,7 @@ function renderAddFood(){
         </div>
         ${resultHtml}
         <div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.4;">Checks your saved foods first, then searches USDA FoodData Central live if it's not found locally. Live search needs an internet connection.</div>
-      </div>
-      <div id="addfood-list" style="display:flex;flex-direction:column;gap:8px;">
-      ${App.state.memory.usda.map(u => `
-        <div data-name="${u.name.toLowerCase()}" class="card pad-sm">
-          <div style="display:flex;align-items:center;justify-content:space-between;">
-            <div style="min-width:0;">
-              <div style="font-size:13.5px;font-weight:700;">${u.name}</div>
-              <div style="margin-top:4px;"><span class="pill pill-usda">Verified · ${u.fdc}</span></div>
-            </div>
-            <div id="kcal-${u.id}" class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);flex-shrink:0;padding-left:8px;">${u.kcalPer100} kcal</div>
-          </div>
-          <div style="font-size:11px;color:var(--muted);margin-top:8px;">${detailLine(u)}</div>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-            <input id="w-usda-${u.id}" type="number" value="100" oninput="App.scaleRow('${u.id}', ${u.kcalPer100}, this)"/>
-            <div style="font-size:12.5px;color:var(--muted);flex:1;">g used</div>
-            <button onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===u.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
-          </div>
-        </div>
-      `).join('')}
-    </div>`;
+      </div>`;
   }
 
   return `
@@ -1959,7 +2095,7 @@ function renderAddFood(){
       </div>
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <input placeholder="Search saved foods, ingredients, USDA..." oninput="App.filterRows('addfood-list', this.value)"/>
+        <input placeholder="Search saved foods, ingredients, USDA..." oninput="App.filterAddFoodRows(this.value)"/>
       </div>
       <div class="seg" style="margin-top:12px;">
         ${tabs.map(([id,label]) => `<button class="seg-btn" style="flex:1;${st.activeTab===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setAddFoodTab('${id}')">${label}</button>`).join('')}
@@ -1967,10 +2103,10 @@ function renderAddFood(){
     </div>
 
     <div class="scroll-area" style="padding:14px 18px 14px 18px;">
-      <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;">
+      <div id="addfood-context-label" style="font-size:11.5px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;">
         ${st.activeTab==='saved' ? 'From your memory' : (st.activeTab==='ingredients' ? 'Raw ingredients · scale by weight' : 'USDA FoodData Central')}
       </div>
-      ${list}
+      ${quickLookup}${groups}
     </div>
 
     <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;">
@@ -2188,9 +2324,8 @@ function memoryConfirmMoveCard(kind, item){
 /* ---------- Library ---------- */
 function renderLibrary(){
   const st = App.state.library;
-  const tabs = [['foods','Saved foods'],['ingredients','Ingredients'],['usda','USDA'],['notes','Notes']];
-  const ratios = st.boneEntries.map(e => (e.bone/e.total)*100);
-  const boneAvg = ratios.length>0 ? (ratios.reduce((a,r)=>a+r,0)/ratios.length).toFixed(1) : '0.0';
+  if (!['foods','ingredients','usda'].includes(st.activeTab)) st.activeTab = 'foods';
+  const tabs = [['foods','Saved foods'],['ingredients','Ingredients'],['usda','USDA']];
   const formHere = k => st.form && st.form.kind === k ? renderMemoryForm(st.form) : '';
 
   let body = '';
@@ -2300,27 +2435,6 @@ function renderLibrary(){
           </div>`;
         }).join('')}
       </div>`;
-  } else {
-    body = `
-      <div style="background:var(--note-bg);border:1px solid var(--note-border);border-radius:14px;padding:14px;margin-bottom:10px;">
-        <div style="font-size:13px;font-weight:800;margin-bottom:4px;">Bone-to-total-weight ratio</div>
-        <div style="font-size:11.5px;color:var(--ink-2);margin-bottom:10px;line-height:1.4;">Running average from weighed bone-in chicken &amp; mutton. Add a new data point to update it.</div>
-        <div class="num disp" style="font-size:26px;font-weight:800;color:var(--brand-dark);">${boneAvg}%</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">across ${st.boneEntries.length} weighed entries</div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <input id="bone-total-input" type="number" placeholder="Total g" style="width:0;flex:1;text-align:left;"/>
-          <input id="bone-bone-input" type="number" placeholder="Bone g" style="width:0;flex:1;text-align:left;"/>
-          <button onclick="App.addBoneEntry()" style="flex-shrink:0;padding:8px 12px;border-radius:8px;background:var(--brand);color:#fff;font-size:12px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">Add</button>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        ${RULE_NOTES.map(rn => `
-          <div class="card pad-sm">
-            <div style="font-size:12.5px;font-weight:700;margin-bottom:4px;">${rn.title}</div>
-            <div style="font-size:11.5px;color:var(--ink-2);line-height:1.45;">${rn.body}</div>
-          </div>
-        `).join('')}
-      </div>`;
   }
 
   return `
@@ -2329,7 +2443,7 @@ function renderLibrary(){
       <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">Saved foods, ingredients &amp; learned rules — update anytime</div>
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <input placeholder="Search memory..." oninput="App.filterRows('lib-list', this.value)" ${st.activeTab==='notes'?'disabled style="opacity:.5;"':''}/>
+        <input placeholder="Search memory..." oninput="App.filterRows('lib-list', this.value)"/>
       </div>
       <div class="seg" style="margin-top:12px;overflow-x:auto;">
         ${tabs.map(([id,label]) => `<button class="seg-btn" style="flex-shrink:0;${st.activeTab===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setLibraryTab('${id}')">${label}</button>`).join('')}
@@ -2351,6 +2465,15 @@ function renderHistory(){
     body = `
       <div style="display:flex;flex-direction:column;gap:8px;">
         ${realDays.map((d,i) => {
+          if (st.confirmDeleteDate === d.date){
+            return `<div class="card pad-sm" style="border-color:var(--critical);">
+              <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Permanently delete ${formatShortDate(d.date)}? This removes it from History, Trends and Export — it can't be undone.</div>
+              <div style="display:flex;gap:8px;">
+                <button onclick="App.cancelDeleteDay()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+                <button onclick="App.deleteDay('${d.date}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Delete</button>
+              </div>
+            </div>`;
+          }
           const label = d.isToday ? 'Today' : formatShortDate(d.date);
           const open = st.openIdx === i;
           return `
@@ -2368,11 +2491,19 @@ function renderHistory(){
               <div class="num disp" style="font-size:15px;font-weight:800;">${Math.round(d.calories)} <span style="font-size:11px;font-weight:600;color:var(--muted);">kcal</span></div>
             </div>
             ${open ? `
-              <div style="padding:0 13px 12px 13px;border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:6px;margin-top:10px;">
-                <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.protein}g</div><div style="font-size:9.5px;color:var(--muted);">Protein</div></div>
-                <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.fiber}g</div><div style="font-size:9.5px;color:var(--muted);">Fiber</div></div>
-                <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.sugar}g</div><div style="font-size:9.5px;color:var(--muted);">Sugar</div></div>
-                <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${Math.round(d.calories)}</div><div style="font-size:9.5px;color:var(--muted);">Calories</div></div>
+              <div style="padding:0 13px 12px 13px;border-top:1px solid var(--border);">
+                <div style="display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:6px;margin-top:10px;">
+                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.protein}g</div><div style="font-size:9.5px;color:var(--muted);">Protein</div></div>
+                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.fiber}g</div><div style="font-size:9.5px;color:var(--muted);">Fiber</div></div>
+                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.sugar}g</div><div style="font-size:9.5px;color:var(--muted);">Sugar</div></div>
+                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${Math.round(d.calories)}</div><div style="font-size:9.5px;color:var(--muted);">Calories</div></div>
+                </div>
+                ${!d.isToday ? `
+                  <button onclick="App.requestDeleteDay('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;border:1.5px dashed var(--critical);background:transparent;color:var(--critical);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Delete this day
+                  </button>
+                ` : ''}
               </div>
             ` : ''}
           </div>`;
@@ -2607,7 +2738,58 @@ function renderTrends(){
 }
 
 /* ---------- Export ---------- */
+function renderMemoryImportReview(){
+  const mi = App.state.memoryImport;
+  const kindLabel = { foods:'Saved food', ingredients:'Ingredient', usda:'USDA reference' };
+  const totalAutoAdd = mi.autoAdd.foods.length + mi.autoAdd.ingredients.length + mi.autoAdd.usda.length;
+  const choices = [['skip','Skip'],['duplicate','Add as duplicate'],['overwrite','Overwrite']];
+  const kcalOf = x => x ? (x.kcal ?? x.kcalPer100 ?? '—') : '—';
+  return `
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+        <button onclick="App.cancelMemoryImport()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="disp" style="font-size:18px;font-weight:800;">Resolve duplicates</div>
+      </div>
+      <div style="font-size:12px;color:var(--ink-2);line-height:1.4;">
+        ${totalAutoAdd>0 ? `${totalAutoAdd} new item${totalAutoAdd===1?'':'s'} will be added automatically. ` : ''}${mi.conflicts.length} item${mi.conflicts.length===1?'':'s'} already ${mi.conflicts.length===1?'exists':'exist'} in your memory — choose what to do with each below.
+      </div>
+    </div>
+    <div class="scroll-area" style="padding:14px 18px 90px 18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <div style="font-size:11px;color:var(--muted);flex-shrink:0;">Apply to all:</div>
+        <div class="seg" style="flex:1;">
+          <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('skip')">Skip</button>
+          <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('duplicate')">Duplicate</button>
+          <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('overwrite')">Overwrite</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        ${mi.conflicts.map((c,i) => {
+          const existing = App.state.memory[c.kind].find(x => x.id === c.existingId);
+          return `
+          <div class="card pad-sm">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <div style="font-size:13.5px;font-weight:700;">${c.incoming.name}</div>
+              <span class="pill pill-neutral">${kindLabel[c.kind]}</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Incoming: ${kcalOf(c.incoming)} kcal &nbsp;·&nbsp; Existing: ${kcalOf(existing)} kcal</div>
+            <div class="seg">
+              ${choices.map(([id,label]) => `<button class="seg-btn" style="flex:1;${c.choice===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setMemoryImportChoice(${i},'${id}')">${label}</button>`).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;display:flex;gap:8px;">
+      <button onclick="App.cancelMemoryImport()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+      <button onclick="App.applyMemoryImport()" style="flex:2;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Apply import</button>
+    </div>
+  `;
+}
 function renderExport(){
+  if (App.state.memoryImport) return renderMemoryImportReview();
   const st = App.state.exportScreen;
   const realDays = App.allRealDays();
 
@@ -2796,6 +2978,32 @@ function renderExport(){
       </div>
       ${st.dataStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.dataStatus}</div>` : ''}
       <div style="font-size:10px;color:var(--muted);line-height:1.4;">Nothing here ever leaves this device on its own — export only sends data where you choose to save it.</div>
+
+      <div style="height:1px;background:var(--border);margin:20px 0;"></div>
+
+      <div style="font-size:15px;font-weight:700;margin-bottom:4px;">Share memory</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Export just your Saved foods, Ingredients &amp; USDA list — no day-to-day entries, weight, water, notes, targets or your USDA key — so you can share it with someone else without handing over your personal tracking data.</div>
+      <div class="card pad" style="margin-bottom:10px;">
+        <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Export memory only</div>
+        <button onclick="App.exportMemoryOnly()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 0;border-radius:11px;background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+          Save memory (.json)
+        </button>
+        ${st.memoryFallbackJson ? `
+          <div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.4;">Direct file save isn't available in this view — select the text below and copy it (Ctrl/Cmd+C) to save it yourself.</div>
+          <textarea readonly onclick="this.select()" style="width:100%;height:90px;margin-top:6px;padding:8px;border-radius:8px;border:1px solid var(--border);font-size:10px;font-family:monospace;resize:none;">${st.memoryFallbackJson.replace(/</g,'&lt;')}</textarea>
+        ` : ''}
+      </div>
+      <div class="card pad" style="margin-bottom:10px;">
+        <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Import memory</div>
+        <label style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px 0;border-radius:11px;border:1.5px dashed rgba(11,11,11,0.22);color:var(--ink-2);font-size:12.5px;font-weight:700;cursor:pointer;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 20V9m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 6V5a1 1 0 011-1h12a1 1 0 011 1v1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Choose memory file (.json)
+          <input type="file" accept="application/json,.json" style="display:none;" onchange="App.handleMemoryImportFile(this)"/>
+        </label>
+        <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.4;">Merges into your existing memory — nothing you already have is removed. If an item's name matches something you already have, you'll choose what happens to it.</div>
+      </div>
+      ${st.memoryStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.memoryStatus}</div>` : ''}
     </div>
     ${bottomNav('exportScreen')}
   `;
