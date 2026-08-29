@@ -799,6 +799,24 @@ const App = {
     if (label) label.textContent = searching ? 'Matching saved foods, ingredients & USDA' :
       (activeTab==='saved' ? 'From your memory' : (activeTab==='ingredients' ? 'Raw ingredients · scale by weight' : 'USDA FoodData Central'));
   },
+  filterLibraryRows(query){
+    const q = query.trim().toLowerCase();
+    const activeTab = this.state.library.activeTab;
+    const searching = !!q;
+    const groups = document.querySelectorAll('#lib-groups [data-kind]');
+    groups.forEach(group => {
+      const kind = group.getAttribute('data-kind');
+      group.style.display = (searching || kind === activeTab) ? 'flex' : 'none';
+      group.querySelectorAll('[data-name]').forEach(row => {
+        row.style.display = (!q || row.getAttribute('data-name').includes(q)) ? '' : 'none';
+        row.querySelectorAll('.src-tag').forEach(tag => tag.classList.toggle('show', searching));
+      });
+    });
+    const extras = document.getElementById('lib-extras');
+    if (extras) extras.style.display = searching ? 'none' : '';
+    const label = document.getElementById('lib-context-label');
+    if (label) label.style.display = searching ? 'block' : 'none';
+  },
 
   async runLookup(){
     const raw = document.getElementById('lookup-input')?.value || '';
@@ -2322,16 +2340,99 @@ function memoryConfirmMoveCard(kind, item){
 }
 
 /* ---------- Library ---------- */
+function renderFoodLibraryRow(f, st){
+  if (st.confirmDeleteKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmCard('foods', f)}</div>`;
+  if (st.confirmMoveKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmMoveCard('foods', f)}</div>`;
+  const open = st.openId === f.id;
+  const isComposite = Array.isArray(f.components);
+  return `
+  <div data-name="${f.name.toLowerCase()}" class="card" style="overflow:hidden;">
+    <div class="accordion-head pad-sm" onclick="App.toggleLibraryOpen('${f.id}')">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+        ${photoThumb(f)}
+        <div style="min-width:0;">
+          <div style="font-size:13.5px;font-weight:700;">${srcTag('Saved','pill-brand')}${f.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px;">${isComposite ? 'Built from ingredients' : 'Updated '+f.updated}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;padding-left:8px;">
+        <div class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.kcal} kcal</div>
+        ${memoryRowActions('foods', f)}
+        <div class="chev ${open?'open':''}"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+    </div>
+    ${open ? `
+      <div style="padding:0 13px 13px 13px;border-top:1px solid var(--border);">
+        ${isComposite ? `
+          <div style="display:flex;flex-direction:column;gap:6px;margin:10px 0;">
+            ${f.components.map(comp => {
+              const per100 = resolveComponentPer100(comp);
+              const kcal = Math.round((per100.kcal||0)*(comp.weight||0)/100);
+              const live = isComponentLive(comp);
+              return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;background:var(--surface);border-radius:8px;padding:7px 10px;">
+                <div>${comp.name} · ${comp.weight}${comp.unit||'g'}${live?'':' <span style="color:var(--muted);">(fixed)</span>'}</div>
+                <div class="num" style="font-weight:700;flex-shrink:0;padding-left:8px;">${kcal} kcal</div>
+              </div>`;
+            }).join('')}
+          </div>
+        ` : `<div style="font-size:11px;color:var(--muted);margin:10px 0 6px 0;">${f.recipe}</div>`}
+        <div style="display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:6px;">
+          ${macrosArrayFrom(f).map(([l,v]) => `
+            <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;">
+              <div class="num" style="font-size:12.5px;font-weight:700;">${v}</div>
+              <div style="font-size:9.5px;color:var(--muted);margin-top:1px;">${l}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+  </div>`;
+}
+function renderIngredientLibraryRow(ing, st){
+  if (st.confirmDeleteKey === 'ingredients:'+ing.id) return `<div data-name="${ing.name.toLowerCase()}">${memoryConfirmCard('ingredients', ing)}</div>`;
+  if (st.confirmMoveKey === 'ingredients:'+ing.id) return `<div data-name="${ing.name.toLowerCase()}">${memoryConfirmMoveCard('ingredients', ing)}</div>`;
+  return `
+  <div data-name="${ing.name.toLowerCase()}" class="card pad-sm">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+        ${photoThumb(ing)}
+        <div style="font-size:13.5px;font-weight:700;">${srcTag('Ingredient','pill-neutral')}${ing.name}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:8px;">
+        <div class="pill ${ing.source==='Lab-tested'?'pill-lab':(ing.source==='Per label'?'pill-label':'pill-usda')}">${ing.source}</div>
+        ${memoryRowActions('ingredients', ing)}
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:6px;">${detailLine(ing)}</div>
+  </div>`;
+}
+function renderUsdaLibraryRow(u, st){
+  if (st.confirmDeleteKey === 'usda:'+u.id) return `<div data-name="${u.name.toLowerCase()}">${memoryConfirmCard('usda', u)}</div>`;
+  return `
+  <div data-name="${u.name.toLowerCase()}" class="card pad-sm">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+        ${photoThumb(u)}
+        <div style="font-size:13.5px;font-weight:700;">${srcTag('USDA','pill-usda')}${u.name}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:8px;">
+        <div class="pill pill-usda">${u.fdc}</div>
+        ${memoryRowActions('usda', u)}
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:6px;">${detailLine(u)}</div>
+  </div>`;
+}
 function renderLibrary(){
   const st = App.state.library;
   if (!['foods','ingredients','usda'].includes(st.activeTab)) st.activeTab = 'foods';
   const tabs = [['foods','Saved foods'],['ingredients','Ingredients'],['usda','USDA']];
   const formHere = k => st.form && st.form.kind === k ? renderMemoryForm(st.form) : '';
 
-  let body = '';
+  let extras = '';
   if (st.activeTab === 'foods'){
     const showAddButtons = !st.form && !st.composer;
-    body = `${formHere('foods')}${st.composer ? renderComposerForm(st.composer) : ''}${showAddButtons ? `
+    extras = `${formHere('foods')}${st.composer ? renderComposerForm(st.composer) : ''}${showAddButtons ? `
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         ${addMemoryButton('foods','Add a saved food')}
       </div>
@@ -2339,103 +2440,28 @@ function renderLibrary(){
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         Build from ingredients
       </button>
-    ` : ''}<div id="lib-list" style="display:flex;flex-direction:column;gap:8px;">
-      ${App.state.memory.foods.map(f => {
-        if (st.confirmDeleteKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmCard('foods', f)}</div>`;
-        if (st.confirmMoveKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmMoveCard('foods', f)}</div>`;
-        const open = st.openId === f.id;
-        const isComposite = Array.isArray(f.components);
-        return `
-        <div data-name="${f.name.toLowerCase()}" class="card" style="overflow:hidden;">
-          <div class="accordion-head pad-sm" onclick="App.toggleLibraryOpen('${f.id}')">
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-              ${photoThumb(f)}
-              <div style="min-width:0;">
-                <div style="font-size:13.5px;font-weight:700;">${f.name}</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:1px;">${isComposite ? 'Built from ingredients' : 'Updated '+f.updated}</div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;padding-left:8px;">
-              <div class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.kcal} kcal</div>
-              ${memoryRowActions('foods', f)}
-              <div class="chev ${open?'open':''}"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-            </div>
-          </div>
-          ${open ? `
-            <div style="padding:0 13px 13px 13px;border-top:1px solid var(--border);">
-              ${isComposite ? `
-                <div style="display:flex;flex-direction:column;gap:6px;margin:10px 0;">
-                  ${f.components.map(comp => {
-                    const per100 = resolveComponentPer100(comp);
-                    const kcal = Math.round((per100.kcal||0)*(comp.weight||0)/100);
-                    const live = isComponentLive(comp);
-                    return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;background:var(--surface);border-radius:8px;padding:7px 10px;">
-                      <div>${comp.name} · ${comp.weight}${comp.unit||'g'}${live?'':' <span style="color:var(--muted);">(fixed)</span>'}</div>
-                      <div class="num" style="font-weight:700;flex-shrink:0;padding-left:8px;">${kcal} kcal</div>
-                    </div>`;
-                  }).join('')}
-                </div>
-              ` : `<div style="font-size:11px;color:var(--muted);margin:10px 0 6px 0;">${f.recipe}</div>`}
-              <div style="display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:6px;">
-                ${macrosArrayFrom(f).map(([l,v]) => `
-                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;">
-                    <div class="num" style="font-size:12.5px;font-weight:700;">${v}</div>
-                    <div style="font-size:9.5px;color:var(--muted);margin-top:1px;">${l}</div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-        </div>`;
-      }).join('')}
-    </div>`;
+    ` : ''}`;
   } else if (st.activeTab === 'ingredients'){
-    body = `${formHere('ingredients')}${st.form && st.form.kind==='ingredients' ? '' : addMemoryButton('ingredients','Add an ingredient')}<div id="lib-list" style="display:flex;flex-direction:column;gap:8px;">
-      ${App.state.memory.ingredients.map(ing => {
-        if (st.confirmDeleteKey === 'ingredients:'+ing.id) return `<div data-name="${ing.name.toLowerCase()}">${memoryConfirmCard('ingredients', ing)}</div>`;
-        if (st.confirmMoveKey === 'ingredients:'+ing.id) return `<div data-name="${ing.name.toLowerCase()}">${memoryConfirmMoveCard('ingredients', ing)}</div>`;
-        return `
-        <div data-name="${ing.name.toLowerCase()}" class="card pad-sm">
-          <div style="display:flex;align-items:center;justify-content:space-between;">
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-              ${photoThumb(ing)}
-              <div style="font-size:13.5px;font-weight:700;">${ing.name}</div>
-            </div>
-            <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:8px;">
-              <div class="pill ${ing.source==='Lab-tested'?'pill-lab':(ing.source==='Per label'?'pill-label':'pill-usda')}">${ing.source}</div>
-              ${memoryRowActions('ingredients', ing)}
-            </div>
-          </div>
-          <div style="font-size:11.5px;color:var(--muted);margin-top:6px;">${detailLine(ing)}</div>
-        </div>`;
-      }).join('')}
-    </div>`;
+    extras = `${formHere('ingredients')}${st.form && st.form.kind==='ingredients' ? '' : addMemoryButton('ingredients','Add an ingredient')}`;
   } else if (st.activeTab === 'usda'){
-    body = `
+    extras = `
       <div style="background:var(--usda-tint);border-radius:11px;padding:10px 12px;margin-bottom:10px;font-size:11.5px;color:var(--brand-dark);line-height:1.4;">
         Used for unlabeled/generic foods — apply these exact figures consistently.
       </div>
-      ${formHere('usda')}${st.form && st.form.kind==='usda' ? '' : addMemoryButton('usda','Add a reference item')}
-      <div id="lib-list" style="display:flex;flex-direction:column;gap:8px;">
-        ${App.state.memory.usda.map(u => {
-          if (st.confirmDeleteKey === 'usda:'+u.id) return `<div data-name="${u.name.toLowerCase()}">${memoryConfirmCard('usda', u)}</div>`;
-          return `
-          <div data-name="${u.name.toLowerCase()}" class="card pad-sm">
-            <div style="display:flex;align-items:center;justify-content:space-between;">
-              <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-                ${photoThumb(u)}
-                <div style="font-size:13.5px;font-weight:700;">${u.name}</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:8px;">
-                <div class="pill pill-usda">${u.fdc}</div>
-                ${memoryRowActions('usda', u)}
-              </div>
-            </div>
-            <div style="font-size:11.5px;color:var(--muted);margin-top:6px;">${detailLine(u)}</div>
-          </div>`;
-        }).join('')}
-      </div>`;
+      ${formHere('usda')}${st.form && st.form.kind==='usda' ? '' : addMemoryButton('usda','Add a reference item')}`;
   }
+
+  const groups = `<div id="lib-groups">
+    <div data-kind="foods" style="display:${st.activeTab==='foods'?'flex':'none'};flex-direction:column;gap:8px;">
+      ${App.state.memory.foods.map(f => renderFoodLibraryRow(f, st)).join('')}
+    </div>
+    <div data-kind="ingredients" style="display:${st.activeTab==='ingredients'?'flex':'none'};flex-direction:column;gap:8px;">
+      ${App.state.memory.ingredients.map(ing => renderIngredientLibraryRow(ing, st)).join('')}
+    </div>
+    <div data-kind="usda" style="display:${st.activeTab==='usda'?'flex':'none'};flex-direction:column;gap:8px;">
+      ${App.state.memory.usda.map(u => renderUsdaLibraryRow(u, st)).join('')}
+    </div>
+  </div>`;
 
   return `
     <div class="topbar">
@@ -2443,13 +2469,17 @@ function renderLibrary(){
       <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">Saved foods, ingredients &amp; learned rules — update anytime</div>
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <input placeholder="Search memory..." oninput="App.filterRows('lib-list', this.value)"/>
+        <input placeholder="Search memory..." oninput="App.filterLibraryRows(this.value)"/>
       </div>
+      <div id="lib-context-label" style="display:none;font-size:11.5px;color:var(--muted);margin-top:10px;text-transform:uppercase;letter-spacing:0.04em;">Matching saved foods, ingredients &amp; USDA</div>
       <div class="seg" style="margin-top:12px;overflow-x:auto;">
         ${tabs.map(([id,label]) => `<button class="seg-btn" style="flex-shrink:0;${st.activeTab===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setLibraryTab('${id}')">${label}</button>`).join('')}
       </div>
     </div>
-    <div class="scroll-area" style="padding:14px 18px 90px 18px;">${body}</div>
+    <div class="scroll-area" style="padding:14px 18px 90px 18px;">
+      <div id="lib-extras">${extras}</div>
+      ${groups}
+    </div>
     ${bottomNav('library')}
   `;
 }
@@ -2688,9 +2718,12 @@ function renderTrends(){
   if (st.activePoint!==null && series[st.activePoint]){
     const s = series[st.activePoint];
     const label = s.isToday ? 'Today' : formatShortDate(s.date);
-    const left = xFor(st.activePoint);
+    // xFor() is in the SVG's 0-342 viewBox units, but the SVG is width:100% of a variable-width
+    // card — express as a % of that width (not px) so it lines up regardless of screen size, and
+    // clamp so the centered tooltip can't push off the left/right edge for points near either end.
+    const leftPct = Math.min(88, Math.max(12, (xFor(st.activePoint)/342)*100));
     const top = yFor(s.v)-34;
-    tooltip = `<div style="position:absolute;background:var(--brand-dark);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px;left:${left}px;top:${top}px;white-space:nowrap;transform:translateX(-50%);z-index:2;">${label} · ${s.v}${unit}</div>`;
+    tooltip = `<div style="position:absolute;background:var(--brand-dark);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px;left:${leftPct.toFixed(2)}%;top:${top}px;white-space:nowrap;transform:translateX(-50%);z-index:2;">${label} · ${s.v}${unit}</div>`;
   }
 
   const avg = values.reduce((a,v)=>a+v,0)/values.length;

@@ -472,6 +472,13 @@ build → confirm on device → move on, per feature.
    bug. The USDA tab's "Quick lookup" card (`#addfood-quicklookup`) is hidden during an active
    search (it's a tab-specific feature, not part of the merged list) and restored when the query is
    cleared, also handled inside `filterAddFoodRows`.
+   ⚠️ **This alone didn't fully satisfy the original request** — user later reported "the memory
+   search option" still only searched the active tab. Turned out the original ask ("a search option
+   that searches across all 3 tabs... Saved foods, Ingredients & USDA") was ambiguous between *two*
+   screens that both have that exact 3-tab shape: this one (Add Food / "Log food", used when logging
+   a meal) and the separate **Memory & Library screen** (titled "Memory & library," its search box's
+   own placeholder literally says "Search memory...") — only Add Food got fixed initially. See the
+   dedicated bullet below for the Library-screen fix, added once this was caught.
 3. **Delete a past day** (History → Day view): each non-today entry, once expanded, shows a
    "Delete this day" button leading to an inline confirm card (`App.requestDeleteDay`/
    `cancelDeleteDay`/`deleteDay`, mirroring the existing `memoryConfirmCard` pattern). Permanent,
@@ -488,10 +495,34 @@ build → confirm on device → move on, per feature.
    per explicit user confirmation once this was explained. `renderLibrary()` now defensively resets
    `st.activeTab` back to `'foods'` if it's ever anything outside the 3 valid tabs (guards against a
    returning user's `localStorage` still holding `activeTab:'notes'` from before this change).
+5. **Memory & Library screen search, actually cross-tab now** (2026-08-28 follow-up — this is the
+   fix for the ⚠️ under item 2 above): applied the exact same technique as Add Food's search to
+   `renderLibrary()`. Extracted the three per-tab row templates into
+   `renderFoodLibraryRow()`/`renderIngredientLibraryRow()`/`renderUsdaLibraryRow()`, always render
+   all three into `#lib-groups` (default-hidden except the active tab, `data-kind` matches
+   `state.library.activeTab` values directly here — `'foods'`/`'ingredients'`/`'usda'`, no `'saved'`
+   vs `'foods'` naming mismatch like Add Food has), and added `App.filterLibraryRows(query)` — same
+   DOM-only approach, same reused `srcTag()`/`.src-tag` tagging. The tab-specific "extras" (add-item
+   buttons, the open add/edit form, the USDA info banner, the composite-food composer) are wrapped
+   in `#lib-extras` and hidden together during an active search, same pattern as Add Food's
+   `#addfood-quicklookup`. A `#lib-context-label` (hidden by default) shows "Matching saved foods,
+   ingredients & USDA" while searching.
+6. **Trends chart point tooltip no longer overflows off-frame at the left/right edges** — also a
+   2026-08-28 follow-up, a real bug the user found while testing the above (unrelated to the 4
+   features, just found at the same time). Root cause: the tooltip's horizontal position was set as
+   `left:${xFor(k)}px` where `xFor()` returns a value in the chart SVG's `0–342` **viewBox** units,
+   but the SVG itself is `width:100%` of a variable-width card — those aren't the same number of
+   real CSS pixels on any actual device, and worse, nothing clamped the value, so a centered tooltip
+   (`transform:translateX(-50%)`) on a point near either end pushed half the box past the card
+   edge. Fixed in `renderTrends()`: compute `left` as a **percentage** of 342 instead of raw px
+   (correct regardless of actual rendered width) and clamp it to `12%–88%` before applying the
+   existing `translateX(-50%)` centering. The vertical (`top`) position didn't have this bug and
+   wasn't touched — the SVG's `height="176"` is a literal fixed px value (unlike the `width:100%`),
+   so viewBox y-units already equal real px there.
 
 ## Immediate next steps (pick up here)
 
-The four features above are implemented and self-tested in both apps but **not yet confirmed by the
-user on a real device** — that's the next step before considering them done. One open thread to
-keep in mind if it comes back up: OCR accuracy on real-world label photos (user is still testing,
-explicitly asked to leave it alone for now).
+The four features above (plus the two follow-up fixes) are implemented and self-tested in both apps
+but **not yet confirmed by the user on a real device** — that's the next step before considering
+them done. One open thread to keep in mind if it comes back up: OCR accuracy on real-world label
+photos (user is still testing, explicitly asked to leave it alone for now).
