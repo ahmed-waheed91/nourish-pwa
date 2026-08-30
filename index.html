@@ -697,7 +697,24 @@ const App = {
   },
 
   setAddFoodTab(id){ this.state.addfood.activeTab = id; this.render(); },
-  toggleSelected(id){ const s=this.state.addfood.selected; s[id] = !s[id]; this.render(); },
+  toggleSelected(id){
+    const s = this.state.addfood.selected;
+    if (s[id]) delete s[id]; else s[id] = 100;
+    this.render();
+  },
+  setSelectedPortion(id, pct, opts){
+    const s = this.state.addfood.selected;
+    if (!s[id]) return;
+    const clean = Math.max(1, Math.round(pct) || 0) || 1;
+    s[id] = clean;
+    if (opts && opts.live){
+      const food = this.state.memory.foods.find(f => f.id === id);
+      const el = document.getElementById(`sel-kcal-${id}`);
+      if (food && el) el.textContent = Math.round(food.kcal*clean/100) + ' kcal';
+      return;
+    }
+    this.render();
+  },
   setTargetMeal(m){ this.state.addfood.targetMeal = m; this.render(); },
 
   checkDayRollover(){
@@ -744,7 +761,14 @@ const App = {
     ids.forEach(id => {
       const food = this.state.memory.foods.find(f => f.id === id);
       if (!food) return;
-      meal.items.push({ name: food.name, kcal: food.kcal, p: food.p, c: food.c, f: food.f, fib: food.fib, sugar: food.sugar||0, sodium: food.sodium||0 });
+      const pct = st.selected[id];
+      const scale = pct/100;
+      const round1 = n => Math.round((n||0)*scale*10)/10;
+      meal.items.push({
+        name: pct===100 ? food.name : `${food.name} (${pct}%)`,
+        kcal: Math.round(food.kcal*scale), p:round1(food.p), c:round1(food.c), f:round1(food.f),
+        fib:round1(food.fib), sugar:round1(food.sugar||0), sodium:Math.round((food.sodium||0)*scale),
+      });
     });
     st.selected = {};
     st.addedFlash = `Added to ${meal.name} ✓`;
@@ -1107,6 +1131,30 @@ const App = {
     });
     const totalEl = document.getElementById(`cf-total-${foodId}`);
     if (totalEl) totalEl.textContent = Math.round(total);
+  },
+  scaleComposedRecipe(foodId, pct){
+    const food = this.state.memory.foods.find(x => x.id === foodId);
+    if (!food || !Array.isArray(food.components)) return;
+    const clean = Math.max(1, Math.round(pct) || 0) || 1;
+    let total = 0;
+    food.components.forEach(comp => {
+      const newWeight = Math.round((comp.weight||0)*clean/100*10)/10;
+      const input = document.getElementById(`cf-weight-${foodId}-${comp.id}`);
+      if (input) input.value = newWeight;
+      const per100 = resolveComponentPer100(comp);
+      const kcal = Math.round((per100.kcal||0)*newWeight/100);
+      const kcalEl = document.getElementById(`cf-kcal-${foodId}-${comp.id}`);
+      if (kcalEl) kcalEl.textContent = kcal + ' kcal';
+      total += (per100.kcal||0)*newWeight/100;
+    });
+    const totalEl = document.getElementById(`cf-total-${foodId}`);
+    if (totalEl) totalEl.textContent = Math.round(total);
+    document.querySelectorAll(`[data-recipe-chip="${foodId}"]`).forEach(btn => {
+      const active = parseInt(btn.getAttribute('data-pct'),10) === clean;
+      btn.style.borderColor = active ? 'var(--brand)' : 'var(--border)';
+      btn.style.background = active ? 'var(--brand)' : 'transparent';
+      btn.style.color = active ? '#fff' : 'var(--ink-2)';
+    });
   },
   addComposedFoodToMeal(foodId){
     const food = this.state.memory.foods.find(x => x.id === foodId);
@@ -1962,6 +2010,14 @@ function renderSavedFoodRow(f, st){
       </div>
       ${expanded ? `
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-bottom:8px;border-bottom:1px dashed var(--border);">
+            <div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">Whole recipe portion:</div>
+            ${[100,75,50,25].map(p => `<button data-recipe-chip="${f.id}" data-pct="${p}" onclick="App.scaleComposedRecipe('${f.id}',${p})" style="padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;border:1.5px solid ${p===100?'var(--brand)':'var(--border)'};background:${p===100?'var(--brand)':'transparent'};color:${p===100?'#fff':'var(--ink-2)'};font-family:inherit;">${p}%</button>`).join('')}
+            <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+              <input type="number" value="100" oninput="App.scaleComposedRecipe('${f.id}', parseFloat(this.value)||1)" style="width:48px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
+              <div style="font-size:10.5px;color:var(--muted);">%</div>
+            </div>
+          </div>
           ${f.components.map(comp => {
             const per100 = resolveComponentPer100(comp);
             const kcal = Math.round((per100.kcal||0)*(comp.weight||0)/100);
@@ -1984,18 +2040,31 @@ function renderSavedFoodRow(f, st){
     </div>`;
   }
   const sel = !!st.selected[f.id];
+  const pct = sel ? st.selected[f.id] : 100;
   return `
-  <div data-name="${f.name.toLowerCase()}" onclick="App.toggleSelected('${f.id}')" class="pad-sm" style="display:flex;align-items:center;justify-content:space-between;background:var(--card);border:1.5px solid ${sel?'var(--brand)':'var(--border)'};border-radius:13px;cursor:pointer;">
-    <div style="min-width:0;">
-      <div style="font-size:13.5px;font-weight:700;">${srcTag('Saved','pill-brand')}${f.name}</div>
-      <div style="font-size:11.5px;color:var(--muted);margin-top:1px;">${f.recipe.length>46 ? f.recipe.slice(0,46)+'…' : f.recipe}</div>
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;padding-left:8px;">
-      <div class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.kcal} kcal</div>
-      <div style="width:20px;height:20px;border-radius:6px;border:1.5px solid ${sel?'var(--brand)':'var(--border)'};background:${sel?'var(--brand)':'transparent'};display:flex;align-items:center;justify-content:center;">
-        ${sel ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
+  <div data-name="${f.name.toLowerCase()}" class="pad-sm" style="background:var(--card);border:1.5px solid ${sel?'var(--brand)':'var(--border)'};border-radius:13px;">
+    <div onclick="App.toggleSelected('${f.id}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+      <div style="min-width:0;">
+        <div style="font-size:13.5px;font-weight:700;">${srcTag('Saved','pill-brand')}${f.name}</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:1px;">${f.recipe.length>46 ? f.recipe.slice(0,46)+'…' : f.recipe}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;padding-left:8px;">
+        <div id="sel-kcal-${f.id}" class="num" style="font-size:13px;font-weight:700;color:var(--ink-2);">${Math.round(f.kcal*pct/100)} kcal</div>
+        <div style="width:20px;height:20px;border-radius:6px;border:1.5px solid ${sel?'var(--brand)':'var(--border)'};background:${sel?'var(--brand)':'transparent'};display:flex;align-items:center;justify-content:center;">
+          ${sel ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
+        </div>
       </div>
     </div>
+    ${sel ? `
+      <div onclick="event.stopPropagation()" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">Portion:</div>
+        ${[100,75,50,25].map(p => `<button onclick="App.setSelectedPortion('${f.id}',${p})" style="padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;border:1.5px solid ${pct===p?'var(--brand)':'var(--border)'};background:${pct===p?'var(--brand)':'transparent'};color:${pct===p?'#fff':'var(--ink-2)'};font-family:inherit;">${p}%</button>`).join('')}
+        <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+          <input type="number" value="${pct}" oninput="App.setSelectedPortion('${f.id}', parseFloat(this.value)||1, {live:true})" style="width:48px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
+          <div style="font-size:10.5px;color:var(--muted);">%</div>
+        </div>
+      </div>
+    ` : ''}
   </div>`;
 }
 

@@ -519,6 +519,39 @@ build → confirm on device → move on, per feature.
    existing `translateX(-50%)` centering. The vertical (`top`) position didn't have this bug and
    wasn't touched — the SVG's `height="176"` is a literal fixed px value (unlike the `width:100%`),
    so viewBox y-units already equal real px there.
+7. **Log a partial portion of a Saved Food** (2026-08-28, new feature request): previously any
+   Saved Food could only be logged at its full recorded value — no way to log "half of what I
+   usually eat." Two different mechanisms, since plain and composite Saved Foods already had
+   different interaction models:
+   - **Plain (non-composite) Saved Foods** — these use a checkbox multi-select + one shared
+     "Add to X · N items" button. `state.addfood.selected[id]` used to just be `true`/absent;
+     it's now a **percentage number** (100 by default when first checked) instead — every existing
+     read of it (`Object.values(...).filter(Boolean)`, `Object.keys(...).filter(id => ...[id])`)
+     still works unchanged since any positive number is truthy. Checking an item reveals a portion
+     strip (100/75/50/25% chips + a custom number field) via `App.setSelectedPortion(id, pct,
+     opts)`; the strip's own click handler carries `onclick="event.stopPropagation()"` so tapping a
+     chip doesn't also bubble up and re-toggle the checkbox off. `confirmAddSelectedFoods()` now
+     scales every field (kcal/p/c/f/fib/sugar/sodium) by `pct/100` and appends `" (N%)"` to the
+     logged item's name when it isn't 100%.
+   - **Composite Saved Foods** (multi-ingredient) already let you reweight each ingredient
+     individually — added a **"Whole recipe portion"** row (same 100/75/50/25%-chips-plus-custom
+     pattern) above the per-ingredient list. `App.scaleComposedRecipe(foodId, pct)` recomputes
+     every component's weight as `originalSavedWeight * pct/100` **from the food's own stored
+     `components[].weight`** (the canonical 100% baseline), not from whatever's currently in the
+     inputs — so re-picking a portion always resets cleanly rather than compounding on top of any
+     manual per-ingredient tweaks made earlier in the same session. Individual ingredient weights
+     stay manually fine-tunable afterward, same as before.
+   - **Both custom-percentage number inputs deliberately skip `render()` entirely** — they patch
+     the specific kcal text nodes directly via `document.getElementById(...).textContent`, exactly
+     like the existing `scaleRow`/`scaleComposedComponent` pattern — for the same reason called out
+     under item 2 above: a full re-render on every keystroke of a text/number input steals focus.
+     The **quick-tap chips** are plain button clicks, so those *do* call `render()` (or, for the
+     composite recipe chips, do the equivalent direct-DOM update including chip-active-state
+     styling) — button clicks were never the problem, only continuous typing is.
+   - Composite items are still logged as separate per-ingredient meal entries (e.g. "Honey, 100g"),
+     never as one combined "Recipe X (50%)" line — the scaled weight in each ingredient's own name
+     already tells that story, so no extra portion suffix was added there (unlike the plain-food
+     case, where there's only one combined name to annotate).
 
 ## Immediate next steps (pick up here)
 
