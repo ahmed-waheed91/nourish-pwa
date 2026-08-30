@@ -553,6 +553,43 @@ build → confirm on device → move on, per feature.
      already tells that story, so no extra portion suffix was added there (unlike the plain-food
      case, where there's only one combined name to annotate).
 
+8. **Log a portion by weight, not just percentage** (2026-08-28, same-day follow-up to item 7):
+   typing "50g of a 300g meal" is easier than pre-computing ~16.7% by hand, so Saved Foods gained a
+   weight-based alternative to the percentage controls added in item 7.
+   - **New optional field**: plain (non-composite) Saved Foods now have `totalWeightG` (grams for
+     the whole recorded recipe) in the create/edit form (`mf-weight`, under Recipe/description).
+     Genuinely optional — old saved foods without it just don't get a weight box when logging,
+     falling back to percentage-only exactly as item 7 shipped. Carried through in `saveForm()`
+     (`w > 0 ? w : null`, never `0` — a food can't have zero weight) and `editMemoryItem()` (so
+     editing an existing food doesn't wipe it). **Not** carried over on `confirmMove` (moving a food
+     to Ingredients turns it into a per-100g entry, where "total weight" isn't a meaningful concept
+     — correctly excluded already since `confirmMove`'s `shared` object never listed it).
+   - **Plain foods**: when `f.totalWeightG` is set, the portion strip (from item 7) gets an extra
+     "or weight: __g of Ng" row. `App.setSelectedWeight(id, grams)` derives the percentage
+     (`grams/totalWeightG*100`) and live-patches the kcal preview and the `%` input's displayed
+     value directly via DOM (`sel-pct-${id}`), same non-`render()` pattern as everything else typed
+     into here. The reverse direction (`setSelectedPortion`'s live path, i.e. typing directly into
+     the `%` field) now also live-patches `sel-weight-${id}` so the two fields track each other.
+   - **Composite foods**: no new stored field needed — total weight is just
+     `components.reduce((a,c)=>a+c.weight,0)`, the sum of the food's own canonical ingredient
+     weights. The existing "Whole recipe portion" row (item 7) gained the same "or weight" input;
+     `App.scaleComposedRecipeByWeight(foodId, grams)` converts to a percentage and calls the
+     existing `scaleComposedRecipe(foodId, pct)`, which now also syncs `cf-recipe-weight-${foodId}`
+     and `cf-recipe-pct-${foodId}` on every call (chip click *or* weight typed) so all four
+     surfaces — chips, the `%` field, the weight field, and every individual ingredient weight —
+     always agree.
+   - **Precision detail that matters if this is touched again**: `scaleComposedRecipe`'s `pct` and
+     `setSelectedWeight`'s derived percentage are **deliberately left as unrounded floats**
+     internally (e.g. `16.666...`, not `17`) — only *display* points round (`Math.round(clean*10)/10`
+     for the `%` field text, `Math.round(...)` for kcal/weight text). Rounding the percentage itself
+     before using it in the weight round-trip was tried first and caused visible drift: typing
+     `50` into the weight field would settle back to `51` after the percentage got rounded to a
+     whole number and re-multiplied against the total weight. Keeping the underlying value
+     fractional makes weight → percent → weight an exact round trip. The same applies to the
+     percentage shown in a logged item's name (`(16.7%)`, not `(17%)`) — computed as
+     `Math.round(pct*10)/10` for display only, while the actual macro scaling still uses the full
+     unrounded `pct`.
+
 ## Immediate next steps (pick up here)
 
 The four features above (plus the two follow-up fixes) are implemented and self-tested in both apps

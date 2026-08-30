@@ -711,9 +711,27 @@ const App = {
       const food = this.state.memory.foods.find(f => f.id === id);
       const el = document.getElementById(`sel-kcal-${id}`);
       if (food && el) el.textContent = Math.round(food.kcal*clean/100) + ' kcal';
+      if (food && food.totalWeightG){
+        const wEl = document.getElementById(`sel-weight-${id}`);
+        if (wEl) wEl.value = Math.round(food.totalWeightG*clean/100);
+      }
       return;
     }
     this.render();
+  },
+  setSelectedWeight(id, grams){
+    const s = this.state.addfood.selected;
+    if (!s[id]) return;
+    const food = this.state.memory.foods.find(f => f.id === id);
+    if (!food || !food.totalWeightG) return;
+    // kept fractional (not rounded) so the % field displays the true value derived from the exact
+    // grams typed, and the logged macros reflect precisely that weight, not a rounded-off percent
+    const pct = Math.max(0.1, (grams/food.totalWeightG)*100);
+    s[id] = pct;
+    const kcalEl = document.getElementById(`sel-kcal-${id}`);
+    if (kcalEl) kcalEl.textContent = Math.round(food.kcal*pct/100) + ' kcal';
+    const pctEl = document.getElementById(`sel-pct-${id}`);
+    if (pctEl) pctEl.value = Math.round(pct*10)/10;
   },
   setTargetMeal(m){ this.state.addfood.targetMeal = m; this.render(); },
 
@@ -764,8 +782,9 @@ const App = {
       const pct = st.selected[id];
       const scale = pct/100;
       const round1 = n => Math.round((n||0)*scale*10)/10;
+      const pctLabel = Math.round(pct*10)/10;
       meal.items.push({
-        name: pct===100 ? food.name : `${food.name} (${pct}%)`,
+        name: pct===100 ? food.name : `${food.name} (${pctLabel}%)`,
         kcal: Math.round(food.kcal*scale), p:round1(food.p), c:round1(food.c), f:round1(food.f),
         fib:round1(food.fib), sugar:round1(food.sugar||0), sodium:Math.round((food.sodium||0)*scale),
       });
@@ -914,7 +933,7 @@ const App = {
     this.state.library.activeTab = kind;
     this.state.library.form = {
       kind, editId:id, name:item.name, desc:item.recipe||'', unit:item.unit||'g',
-      source: item.source || item.fdc || '',
+      source: item.source || item.fdc || '', totalWeightG: item.totalWeightG || null,
       kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium,
       scanned:false, photo:item.photo||null, ocrRunning:false, ocrFailed:false,
     };
@@ -961,6 +980,8 @@ const App = {
 
     if (f.kind === 'foods'){
       data.recipe = val('mf-desc') || 'No description added.';
+      const w = parseFloat(document.getElementById('mf-weight')?.value);
+      data.totalWeightG = w > 0 ? w : null;
       data.updated = 'Just now';
     } else {
       const unit = document.querySelector('input[name="mf-unit"]:checked')?.value || 'g';
@@ -1135,7 +1156,9 @@ const App = {
   scaleComposedRecipe(foodId, pct){
     const food = this.state.memory.foods.find(x => x.id === foodId);
     if (!food || !Array.isArray(food.components)) return;
-    const clean = Math.max(1, Math.round(pct) || 0) || 1;
+    // kept fractional (not rounded) so a weight-driven call can round-trip back to the exact
+    // grams typed -- rounding only happens at display points below
+    const clean = Math.max(0.1, pct || 0);
     let total = 0;
     food.components.forEach(comp => {
       const newWeight = Math.round((comp.weight||0)*clean/100*10)/10;
@@ -1150,11 +1173,24 @@ const App = {
     const totalEl = document.getElementById(`cf-total-${foodId}`);
     if (totalEl) totalEl.textContent = Math.round(total);
     document.querySelectorAll(`[data-recipe-chip="${foodId}"]`).forEach(btn => {
-      const active = parseInt(btn.getAttribute('data-pct'),10) === clean;
+      const active = parseInt(btn.getAttribute('data-pct'),10) === Math.round(clean);
       btn.style.borderColor = active ? 'var(--brand)' : 'var(--border)';
       btn.style.background = active ? 'var(--brand)' : 'transparent';
       btn.style.color = active ? '#fff' : 'var(--ink-2)';
     });
+    const pctEl = document.getElementById(`cf-recipe-pct-${foodId}`);
+    if (pctEl) pctEl.value = Math.round(clean*10)/10;
+    const totalOriginal = food.components.reduce((a,c)=>a+(c.weight||0),0);
+    const weightEl = document.getElementById(`cf-recipe-weight-${foodId}`);
+    if (weightEl) weightEl.value = Math.round(totalOriginal*clean/100);
+  },
+  scaleComposedRecipeByWeight(foodId, grams){
+    const food = this.state.memory.foods.find(x => x.id === foodId);
+    if (!food || !Array.isArray(food.components)) return;
+    const totalOriginal = food.components.reduce((a,c)=>a+(c.weight||0),0);
+    if (!totalOriginal) return;
+    const pct = Math.max(0.1, (grams/totalOriginal)*100);
+    this.scaleComposedRecipe(foodId, pct);
   },
   addComposedFoodToMeal(foodId){
     const food = this.state.memory.foods.find(x => x.id === foodId);
@@ -2014,8 +2050,13 @@ function renderSavedFoodRow(f, st){
             <div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">Whole recipe portion:</div>
             ${[100,75,50,25].map(p => `<button data-recipe-chip="${f.id}" data-pct="${p}" onclick="App.scaleComposedRecipe('${f.id}',${p})" style="padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;border:1.5px solid ${p===100?'var(--brand)':'var(--border)'};background:${p===100?'var(--brand)':'transparent'};color:${p===100?'#fff':'var(--ink-2)'};font-family:inherit;">${p}%</button>`).join('')}
             <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
-              <input type="number" value="100" oninput="App.scaleComposedRecipe('${f.id}', parseFloat(this.value)||1)" style="width:48px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
+              <input id="cf-recipe-pct-${f.id}" type="number" value="100" oninput="App.scaleComposedRecipe('${f.id}', parseFloat(this.value)||1)" style="width:48px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
               <div style="font-size:10.5px;color:var(--muted);">%</div>
+            </div>
+            <div style="width:100%;display:flex;align-items:center;gap:6px;margin-top:4px;">
+              <div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">or weight:</div>
+              <input id="cf-recipe-weight-${f.id}" type="number" value="${f.components.reduce((a,c)=>a+(c.weight||0),0)}" oninput="App.scaleComposedRecipeByWeight('${f.id}', parseFloat(this.value)||0)" style="width:56px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
+              <div style="font-size:10.5px;color:var(--muted);">g of ${f.components.reduce((a,c)=>a+(c.weight||0),0)}g</div>
             </div>
           </div>
           ${f.components.map(comp => {
@@ -2060,9 +2101,16 @@ function renderSavedFoodRow(f, st){
         <div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">Portion:</div>
         ${[100,75,50,25].map(p => `<button onclick="App.setSelectedPortion('${f.id}',${p})" style="padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;border:1.5px solid ${pct===p?'var(--brand)':'var(--border)'};background:${pct===p?'var(--brand)':'transparent'};color:${pct===p?'#fff':'var(--ink-2)'};font-family:inherit;">${p}%</button>`).join('')}
         <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
-          <input type="number" value="${pct}" oninput="App.setSelectedPortion('${f.id}', parseFloat(this.value)||1, {live:true})" style="width:48px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
+          <input id="sel-pct-${f.id}" type="number" value="${pct}" oninput="App.setSelectedPortion('${f.id}', parseFloat(this.value)||1, {live:true})" style="width:48px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
           <div style="font-size:10.5px;color:var(--muted);">%</div>
         </div>
+        ${f.totalWeightG ? `
+          <div style="width:100%;display:flex;align-items:center;gap:6px;margin-top:4px;">
+            <div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">or weight:</div>
+            <input id="sel-weight-${f.id}" type="number" value="${Math.round(f.totalWeightG*pct/100)}" oninput="App.setSelectedWeight('${f.id}', parseFloat(this.value)||0)" style="width:56px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
+            <div style="font-size:10.5px;color:var(--muted);">g of ${f.totalWeightG}g</div>
+          </div>
+        ` : ''}
       </div>
     ` : ''}
   </div>`;
@@ -2243,7 +2291,10 @@ function renderMemoryForm(f){
       <input id="mf-name" type="text" value="${esc2(g(f.name))}" placeholder="${isFoods?'e.g. Protein Shake':'e.g. Almarai Full Fat Milk'}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
       ${isFoods ? `
         <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Recipe / description</label>
-        <input id="mf-desc" type="text" value="${esc2(g(f.desc))}" placeholder="What's in it, and how much" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:12px;font-family:inherit;"/>
+        <input id="mf-desc" type="text" value="${esc2(g(f.desc))}" placeholder="What's in it, and how much" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
+        <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Total weight in grams (optional)</label>
+        <input id="mf-weight" type="number" step="1" value="${g(f.totalWeightG)}" placeholder="e.g. 300" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:4px;font-family:inherit;"/>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Lets you log a partial portion by weight (e.g. "I ate 50g of this 300g meal") instead of only by percentage.</div>
       ` : `
         <div style="display:flex;gap:14px;margin-bottom:10px;">
           <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;"><input type="radio" name="mf-unit" value="g" ${f.unit!=='ml'?'checked':''}/> per 100 g</label>
