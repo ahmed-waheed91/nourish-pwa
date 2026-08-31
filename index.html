@@ -500,6 +500,14 @@ function esc(s){ return String(s); }
 const LOCAL_STORAGE_KEY = 'nourish_backup_v2';
 
 /* ---------- Real dates & liters formatting ---------- */
+const MEAL_ORDER = ['Breakfast','Lunch','Snack','Dinner'];
+function sortedMealsForDisplay(meals){
+  return meals.slice().sort((a,b) => {
+    const ai = MEAL_ORDER.indexOf(a.name), bi = MEAL_ORDER.indexOf(b.name);
+    return (ai===-1?MEAL_ORDER.length:ai) - (bi===-1?MEAL_ORDER.length:bi);
+  });
+}
+
 const WEEKDAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 function todayISO(){
@@ -1394,7 +1402,7 @@ const App = {
       y += 7;
 
       if (entry.meals && entry.meals.length){
-        entry.meals.forEach(meal => {
+        sortedMealsForDisplay(entry.meals).forEach(meal => {
           y = ensureRoom(y, 20);
           doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(...ink);
           doc.text(meal.name, margin, y);
@@ -1920,7 +1928,7 @@ function renderToday(){
           <div class="card pad" style="text-align:center;color:var(--muted);font-size:13px;">
             Nothing logged today yet.<br/>Tap <strong style="color:var(--ink-2);">+ Log food</strong> above to get started.
           </div>
-        ` : st.meals.map(meal => {
+        ` : sortedMealsForDisplay(st.meals).map(meal => {
           const open = st.expandedMeal === meal.id;
           return `
           <div class="card" style="overflow:hidden;">
@@ -3364,7 +3372,7 @@ function renderDesktop(){
 
         <div class="card" style="overflow:hidden;">
           <div class="pad" style="border-bottom:1px solid var(--border);font-size:13.5px;font-weight:700;">Meal breakdown</div>
-          ${dt.meals.map(meal => {
+          ${sortedMealsForDisplay(dt.meals).map(meal => {
             const open = dd.openMeal === meal.id;
             return `
             <div style="border-bottom:1px solid var(--border);">

@@ -590,6 +590,30 @@ build → confirm on device → move on, per feature.
      `Math.round(pct*10)/10` for display only, while the actual macro scaling still uses the full
      unrounded `pct`.
 
+9. **Meal breakdown always displays in a fixed order** (2026-08-28): meals used to display in
+   whatever order they were first logged that day — e.g. if you logged Lunch before Breakfast, Lunch
+   would show above Breakfast in "Meal breakdown." User initially asked for manual press-and-hold
+   drag reordering; offered a simpler alternative instead (always display in a fixed canonical
+   order, no interaction needed) and the user preferred that over building drag-and-drop — worth
+   remembering if a similar "let me reorder X" request comes up again: **ask whether a fixed/
+   automatic order solves the actual problem before building a manual reorder UI** — drag-and-drop
+   is real complexity (touch/scroll conflicts, no precedent anywhere in this app) that often isn't
+   the simplest fix for what's actually motivating the request.
+   - New `MEAL_ORDER = ['Breakfast','Lunch','Snack','Dinner']` constant and
+     `sortedMealsForDisplay(meals)` helper (both near the top of the script, by `WEEKDAY_NAMES`) —
+     stable-sorts a **copy** of the meals array (`.slice()` first) by each meal's index in
+     `MEAL_ORDER`, appending any unrecognized meal name at the end in its existing relative order.
+     The underlying `state.today.meals` array (and its ordering as archived into `dayHistory` by
+     `checkDayRollover`) is **never reordered** — only the copy handed to each display site is. This
+     matters because `expandedMeal`/`openMeal` track which meal is expanded **by `meal.id`, not by
+     array position**, so re-sorting the display copy doesn't desync from what's currently expanded.
+   - Applied at all three places that render a meal-by-meal breakdown, so they all agree with each
+     other: the Today (mobile) screen's "Meal breakdown" list, the desktop dual-pane dashboard's
+     meal table, and the PDF export's per-meal tables. Missing any one of these would mean the fixed
+     order only appeared in some views, not others — check for other `.meals.map(`/`.meals.forEach(`
+     call sites if this is ever extended (e.g. History's day-detail view doesn't currently show a
+     meal-by-meal breakdown at all, only aggregate day totals, so there was nothing to fix there).
+
 ## Immediate next steps (pick up here)
 
 The four features above (plus the two follow-up fixes) are implemented and self-tested in both apps
