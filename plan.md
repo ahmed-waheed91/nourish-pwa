@@ -4,11 +4,14 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated: composite Saved Foods shipped and confirmed, plus two post-ship bug fixes (form
-data getting silently wiped mid-edit, and the edit screen scrolling to a disorienting position on
-long lists). All four features requested so far (PDF export, live USDA lookup, real OCR, composite
-Saved Foods) are done and confirmed working on the user's real device. No feature is in progress
-right now — check with the user for what's next._
+_Last updated 2026-09-02. The original four features (PDF export, live USDA lookup, real OCR,
+composite Saved Foods) plus a large batch shipped 2026-08-28 are all live in both apps — see "Four
+functional features" and items 5-9 below for the 2026-08-28 batch (memory sharing, cross-tab
+search, delete-a-day, Notes-tab removal, portion-by-percentage, portion-by-weight, fixed meal
+order) and their confirmation status (most are user-confirmed on real device; the two most recent —
+portion-by-weight, fixed meal order — are built/self-tested but not yet confirmed). No feature is
+in progress right now — check with the user for what's next. See "Immediate next steps" and
+"Standing watch item" near the end of this file before starting new work._
 
 ## Cross-machine continuity (why this file is here, in git)
 
@@ -387,23 +390,47 @@ shared `localStorage` origin, not two isolated copies.
   JS. Python 3.13 available there; `pip install pillow` works (used once for icon generation).
   Android SDK (Android Studio + platform-tools + `adb`) also present at
   `C:\Users\Ahmed\AppData\Local\Android\Sdk\`. **None of this is guaranteed on a different
-  machine** — verify before assuming a tool is present when working from a new PC.
+  machine** — verify before assuming a tool is present when working from a new PC. **Confirmed on
+  2026-08-28 on a second machine**: neither Python nor Node present there either (the working
+  directory Claude Code was bound to on that machine was an empty, unrelated `D:\Claude\Calorie
+  Tracker` folder — the real project lives on Google Drive at `G:\My Drive\Personal\Claude\Calorie
+  Tracking App\`; if a session opens cold into an empty/wrong directory, that's very likely why —
+  go find the Drive-synced folder rather than assuming the project doesn't exist). For local
+  testing on a machine with no Python, a small inline PowerShell `System.Net.HttpListener` static
+  file server works as a substitute — see the testing-workflow bullet below.
 - `git`/`gh` push access is configured per-machine (via `gh auth login` or equivalent) — this was
   done once on the original dev machine. A different machine needs its own auth before `git push`
   will work, even if the Drive-synced files are already there.
 - **Service worker registration fails inside the Claude Code Browser-pane test tool specifically**
   — confirmed testing-tool limitation, not a code bug (real deployed site shows `active:true`
   registrations fine). Test SW behavior on the real deployed URL, not locally.
-- Local testing workflow: `python -m http.server <port>` in `pwa/` + Browser-pane
-  `javascript_tool` direct state calls (`App.setScreen(...)`, calling methods directly, monkey-
-  patching) rather than real clicks — more reliable than coordinate-based clicking in this tool.
-  Always stop the server (`pkill -f "http.server <port>"`, or the PowerShell equivalent) when
-  done.
+- Local testing workflow: a static file server in `pwa/` (`python -m http.server <port>` if Python
+  is present; otherwise a small inline PowerShell script using
+  `System.Net.HttpListener` — write it once to a scratch `.ps1` file, `Start-Process powershell
+  -ArgumentList '-File',... -WindowStyle Hidden` to run it detached in the background) + Browser-
+  pane `javascript_tool` direct state calls (`App.setScreen(...)`, calling methods directly,
+  monkey-patching, `dispatchEvent(new Event('input',{bubbles:true}))` to exercise real `oninput`
+  wiring) rather than real clicks — more reliable than coordinate-based clicking in this tool, and
+  `computer`-tool clicks/typing have been flaky/unavailable in some sessions (fall back to
+  dispatched events or direct `App.*` calls if `computer` errors with "No site is open"). Always
+  stop the server when done — find it via `Get-Process powershell` and match on command line
+  (`Get-CimInstance Win32_Process -Filter "ProcessId=$id"`), since a stale server left listening on
+  a port will silently serve old code to the next test and waste time debugging a "bug" that's
+  actually just stale cache.
 - Real bugs hit and fixed this project (don't reintroduce): `App.state.history` naming collision;
   a reactive-vs-guessed-threshold bug in the storage failsafe; a day-rollover check that only ran
   once at boot instead of on every app resume; `getOrCreateMeal` matching on the wrong id format
   (created a duplicate meal group on every add); the composer DOM-sync trap and the edit-scroll
-  trap (both above, under Composite Saved Foods).
+  trap (both above, under Composite Saved Foods); the `render()`-on-every-keystroke focus-loss trap
+  (see "Render pattern" near the top of this file — any input whose `oninput` triggers a full
+  `render()` steals focus on the next character typed; direct DOM patching or a `{live:true}`-style
+  no-render escape hatch is required for anything typed continuously, see item 7/8 below for the
+  established pattern); an SVG chart element positioned with `left:${x}px` where `x` came from the
+  chart's `viewBox` units while the SVG itself was `width:100%` of a variable-width container — the
+  two aren't the same number of real pixels on any given device, and it also wasn't clamped, so a
+  centered tooltip pushed off-frame near either edge (item 6 below) — position chart elements as a
+  **percentage** of the viewBox dimension, not raw px, whenever the SVG's width isn't a hardcoded
+  pixel value.
 
 ## Development History (condensed)
 
@@ -419,20 +446,26 @@ editable/deletable. Then: real OCR for label photos via a fully-vendored, offlin
 Tesseract.js. Then: composite Saved Foods (multi-ingredient, independently-scalable meals) built
 through several rounds of upfront design Q&A, followed by two rounds of real-device bug reports
 (form data wiping mid-edit, disorienting scroll-to-middle on edit) — both root-caused and fixed.
-Most recently: fixed the GitHub repo's blank "Website" field for install-link discoverability, and
-moved this checkpoint file into the git repo (from the parent project folder) so it stays in sync
-across the user's two development machines via the same git push/pull habit as the code, after
-confirming that a Claude Code session itself (browser or desktop) does not carry over between
-machines.
+Then: fixed the GitHub repo's blank "Website" field for install-link discoverability, and moved this
+checkpoint file into the git repo (from the parent project folder) so it stays in sync across the
+user's two development machines via the same git push/pull habit as the code, after confirming that
+a Claude Code session itself (browser or desktop) does not carry over between machines. Most
+recently (2026-08-28, one long session): a large batch of functional features and fixes — memory
+sharing between users, cross-tab search (twice — the Library screen was the one the user actually
+meant, not just Add Food), delete-a-past-day, removed the dead "Notes" tab, a real Trends-chart
+tooltip overflow bug, portion logging by percentage then by weight, and a fixed meal display order.
+Full detail for all of it is in "Four functional features" and items 5-9 below — see "Immediate
+next steps" for what's confirmed vs. still awaiting real-device confirmation.
 
-## Four functional features (2026-08-28) — implemented in both apps, not yet confirmed on device
+## Four functional features (2026-08-28) — implemented in both apps, user-confirmed working
 
 Per the corrected Original-vs-Limited-Edition rule above, these are **functional** changes and were
 implemented in **both** this app and BilliFit in the same pass (not "Original first, port later").
-Built and self-verified (via `App.*` calls in the Browser-pane test tool, not real device testing
-yet) in both `pwa/index.html` and `billifit-pwa/index.html`. Ask the user to confirm each works on
-their real device before considering this fully shipped — this project's established pattern is
-build → confirm on device → move on, per feature.
+Built and self-verified (via `App.*` calls in the Browser-pane test tool) in both `pwa/index.html`
+and `billifit-pwa/index.html`, then confirmed by the user on their real device — with one real bug
+found along the way (item 2's search fix only covered Add Food, not the Memory & Library screen the
+user actually meant; fixed as item 5 below) plus one unrelated real bug the user found while testing
+(the Trends tooltip overflow, item 6).
 
 1. **Memory-only export/import** (Export screen → new "Share memory" section, below the existing
    full backup section): `App.buildMemoryOnlyPayload()` exports just `{ foods, ingredients, usda }`
@@ -519,7 +552,9 @@ build → confirm on device → move on, per feature.
    existing `translateX(-50%)` centering. The vertical (`top`) position didn't have this bug and
    wasn't touched — the SVG's `height="176"` is a literal fixed px value (unlike the `width:100%`),
    so viewBox y-units already equal real px there.
-7. **Log a partial portion of a Saved Food** (2026-08-28, new feature request): previously any
+7. **Log a partial portion of a Saved Food** (2026-08-28, new feature request; working in practice
+   — user asked for the weight-based follow-up in item 8 rather than reporting a problem, though
+   never explicitly said "confirmed"): previously any
    Saved Food could only be logged at its full recorded value — no way to log "half of what I
    usually eat." Two different mechanisms, since plain and composite Saved Foods already had
    different interaction models:
@@ -553,7 +588,8 @@ build → confirm on device → move on, per feature.
      already tells that story, so no extra portion suffix was added there (unlike the plain-food
      case, where there's only one combined name to annotate).
 
-8. **Log a portion by weight, not just percentage** (2026-08-28, same-day follow-up to item 7):
+8. **Log a portion by weight, not just percentage** (2026-08-28, same-day follow-up to item 7;
+   built and self-tested, **not yet confirmed on a real device**):
    typing "50g of a 300g meal" is easier than pre-computing ~16.7% by hand, so Saved Foods gained a
    weight-based alternative to the percentage controls added in item 7.
    - **New optional field**: plain (non-composite) Saved Foods now have `totalWeightG` (grams for
@@ -590,7 +626,8 @@ build → confirm on device → move on, per feature.
      `Math.round(pct*10)/10` for display only, while the actual macro scaling still uses the full
      unrounded `pct`.
 
-9. **Meal breakdown always displays in a fixed order** (2026-08-28): meals used to display in
+9. **Meal breakdown always displays in a fixed order** (2026-08-28, built and self-tested, **not
+   yet confirmed on a real device**): meals used to display in
    whatever order they were first logged that day — e.g. if you logged Lunch before Breakfast, Lunch
    would show above Breakfast in "Meal breakdown." User initially asked for manual press-and-hold
    drag reordering; offered a simpler alternative instead (always display in a fixed canonical
@@ -614,9 +651,39 @@ build → confirm on device → move on, per feature.
      call sites if this is ever extended (e.g. History's day-detail view doesn't currently show a
      meal-by-meal breakdown at all, only aggregate day totals, so there was nothing to fix there).
 
+## Standing watch item: app size / build weight (started 2026-08-28)
+
+User asked whether the desktop dashboard was worth removing to save resources — measured it
+directly rather than guessing: `renderDesktop()` is ~198 lines / ~14 KB plus ~1 KB of CSS, about 7%
+of the single `index.html` file (~206 KB at the time of measuring). Decided **zero runtime cost on
+mobile** was the deciding fact: it only renders when `state.view==='desktop'`, reachable only via a
+toggle button CSS-hidden below 700px width — real phones never see it, so it's never even executed,
+just inert bytes in the file. Verdict: keep it as-is.
+
+**User's explicit ask: proactively flag it if this — the app's overall size/build weight, not just
+the desktop view specifically — ever becomes significant enough to matter**, e.g. noticeably
+slower initial load/parse, meaningfully larger download even after gzip, or the single-file
+architecture itself becoming unwieldy to maintain. This app is a single monolithic `index.html`
+(currently ~206 KB) with no build step/bundler/minification — there's no established threshold for
+"too big" yet, so use judgment: a good trigger point is when total file size roughly doubles from
+this ~206 KB baseline, or when any one addition alone is large relative to the whole file (unlike
+the desktop view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked.
+
 ## Immediate next steps (pick up here)
 
-The four features above (plus the two follow-up fixes) are implemented and self-tested in both apps
-but **not yet confirmed by the user on a real device** — that's the next step before considering
-them done. One open thread to keep in mind if it comes back up: OCR accuracy on real-world label
-photos (user is still testing, explicitly asked to leave it alone for now).
+No feature is in progress. As of 2026-09-02: items 1-7 above (memory sharing, cross-tab search in
+both Add Food and Memory & Library, delete-a-day, Notes-tab removal, the Trends tooltip fix, and
+portion-by-percentage) are shipped and confirmed working. **Items 8 (portion-by-weight) and 9
+(fixed meal order) are built and self-tested but not yet confirmed by the user on a real device** —
+that's the natural next thing to check if the user brings this project up again without a new,
+specific ask. Ask what's next rather than assuming.
+
+Two open threads to keep in mind if they come back up, neither active right now:
+- OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
+  asked to leave it alone for now — don't touch OCR code unless asked).
+- The Limited Edition App's icon redesign is **paused**, not abandoned — see BilliFit's own
+  `plan.md` "Icon work paused" section. A yellow-background/bigger-cat icon already shipped and is
+  live; a further redesign is waiting on the user supplying their own artwork (a square PNG,
+  ≥512×512, opaque background). Do not attempt another from-memory recreation of reference art if
+  this comes up again — the whole point of pausing was that approach wasn't working; wait for the
+  file.
