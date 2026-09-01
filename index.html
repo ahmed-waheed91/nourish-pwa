@@ -2780,7 +2780,7 @@ function renderTrends(){
   const rd = rangeDefs.find(r=>r[0]===st.range) || rangeDefs[0];
   const n = rd[2];
 
-  const realDays = App.allRealDays();
+  const realDays = App.allRealDays().filter(d => !d.isToday);
   const valueForDay = (d) => {
     if (cat.id === 'weight') return typeof d.weightKg === 'number' ? d.weightKg : null;
     if (cat.id === 'water') return Math.round((d.waterMl/1000)*100)/100;
