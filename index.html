@@ -1609,17 +1609,17 @@ const App = {
     const fileName = `nourish-${slug}.json`;
     const shareIntro = `${item.name} — shared from Nourish. Import it via Memory & Library → Export → Import memory.`;
 
-    const toDownload = () => {
+    const toDownload = (reason) => {
       try {
         saveFileToDevice(fileName, json);
-        this.state.library.shareStatus = `Sharing isn't supported here — downloaded ${fileName} instead.`;
+        this.state.library.shareStatus = `Sharing isn't supported here (${reason}) — downloaded ${fileName} instead.`;
       } catch (err){
         this.state.library.shareStatus = "Couldn't share this item.";
       }
       this.render();
-      setTimeout(() => { this.state.library.shareStatus = null; this.render(); }, 3200);
+      setTimeout(() => { this.state.library.shareStatus = null; this.render(); }, 5000);
     };
-    if (!navigator.share){ toDownload(); return; }
+    if (!navigator.share){ toDownload('no navigator.share'); return; }
     // navigator.share() consumes the tap's user-activation the moment it's called, win or lose —
     // a second share() attempt from inside a failed one's .catch() is guaranteed to be rejected
     // for lacking a user gesture. So decide the best payload up front using canShare (a pure,
@@ -1632,9 +1632,9 @@ const App = {
       ? { files:[file], title:item.name, text:shareIntro }
       : { title:item.name, text:`${shareIntro}\n\n${json}` };
     try {
-      navigator.share(shareData).catch(toDownload);
+      navigator.share(shareData).catch(err => toDownload(`${err && err.name}: ${err && err.message}`));
     } catch (err) {
-      toDownload();
+      toDownload(`sync ${err && err.name}: ${err && err.message}`);
     }
   },
   exportMemoryOnly(){
