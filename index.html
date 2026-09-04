@@ -626,7 +626,7 @@ const App = {
       usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
     builtinFoodsSeeded: true,
-    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null },
+    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, shareStatus:null },
     history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null },
@@ -1600,6 +1600,33 @@ const App = {
   buildMemoryOnlyPayload(){
     return { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:this.state.memory };
   },
+  shareMemoryItem(kind, id){
+    const item = this.state.memory[kind].find(x => x.id === id);
+    if (!item) return;
+    const payload = { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:{ foods:[], ingredients:[], usda:[], [kind]:[item] } };
+    const json = JSON.stringify(payload, null, 2);
+    const slug = (item.name||kind).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || kind;
+    const fileName = `nourish-${slug}.json`;
+    const shareText = `${item.name} — shared from Nourish. Import it via Memory & Library → Export → Import memory.`;
+    let file = null;
+    try { file = new File([json], fileName, { type:'application/json' }); } catch (err) { /* no File support */ }
+    if (file && navigator.canShare && navigator.canShare({ files:[file] })){
+      navigator.share({ files:[file], title:item.name, text:shareText }).catch(()=>{});
+      return;
+    }
+    if (navigator.share){
+      navigator.share({ title:item.name, text:`${shareText}\n\n${json}` }).catch(()=>{});
+      return;
+    }
+    try {
+      saveFileToDevice(fileName, json);
+      this.state.library.shareStatus = `Sharing isn't supported here — downloaded ${fileName} instead.`;
+    } catch (err){
+      this.state.library.shareStatus = "Couldn't share this item.";
+    }
+    this.render();
+    setTimeout(() => { this.state.library.shareStatus = null; this.render(); }, 3200);
+  },
   exportMemoryOnly(){
     const json = JSON.stringify(this.buildMemoryOnlyPayload(), null, 2);
     const stamp = new Date().toISOString().slice(0,10);
@@ -2510,6 +2537,9 @@ function memoryRowActions(kind, item){
   const moveTo = kind === 'foods' ? 'Ingredients' : 'Saved foods';
   const editCall = isComposite ? `App.openComposer('${item.id}')` : `App.editMemoryItem('${kind}','${item.id}')`;
   return `
+    <button onclick="event.stopPropagation();App.shareMemoryItem('${kind}','${item.id}')" title="Share" style="${ROW_ACTION_BTN}">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
     ${canMove ? `
     <button onclick="event.stopPropagation();App.requestMove('${kind}','${item.id}')" title="Move to ${moveTo}" style="${ROW_ACTION_BTN}">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 8h12m0 0l-4-4m4 4l-4 4M17 16H5m0 0l4 4m-4-4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -2680,6 +2710,7 @@ function renderLibrary(){
       </div>
     </div>
     <div class="scroll-area" style="padding:14px 18px 90px 18px;">
+      ${st.shareStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.shareStatus}</div>` : ''}
       <div id="lib-extras">${extras}</div>
       ${groups}
     </div>
