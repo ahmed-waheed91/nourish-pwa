@@ -629,7 +629,7 @@ const App = {
     library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, shareStatus:null },
     history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
-    exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null },
+    exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
     memoryImport: null,
     desktop: { openMeal:'lunch' },
     settingsStatus: null,
@@ -1607,12 +1607,12 @@ const App = {
     const json = JSON.stringify(payload, null, 2);
     const slug = (item.name||kind).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || kind;
     const fileName = `nourish-${slug}.json`;
-    const shareIntro = `${item.name} — shared from Nourish. Import it via Memory & Library → Export → Import memory.`;
+    const shareIntro = `${item.name} — shared from Nourish. To bring it into your own Nourish, paste this whole message into Memory & Library → Export → Import memory → "Import from pasted text".`;
 
     const toDownload = (reason) => {
       try {
         saveFileToDevice(fileName, json);
-        this.state.library.shareStatus = `Sharing isn't supported here (${reason}) — downloaded ${fileName} instead.`;
+        this.state.library.shareStatus = reason ? `Couldn't open the share sheet (${reason}) — downloaded ${fileName} instead.` : `Downloaded ${fileName} instead.`;
       } catch (err){
         this.state.library.shareStatus = "Couldn't share this item.";
       }
@@ -1620,19 +1620,13 @@ const App = {
       setTimeout(() => { this.state.library.shareStatus = null; this.render(); }, 5000);
     };
     if (!navigator.share){ toDownload('no navigator.share'); return; }
-    // navigator.share() consumes the tap's user-activation the moment it's called, win or lose —
-    // a second share() attempt from inside a failed one's .catch() is guaranteed to be rejected
-    // for lacking a user gesture. So decide the best payload up front using canShare (a pure,
-    // activation-free capability check) and commit to exactly one share() call.
-    let file = null;
-    try { file = new File([json], fileName, { type:'application/json' }); } catch (err) { /* no File support */ }
-    let canFiles = false;
-    try { canFiles = !!(file && navigator.canShare && navigator.canShare({ files:[file] })); } catch (err) { canFiles = false; }
-    const shareData = canFiles
-      ? { files:[file], title:item.name, text:shareIntro }
-      : { title:item.name, text:`${shareIntro}\n\n${json}` };
+    // File-based Web Share is unreliable for a .json payload — canShare({files}) can report true
+    // while the actual share() call rejects with "NotAllowedError: Permission denied", because
+    // Chromium restricts file sharing to a curated safe list of extensions that excludes .json.
+    // Text sharing has no such restriction, so it's the only path used here.
     try {
-      navigator.share(shareData).catch(err => toDownload(`${err && err.name}: ${err && err.message}`));
+      navigator.share({ title:item.name, text:`${shareIntro}\n\n${json}` })
+        .catch(err => toDownload(`${err && err.name}: ${err && err.message}`));
     } catch (err) {
       toDownload(`sync ${err && err.name}: ${err && err.message}`);
     }
@@ -1654,47 +1648,62 @@ const App = {
     const file = inputEl.files && inputEl.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
-      let data;
-      try { data = JSON.parse(e.target.result); }
-      catch (err) {
-        this.state.exportScreen.memoryStatus = "Import failed — that file isn't valid JSON.";
-        this.render();
-        return;
-      }
-      if (!data || !data.memory || !Array.isArray(data.memory.foods) || !Array.isArray(data.memory.ingredients) || !Array.isArray(data.memory.usda)){
-        this.state.exportScreen.memoryStatus = "Import failed — file doesn't look like a Nourish memory export.";
-        this.render();
-        return;
-      }
-      const kinds = ['foods','ingredients','usda'];
-      const autoAdd = { foods:[], ingredients:[], usda:[] };
-      const conflicts = [];
+    reader.onload = (e) => this.processMemoryImportText(e.target.result, file.name, "that file isn't valid JSON.", "file doesn't look like a Nourish memory export.");
+    reader.readAsText(file);
+  },
+  handleMemoryImportPaste(){
+    const text = (document.getElementById('memory-paste-input')?.value || '').trim();
+    this.state.exportScreen.memoryPasteText = text;
+    if (!text){
+      this.state.exportScreen.memoryStatus = "Paste the shared text first, then tap Import.";
+      this.render();
+      return;
+    }
+    // a shared item arrives as an intro line followed by the JSON block — pull out just the JSON
+    const jsonStart = text.indexOf('{');
+    const jsonText = jsonStart === -1 ? text : text.slice(jsonStart);
+    this.processMemoryImportText(jsonText, 'pasted text', "that isn't valid JSON.", "that text doesn't look like a Nourish memory share.");
+  },
+  processMemoryImportText(rawText, sourceLabel, invalidJsonMsg, wrongShapeMsg){
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch (err) {
+      this.state.exportScreen.memoryStatus = `Import failed — ${invalidJsonMsg}`;
+      this.render();
+      return;
+    }
+    if (!data || !data.memory || !Array.isArray(data.memory.foods) || !Array.isArray(data.memory.ingredients) || !Array.isArray(data.memory.usda)){
+      this.state.exportScreen.memoryStatus = `Import failed — ${wrongShapeMsg}`;
+      this.render();
+      return;
+    }
+    const kinds = ['foods','ingredients','usda'];
+    const autoAdd = { foods:[], ingredients:[], usda:[] };
+    const conflicts = [];
+    kinds.forEach(kind => {
+      const existingList = this.state.memory[kind];
+      (data.memory[kind]||[]).forEach(incoming => {
+        const match = existingList.find(x => x.name && incoming.name && x.name.trim().toLowerCase() === incoming.name.trim().toLowerCase());
+        if (match) conflicts.push({ kind, incoming, existingId:match.id, choice:'skip' });
+        else autoAdd[kind].push(incoming);
+      });
+    });
+    this.state.exportScreen.memoryPasteText = '';
+    if (conflicts.length === 0){
+      let total = 0;
       kinds.forEach(kind => {
-        const existingList = this.state.memory[kind];
-        (data.memory[kind]||[]).forEach(incoming => {
-          const match = existingList.find(x => x.name && incoming.name && x.name.trim().toLowerCase() === incoming.name.trim().toLowerCase());
-          if (match) conflicts.push({ kind, incoming, existingId:match.id, choice:'skip' });
-          else autoAdd[kind].push(incoming);
+        autoAdd[kind].forEach(item => {
+          this.state.memory[kind].push({ ...item, id:this.genId(item.name||kind), updated:'Just now' });
+          total++;
         });
       });
-      if (conflicts.length === 0){
-        let total = 0;
-        kinds.forEach(kind => {
-          autoAdd[kind].forEach(item => {
-            this.state.memory[kind].push({ ...item, id:this.genId(item.name||kind), updated:'Just now' });
-            total++;
-          });
-        });
-        this.state.exportScreen.memoryStatus = `Import complete ✓ — added ${total} new item${total===1?'':'s'} to your memory.`;
-        this.render();
-        return;
-      }
-      this.state.memoryImport = { fileName:file.name, autoAdd, conflicts };
-      __scrollTopNext = true;
+      this.state.exportScreen.memoryStatus = `Import complete ✓ — added ${total} new item${total===1?'':'s'} to your memory.`;
       this.render();
-    };
-    reader.readAsText(file);
+      return;
+    }
+    this.state.memoryImport = { fileName:sourceLabel, autoAdd, conflicts };
+    __scrollTopNext = true;
+    this.render();
   },
   setMemoryImportChoice(i, choice){
     this.state.memoryImport.conflicts[i].choice = choice;
@@ -3296,6 +3305,14 @@ function renderExport(){
           <input type="file" accept="application/json,.json" style="display:none;" onchange="App.handleMemoryImportFile(this)"/>
         </label>
         <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.4;">Merges into your existing memory — nothing you already have is removed. If an item's name matches something you already have, you'll choose what happens to it.</div>
+        <div style="display:flex;align-items:center;gap:8px;margin:12px 0;">
+          <div style="flex:1;height:1px;background:var(--border);"></div>
+          <div style="font-size:10px;color:var(--muted);font-weight:700;">OR</div>
+          <div style="flex:1;height:1px;background:var(--border);"></div>
+        </div>
+        <div style="font-size:11px;color:var(--ink-2);margin-bottom:6px;">Got a shared item as a text message instead of a file? Paste it here:</div>
+        <textarea id="memory-paste-input" placeholder="Paste shared item text here..." style="width:100%;height:70px;padding:8px;border-radius:8px;border:1px solid var(--border);font-size:11px;font-family:monospace;resize:vertical;">${(st.memoryPasteText||'').replace(/</g,'&lt;')}</textarea>
+        <button onclick="App.handleMemoryImportPaste()" style="width:100%;margin-top:8px;padding:9px 0;border-radius:9px;background:var(--surface);border:1px solid var(--border);color:var(--ink);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Import from pasted text</button>
       </div>
       ${st.memoryStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.memoryStatus}</div>` : ''}
     </div>
