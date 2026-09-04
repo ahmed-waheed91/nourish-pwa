@@ -1619,27 +1619,23 @@ const App = {
       this.render();
       setTimeout(() => { this.state.library.shareStatus = null; this.render(); }, 3200);
     };
-    // Some Android/Chrome versions report canShare({files}) true for a .json file but then
-    // reject the actual share() call for that same file — so every tier here falls through to
-    // the next on failure instead of swallowing the error, or nothing visibly happens at all.
-    const toTextShare = () => {
-      try {
-        if (navigator.share){
-          navigator.share({ title:item.name, text:`${shareIntro}\n\n${json}` }).catch(toDownload);
-          return;
-        }
-      } catch (err) { /* fall through */ }
-      toDownload();
-    };
+    if (!navigator.share){ toDownload(); return; }
+    // navigator.share() consumes the tap's user-activation the moment it's called, win or lose —
+    // a second share() attempt from inside a failed one's .catch() is guaranteed to be rejected
+    // for lacking a user gesture. So decide the best payload up front using canShare (a pure,
+    // activation-free capability check) and commit to exactly one share() call.
+    let file = null;
+    try { file = new File([json], fileName, { type:'application/json' }); } catch (err) { /* no File support */ }
+    let canFiles = false;
+    try { canFiles = !!(file && navigator.canShare && navigator.canShare({ files:[file] })); } catch (err) { canFiles = false; }
+    const shareData = canFiles
+      ? { files:[file], title:item.name, text:shareIntro }
+      : { title:item.name, text:`${shareIntro}\n\n${json}` };
     try {
-      let file = null;
-      try { file = new File([json], fileName, { type:'application/json' }); } catch (err) { /* no File support */ }
-      if (file && navigator.canShare && navigator.canShare({ files:[file] })){
-        navigator.share({ files:[file], title:item.name, text:shareIntro }).catch(toTextShare);
-        return;
-      }
-    } catch (err) { /* fall through */ }
-    toTextShare();
+      navigator.share(shareData).catch(toDownload);
+    } catch (err) {
+      toDownload();
+    }
   },
   exportMemoryOnly(){
     const json = JSON.stringify(this.buildMemoryOnlyPayload(), null, 2);
