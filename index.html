@@ -619,7 +619,7 @@ const App = {
     dayHistory: [],
     storageAlert: null,
     targets: defaultTargets(),
-    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', lookupQuery:'', lookupResult:null, lookupLoading:false, expandedSavedId:null },
+    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', targetDate:null, lookupQuery:'', lookupResult:null, lookupLoading:false, expandedSavedId:null },
     memory: {
       foods: SAVED_FOODS.map(x => ({...x})),
       ingredients: INGREDIENTS.map(x => ({...x})),
@@ -771,13 +771,64 @@ const App = {
   },
 
   getOrCreateMeal(mealName){
-    const meals = this.state.today.meals;
+    const date = this.state.addfood.targetDate;
+    const meals = date ? this.getOrCreateHistoryDay(date).meals : this.state.today.meals;
     let meal = meals.find(m => m.name === mealName);
     if (!meal){
-      meal = { id: mealName.toLowerCase()+'_'+Math.random().toString(36).slice(2,6), name: mealName, subtitle: 'Logged today', items: [] };
+      meal = { id: mealName.toLowerCase()+'_'+Math.random().toString(36).slice(2,6), name: mealName, subtitle: date ? `Logged ${formatShortDate(date)}` : 'Logged today', items: [] };
       meals.push(meal);
     }
     return meal;
+  },
+  // Finds (or creates, in correct chronological position) the dayHistory entry for a past date —
+  // used by backdated logging, where a "forgotten" day may not have any entry yet.
+  getOrCreateHistoryDay(date){
+    let entry = this.state.dayHistory.find(h => h.date === date);
+    if (!entry){
+      entry = { date, calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sodium:0, waterMl:0, weightKg:null, meals:[], note:'' };
+      const idx = this.state.dayHistory.findIndex(h => h.date > date);
+      if (idx === -1) this.state.dayHistory.push(entry); else this.state.dayHistory.splice(idx, 0, entry);
+    }
+    return entry;
+  },
+  recomputeHistoryDay(date){
+    const entry = this.state.dayHistory.find(h => h.date === date);
+    if (!entry) return;
+    Object.assign(entry, computeConsumedTotals(entry.meals));
+    this.saveLocal();
+  },
+  openAddFood(){
+    this.state.addfood.targetDate = null;
+    this.setScreen('addfood');
+  },
+  startBackdateLog(date){
+    this.state.addfood.targetDate = date;
+    this.state.addfood.selected = {};
+    this.state.addfood.activeTab = 'saved';
+    this.setScreen('addfood');
+  },
+  exitAddFood(){
+    const wasBackdate = !!this.state.addfood.targetDate;
+    this.state.addfood.targetDate = null;
+    this.setScreen(wasBackdate ? 'history' : 'today');
+  },
+  setBackdateWater(ml){
+    const date = this.state.addfood.targetDate;
+    if (!date) return;
+    const entry = this.getOrCreateHistoryDay(date);
+    entry.waterMl = Math.max(0, (entry.waterMl||0) + ml);
+    this.saveLocal();
+    this.render();
+  },
+  saveBackdateWeight(){
+    const date = this.state.addfood.targetDate;
+    if (!date) return;
+    const v = parseFloat(document.getElementById('backdate-weight-input')?.value);
+    if (!v) return;
+    const entry = this.getOrCreateHistoryDay(date);
+    entry.weightKg = Math.round(v*10)/10;
+    this.saveLocal();
+    this.render();
   },
   confirmAddSelectedFoods(){
     const st = this.state.addfood;
@@ -797,10 +848,11 @@ const App = {
         fib:round1(food.fib), sugar:round1(food.sugar||0), sodium:Math.round((food.sodium||0)*scale),
       });
     });
+    if (st.targetDate) this.recomputeHistoryDay(st.targetDate);
     st.selected = {};
     st.addedFlash = `Added to ${meal.name} ✓`;
     this.render();
-    this.setScreen('today');
+    if (!st.targetDate) this.setScreen('today');
   },
   addScaledItemToMeal(kind, id, inputEl){
     const list = kind === 'ingredients' ? this.state.memory.ingredients : this.state.memory.usda;
@@ -816,6 +868,7 @@ const App = {
       kcal: Math.round(item.kcal*scale), p: round1(item.p), c: round1(item.c), f: round1(item.f),
       fib: round1(item.fib), sugar: round1(item.sugar), sodium: Math.round((item.sodium||0)*scale),
     });
+    if (this.state.addfood.targetDate) this.recomputeHistoryDay(this.state.addfood.targetDate);
     this.state.addfood.flashId = id;
     this.render();
     setTimeout(() => { this.state.addfood.flashId = null; this.render(); }, 1400);
@@ -1215,10 +1268,11 @@ const App = {
         fib:round1(per100.fib||0), sugar:round1(per100.sugar||0), sodium:Math.round((per100.sodium||0)*scale),
       });
     });
+    if (this.state.addfood.targetDate) this.recomputeHistoryDay(this.state.addfood.targetDate);
     this.state.addfood.flashId = foodId;
     this.state.addfood.expandedSavedId = null;
     this.render();
-    this.setScreen('today');
+    if (!this.state.addfood.targetDate) this.setScreen('today');
   },
 
   requestMove(kind, id){ this.state.library.confirmMoveKey = kind+':'+id; this.render(); },
@@ -1921,7 +1975,7 @@ function renderToday(){
 
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div style="font-size:15px;font-weight:700;">Meal breakdown</div>
-        <button onclick="App.setScreen('addfood')" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">+ Log food</button>
+        <button onclick="App.openAddFood()" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">+ Log food</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
         ${st.meals.length===0 ? `
@@ -2024,7 +2078,7 @@ function renderToday(){
       </div>
     </div>
 
-    <button class="fab" onclick="App.setScreen('addfood')" title="Log food">
+    <button class="fab" onclick="App.openAddFood()" title="Log food">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
     </button>
 
@@ -2228,10 +2282,30 @@ function renderAddFood(){
       </div>`;
   }
 
+  const backdateEntry = st.targetDate ? (App.state.dayHistory.find(h => h.date === st.targetDate) || {waterMl:0, weightKg:null}) : null;
+  const backdateBanner = st.targetDate ? `
+    <div class="card pad" style="margin-bottom:12px;background:var(--brand-tint);border:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="font-size:12.5px;font-weight:800;color:var(--brand-dark);">Logging to ${formatShortDate(st.targetDate)}</div>
+        <button onclick="App.exitAddFood()" style="padding:6px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Done</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--brand-dark);font-weight:600;">Water</span>
+        <button class="chip" onclick="App.setBackdateWater(250)">+250ml</button>
+        <button class="chip" onclick="App.setBackdateWater(500)">+500ml</button>
+        <span style="font-size:11px;color:var(--brand-dark);">${formatLiters(backdateEntry.waterMl||0)}</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
+        <span style="font-size:11px;color:var(--brand-dark);font-weight:600;">Weight (kg)</span>
+        <input id="backdate-weight-input" type="number" step="0.1" value="${backdateEntry.weightKg ?? ''}" placeholder="—" style="width:70px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;font-family:inherit;"/>
+        <button onclick="App.saveBackdateWeight()" style="padding:6px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button>
+      </div>
+    </div>` : '';
+
   return `
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-        <button onclick="App.setScreen('today')" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
+        <button onclick="App.exitAddFood()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="disp" style="font-size:18px;font-weight:800;">Log food</div>
@@ -2246,6 +2320,7 @@ function renderAddFood(){
     </div>
 
     <div class="scroll-area" style="padding:14px 18px 14px 18px;">
+      ${backdateBanner}
       <div id="addfood-context-label" style="font-size:11.5px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;">
         ${st.activeTab==='saved' ? 'From your memory' : (st.activeTab==='ingredients' ? 'Raw ingredients · scale by weight' : 'USDA FoodData Central')}
       </div>
@@ -2657,7 +2732,11 @@ function renderHistory(){
                   <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${Math.round(d.calories)}</div><div style="font-size:9.5px;color:var(--muted);">Calories</div></div>
                 </div>
                 ${!d.isToday ? `
-                  <button onclick="App.requestDeleteDay('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;border:1.5px dashed var(--critical);background:transparent;color:var(--critical);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+                  <button onclick="App.startBackdateLog('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;border:none;background:var(--brand);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+                    Log a forgotten item to this day
+                  </button>
+                  <button onclick="App.requestDeleteDay('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:8px;padding:9px 0;border-radius:9px;border:1.5px dashed var(--critical);background:transparent;color:var(--critical);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     Delete this day
                   </button>
@@ -2720,6 +2799,8 @@ function renderHistory(){
       const entry = byDate.get(iso);
       if (iso === todayIso && !entry){
         cells += `<div onclick="App.selectMonthDay(${day})" style="aspect-ratio:1;border-radius:9px;display:flex;align-items:center;justify-content:center;background:#EEEEEC;color:var(--ink-2);font-size:11px;font-weight:700;cursor:pointer;${ring}">${day}</div>`;
+      } else if (!entry && iso < todayIso){
+        cells += `<div onclick="App.selectMonthDay(${day})" style="aspect-ratio:1;border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--ink-2);font-size:11px;font-weight:700;cursor:pointer;${ring}">${day}</div>`;
       } else if (!entry){
         cells += `<div style="aspect-ratio:1;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#C3C2B7;font-size:11px;font-weight:700;">${day}</div>`;
       } else {
@@ -2733,12 +2814,15 @@ function renderHistory(){
     if (st.selectedDayNum){
       const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(st.selectedDayNum).padStart(2,'0')}`;
       const entry = byDate.get(iso);
+      const isPast = iso < todayIso;
+      const logBtn = isPast ? `<button onclick="App.startBackdateLog('${iso}')" style="margin-top:8px;padding:7px 14px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">${entry ? 'Log a forgotten item' : 'Log food to this day'}</button>` : '';
       if (!entry){
-        selectedPanel = `<div class="card pad-sm" style="background:var(--brand-tint);border:none;margin-bottom:10px;"><div style="font-size:12.5px;font-weight:700;color:var(--brand-dark);">${formatShortDate(iso)} — nothing logged</div></div>`;
+        selectedPanel = `<div class="card pad-sm" style="background:var(--brand-tint);border:none;margin-bottom:10px;"><div style="font-size:12.5px;font-weight:700;color:var(--brand-dark);">${formatShortDate(iso)} — nothing logged</div>${logBtn}</div>`;
       } else {
         selectedPanel = `<div class="card pad-sm" style="background:var(--brand-tint);border:none;margin-bottom:10px;">
           <div style="font-size:12.5px;font-weight:700;color:var(--brand-dark);margin-bottom:6px;">${entry.isToday ? 'Today' : formatShortDate(iso)}</div>
           <div style="font-size:11.5px;color:var(--brand-dark);">${Math.round(entry.calories)} kcal · ${entry.protein}g protein · ${entry.fiber}g fiber</div>
+          ${logBtn}
         </div>`;
       }
     }
@@ -3312,7 +3396,7 @@ function renderDesktop(){
             <div class="disp" style="font-size:24px;font-weight:800;">Good morning, Ahmed</div>
             <div style="font-size:13.5px;color:var(--ink-2);margin-top:3px;">${formatFullDate(App.state.dayLog.currentDate)} · today's intake so far</div>
           </div>
-          <button onclick="App.setView('mobile'); App.setScreen('addfood')" style="display:flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;background:var(--brand);color:#fff;font-size:13.5px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">
+          <button onclick="App.setView('mobile'); App.openAddFood()" style="display:flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;background:var(--brand);color:#fff;font-size:13.5px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
             Log food
           </button>
