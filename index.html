@@ -639,13 +639,73 @@ const App = {
   setView(v){ this.state.view = v; this.render(); },
   setScreen(s){
     if (this.state.screen === s) return;
+    if (s === 'today' && !this._navigatingFromPopstate && (this._depth||0) > 0){
+      // Returning to Today directly (bottom nav, a back-arrow, etc.) rather than via the
+      // hardware back button still needs to unwind through any pushed history entries first —
+      // otherwise a later back press lands on a stale duplicate-depth entry and does nothing
+      // visible. Delegating to a real history pop lets the popstate handler below perform the
+      // actual close/navigate steps from live state, same as pressing back would.
+      history.go(-(this._depth||0));
+      return;
+    }
     this.state.screen = s;
-    // Pushes a history entry per screen so the Android hardware/gesture back button steps
-    // back through the app's own screens instead of immediately exiting it. Skipped when this
-    // change originated from a back-button popstate itself (see the listener at BOOT below) —
-    // otherwise every back press would push a new forward entry and back would never progress.
-    if (!this._navigatingFromPopstate) history.pushState({ screen: s }, '', location.href);
     this.render();
+  },
+  // Called by every overlay's own X/Cancel control instead of closing it directly, so a UI tap
+  // and a hardware back press both go through the exact same history pop + popstate-driven
+  // close — keeping the stack free of the stale duplicate-depth entries a direct close would
+  // otherwise leave behind (which would silently swallow the next back press).
+  backOneLevel(){
+    if ((this._depth||0) > 0) history.back();
+    else this.closeOpenOverlay();
+  },
+  // Android back button: a fixed 2-level hierarchy, not a record of screens visited. From any
+  // non-Today tab, back goes straight to Today (never through an intermediate tab). If a
+  // closeable sub-panel is open on the current tab (edit form, delete/move confirm, the Library
+  // select bar, the History delete-day card, the Export import review, or an Add Food backdate
+  // session), back closes just that first — same as its own X/Cancel — then a second back goes
+  // to Today. hasOpenOverlay/closeOpenOverlay list every such sub-panel; add new ones here.
+  hasOpenOverlay(){
+    const screen = this.state.screen;
+    if (screen === 'library'){
+      const st = this.state.library;
+      return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.selectMode);
+    }
+    if (screen === 'history') return !!this.state.history.confirmDeleteDate;
+    if (screen === 'exportScreen') return !!this.state.memoryImport;
+    if (screen === 'addfood') return !!this.state.addfood.targetDate;
+    return false;
+  },
+  closeOpenOverlay(){
+    const screen = this.state.screen;
+    if (screen === 'library'){
+      const st = this.state.library;
+      if (st.form) return this.closeForm();
+      if (st.composer) return this.closeComposer();
+      if (st.confirmDeleteKey) return this.cancelDelete();
+      if (st.confirmMoveKey) return this.cancelMove();
+      if (st.selectMode) return this.cancelLibrarySelect();
+    }
+    if (screen === 'history' && this.state.history.confirmDeleteDate) return this.cancelDeleteDay();
+    if (screen === 'exportScreen' && this.state.memoryImport) return this.cancelMemoryImport();
+    if (screen === 'addfood' && this.state.addfood.targetDate) return this.exitAddFood();
+  },
+  // Reconciles the browser history stack to match the app's current depth (0=Today,
+  // 1=away from Today, 2=away with an overlay open) after every render. Pushes when going
+  // deeper (opening something new); replaces in place when going shallower via a UI control
+  // like an X/Cancel button rather than the hardware back button (so a later back press lands
+  // one level up, not on the sub-panel that's already closed). Skipped entirely while a
+  // popstate-triggered change is in flight, since the browser has already moved for us there.
+  _syncBackStack(){
+    if (this._navigatingFromPopstate) return;
+    const away = this.state.screen !== 'today';
+    const overlay = away && this.hasOpenOverlay();
+    const desired = overlay ? 2 : (away ? 1 : 0);
+    const current = this._depth || 0;
+    if (desired === current) return;
+    if (desired > current) history.pushState({ depth: desired }, '', location.href);
+    else history.replaceState({ depth: desired }, '', location.href);
+    this._depth = desired;
   },
 
   toggleStat(id){ const t=this.state.today; t.expandedStat = t.expandedStat===id ? null : id; this.render(); },
@@ -1860,6 +1920,7 @@ const App = {
     renderToolbar();
     renderStage();
     this.saveLocal();
+    this._syncBackStack();
   }
 };
 
@@ -2379,7 +2440,7 @@ function renderAddFood(){
     <div class="card pad" style="margin-bottom:12px;background:var(--brand-tint);border:none;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div style="font-size:12.5px;font-weight:800;color:var(--brand-dark);">Logging to ${formatShortDate(st.targetDate)}</div>
-        <button onclick="App.exitAddFood()" style="padding:6px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Done</button>
+        <button onclick="App.backOneLevel()" style="padding:6px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Done</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--brand-dark);font-weight:600;">Water</span>
@@ -2397,7 +2458,7 @@ function renderAddFood(){
   return `
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-        <button onclick="App.exitAddFood()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
+        <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="disp" style="font-size:18px;font-weight:800;">Log food</div>
@@ -2446,7 +2507,7 @@ function renderMemoryForm(f){
     <div class="card pad" style="margin-bottom:10px;border:1.5px solid var(--brand);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div style="font-size:13.5px;font-weight:800;">${title}</div>
-        <button onclick="App.closeForm()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;">
+        <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
       </div>
@@ -2487,7 +2548,7 @@ function renderMemoryForm(f){
         `).join('')}
       </div>
       <div style="display:flex;gap:8px;">
-        <button onclick="App.closeForm()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:inherit;">Cancel</button>
         <button onclick="App.saveForm()" style="flex:2;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;font-size:13px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">${f.editId ? 'Save changes' : 'Add to memory'}</button>
       </div>
     </div>
@@ -2551,7 +2612,7 @@ function renderComposerForm(c){
     <div class="card pad" style="margin-bottom:10px;border:1.5px solid var(--brand);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div style="font-size:13.5px;font-weight:800;">${isEdit ? 'Edit saved meal' : 'Build a saved meal from ingredients'}</div>
-        <button onclick="App.closeComposer()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;">
+        <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
       </div>
@@ -2586,7 +2647,7 @@ function renderComposerForm(c){
       ${c.manualOpen ? renderComposerManualForm() : ''}
 
       <div style="display:flex;gap:8px;margin-top:14px;">
-        <button onclick="App.closeComposer()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:inherit;">Cancel</button>
         <button onclick="App.saveComposer()" style="flex:2;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;font-size:13px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">${isEdit ? 'Save changes' : 'Save meal'}</button>
       </div>
     </div>
@@ -2631,7 +2692,7 @@ function memoryConfirmCard(kind, item){
   return `<div class="card pad-sm" style="border-color:var(--critical);">
     <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Remove &ldquo;${item.name}&rdquo; from memory?</div>
     <div style="display:flex;gap:8px;">
-      <button onclick="App.cancelDelete()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+      <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
       <button onclick="App.confirmDelete('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Delete</button>
     </div>
   </div>`;
@@ -2641,7 +2702,7 @@ function memoryConfirmMoveCard(kind, item){
   return `<div class="card pad-sm" style="border-color:var(--brand);">
     <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Move &ldquo;${item.name}&rdquo; to ${moveTo}?</div>
     <div style="display:flex;gap:8px;">
-      <button onclick="App.cancelMove()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+      <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
       <button onclick="App.confirmMove('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Move</button>
     </div>
   </div>`;
@@ -2776,7 +2837,7 @@ function renderLibrary(){
     <div class="topbar">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
         <div class="disp" style="font-size:20px;font-weight:800;">Memory &amp; library</div>
-        <button onclick="App.toggleLibrarySelectMode()" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>
+        <button onclick="${st.selectMode ? 'App.backOneLevel()' : 'App.toggleLibrarySelectMode()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>
       </div>
       <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">${st.selectMode ? 'Tap items to select, then share them together.' : 'Saved foods, ingredients &amp; learned rules — update anytime'}</div>
       <div class="search">
@@ -2795,7 +2856,7 @@ function renderLibrary(){
     </div>
     ${st.selectMode ? `
       <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;display:flex;gap:8px;">
-        <button onclick="App.cancelLibrarySelect()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="App.backOneLevel()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
         <button onclick="App.shareSelectedMemoryItems()" ${selectedCount===0?'disabled':''} style="flex:2;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Share ${selectedCount>0 ? selectedCount+' item'+(selectedCount>1?'s':'') : ''}
@@ -2820,7 +2881,7 @@ function renderHistory(){
             return `<div class="card pad-sm" style="border-color:var(--critical);">
               <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Permanently delete ${formatShortDate(d.date)}? This removes it from History, Trends and Export — it can't be undone.</div>
               <div style="display:flex;gap:8px;">
-                <button onclick="App.cancelDeleteDay()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+                <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
                 <button onclick="App.deleteDay('${d.date}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Delete</button>
               </div>
             </div>`;
@@ -3117,7 +3178,7 @@ function renderMemoryImportReview(){
   return `
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-        <button onclick="App.cancelMemoryImport()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
+        <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="disp" style="font-size:18px;font-weight:800;">Review import</div>
@@ -3175,7 +3236,7 @@ function renderMemoryImportReview(){
       ` : ''}
     </div>
     <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;display:flex;gap:8px;">
-      <button onclick="App.cancelMemoryImport()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+      <button onclick="App.backOneLevel()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
       <button onclick="App.applyMemoryImport()" style="flex:2;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Apply import</button>
     </div>
   `;
@@ -3682,17 +3743,24 @@ App.loadLocal();
 App.checkDayRollover();
 App.render();
 
-// Android hardware/gesture back button: seed a base history entry for the screen we booted
-// into, then step the app's own screen back on every popstate instead of letting the browser
-// exit the PWA. Once the user is back at that base entry, a further back press has nothing
-// left to pop and falls through to the normal (app-closing) behavior, which is what we want.
-history.replaceState({ screen: App.state.screen }, '', location.href);
+// Android hardware/gesture back button: seed the base (depth 0) history entry for whatever
+// screen we booted into, then step down one level per popstate — closing an open overlay first
+// if there is one, otherwise going to Today. Once back at depth 0, a further back press has
+// nothing left to pop and falls through to the normal (app-closing) behavior, which is what we want.
+App._depth = 0;
+history.replaceState({ depth: 0 }, '', location.href);
 window.addEventListener('popstate', (e) => {
-  if (e.state && e.state.screen){
-    App._navigatingFromPopstate = true;
-    App.setScreen(e.state.screen);
-    App._navigatingFromPopstate = false;
+  App._navigatingFromPopstate = true;
+  const targetDepth = (e.state && typeof e.state.depth === 'number') ? e.state.depth : 0;
+  let d = App._depth || 0;
+  while (d > targetDepth){
+    if (App.hasOpenOverlay()) App.closeOpenOverlay();
+    else if (App.state.screen !== 'today') App.setScreen('today');
+    else break;
+    d--;
   }
+  App._depth = targetDepth;
+  App._navigatingFromPopstate = false;
 });
 
 if ('serviceWorker' in navigator) {
