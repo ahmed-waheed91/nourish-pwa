@@ -637,7 +637,16 @@ const App = {
   },
 
   setView(v){ this.state.view = v; this.render(); },
-  setScreen(s){ this.state.screen = s; this.render(); },
+  setScreen(s){
+    if (this.state.screen === s) return;
+    this.state.screen = s;
+    // Pushes a history entry per screen so the Android hardware/gesture back button steps
+    // back through the app's own screens instead of immediately exiting it. Skipped when this
+    // change originated from a back-button popstate itself (see the listener at BOOT below) —
+    // otherwise every back press would push a new forward entry and back would never progress.
+    if (!this._navigatingFromPopstate) history.pushState({ screen: s }, '', location.href);
+    this.render();
+  },
 
   toggleStat(id){ const t=this.state.today; t.expandedStat = t.expandedStat===id ? null : id; this.render(); },
   toggleMeal(id){ const t=this.state.today; t.expandedMeal = t.expandedMeal===id ? null : id; this.render(); },
@@ -3672,6 +3681,19 @@ function renderDesktop(){
 App.loadLocal();
 App.checkDayRollover();
 App.render();
+
+// Android hardware/gesture back button: seed a base history entry for the screen we booted
+// into, then step the app's own screen back on every popstate instead of letting the browser
+// exit the PWA. Once the user is back at that base entry, a further back press has nothing
+// left to pop and falls through to the normal (app-closing) behavior, which is what we want.
+history.replaceState({ screen: App.state.screen }, '', location.href);
+window.addEventListener('popstate', (e) => {
+  if (e.state && e.state.screen){
+    App._navigatingFromPopstate = true;
+    App.setScreen(e.state.screen);
+    App._navigatingFromPopstate = false;
+  }
+});
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
