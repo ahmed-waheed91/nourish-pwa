@@ -626,7 +626,7 @@ const App = {
       usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
     builtinFoodsSeeded: true,
-    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, shareStatus:null },
+    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, shareStatus:null, selectMode:false, selected:{} },
     history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
@@ -1600,15 +1600,11 @@ const App = {
   buildMemoryOnlyPayload(){
     return { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:this.state.memory };
   },
-  shareMemoryItem(kind, id){
-    const item = this.state.memory[kind].find(x => x.id === id);
-    if (!item) return;
-    const payload = { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:{ foods:[], ingredients:[], usda:[], [kind]:[item] } };
-    const json = JSON.stringify(payload, null, 2);
-    const slug = (item.name||kind).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || kind;
-    const fileName = `nourish-${slug}.json`;
-    const shareIntro = `${item.name} — shared from Nourish. To bring it into your own Nourish, paste this whole message into Memory & Library → Export → Import memory → "Import from pasted text".`;
-
+  // File-based Web Share is unreliable for a .json payload — canShare({files}) can report true
+  // while the actual share() call rejects with "NotAllowedError: Permission denied", because
+  // Chromium restricts file sharing to a curated safe list of extensions that excludes .json.
+  // Text sharing has no such restriction, so it's the only path used for memory-item sharing.
+  shareJsonAsText(title, text, fileName, json){
     const toDownload = (reason) => {
       try {
         saveFileToDevice(fileName, json);
@@ -1620,16 +1616,59 @@ const App = {
       setTimeout(() => { this.state.library.shareStatus = null; this.render(); }, 5000);
     };
     if (!navigator.share){ toDownload('no navigator.share'); return; }
-    // File-based Web Share is unreliable for a .json payload — canShare({files}) can report true
-    // while the actual share() call rejects with "NotAllowedError: Permission denied", because
-    // Chromium restricts file sharing to a curated safe list of extensions that excludes .json.
-    // Text sharing has no such restriction, so it's the only path used here.
     try {
-      navigator.share({ title:item.name, text:`${shareIntro}\n\n${json}` })
-        .catch(err => toDownload(`${err && err.name}: ${err && err.message}`));
+      navigator.share({ title, text }).catch(err => toDownload(`${err && err.name}: ${err && err.message}`));
     } catch (err) {
       toDownload(`sync ${err && err.name}: ${err && err.message}`);
     }
+  },
+  shareMemoryItem(kind, id){
+    const item = this.state.memory[kind].find(x => x.id === id);
+    if (!item) return;
+    const payload = { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:{ foods:[], ingredients:[], usda:[], [kind]:[item] } };
+    const json = JSON.stringify(payload, null, 2);
+    const slug = (item.name||kind).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || kind;
+    const fileName = `nourish-${slug}.json`;
+    const shareIntro = `${item.name} — shared from Nourish. To bring it into your own Nourish, paste this whole message into Memory & Library → Export → Import memory → "Import from pasted text".`;
+    this.shareJsonAsText(item.name, `${shareIntro}\n\n${json}`, fileName, json);
+  },
+  toggleLibrarySelectMode(){
+    const st = this.state.library;
+    st.selectMode = !st.selectMode;
+    st.selected = {};
+    this.render();
+  },
+  cancelLibrarySelect(){
+    const st = this.state.library;
+    st.selectMode = false;
+    st.selected = {};
+    this.render();
+  },
+  toggleLibrarySelected(kind, id){
+    const st = this.state.library;
+    const key = kind+':'+id;
+    if (st.selected[key]) delete st.selected[key]; else st.selected[key] = true;
+    this.render();
+  },
+  shareSelectedMemoryItems(){
+    const st = this.state.library;
+    const grouped = { foods:[], ingredients:[], usda:[] };
+    Object.keys(st.selected).forEach(key => {
+      const [kind, id] = key.split(':');
+      const item = this.state.memory[kind] && this.state.memory[kind].find(x => x.id === id);
+      if (item) grouped[kind].push(item);
+    });
+    const count = grouped.foods.length + grouped.ingredients.length + grouped.usda.length;
+    if (!count) return;
+    const payload = { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:grouped };
+    const json = JSON.stringify(payload, null, 2);
+    const stamp = new Date().toISOString().slice(0,10);
+    const fileName = `nourish-${count}-items-${stamp}.json`;
+    const shareIntro = `${count} item${count===1?'':'s'} — shared from Nourish. To bring ${count===1?'it':'them'} into your own Nourish, paste this whole message into Memory & Library → Export → Import memory → "Import from pasted text".`;
+    this.shareJsonAsText(`${count} shared item${count===1?'':'s'}`, `${shareIntro}\n\n${json}`, fileName, json);
+    st.selectMode = false;
+    st.selected = {};
+    this.render();
   },
   exportMemoryOnly(){
     const json = JSON.stringify(this.buildMemoryOnlyPayload(), null, 2);
@@ -1678,30 +1717,25 @@ const App = {
       return;
     }
     const kinds = ['foods','ingredients','usda'];
-    const autoAdd = { foods:[], ingredients:[], usda:[] };
+    const newItems = [];
     const conflicts = [];
     kinds.forEach(kind => {
       const existingList = this.state.memory[kind];
       (data.memory[kind]||[]).forEach(incoming => {
         const match = existingList.find(x => x.name && incoming.name && x.name.trim().toLowerCase() === incoming.name.trim().toLowerCase());
         if (match) conflicts.push({ kind, incoming, existingId:match.id, choice:'skip' });
-        else autoAdd[kind].push(incoming);
+        else newItems.push({ kind, item:incoming, include:true });
       });
     });
     this.state.exportScreen.memoryPasteText = '';
-    if (conflicts.length === 0){
-      let total = 0;
-      kinds.forEach(kind => {
-        autoAdd[kind].forEach(item => {
-          this.state.memory[kind].push({ ...item, id:this.genId(item.name||kind), updated:'Just now' });
-          total++;
-        });
-      });
-      this.state.exportScreen.memoryStatus = `Import complete ✓ — added ${total} new item${total===1?'':'s'} to your memory.`;
+    if (newItems.length === 0 && conflicts.length === 0){
+      this.state.exportScreen.memoryStatus = "Nothing to import — that didn't contain any items.";
       this.render();
       return;
     }
-    this.state.memoryImport = { fileName:sourceLabel, autoAdd, conflicts };
+    // Always show the review screen (even with no conflicts) so you can see exactly what's about
+    // to be added — name and calories per item — before it lands in your memory.
+    this.state.memoryImport = { fileName:sourceLabel, newItems, conflicts };
     __scrollTopNext = true;
     this.render();
   },
@@ -1713,6 +1747,11 @@ const App = {
     this.state.memoryImport.conflicts.forEach(c => c.choice = choice);
     this.render();
   },
+  toggleNewItemInclude(i){
+    const n = this.state.memoryImport.newItems[i];
+    n.include = !n.include;
+    this.render();
+  },
   cancelMemoryImport(){
     this.state.memoryImport = null;
     __scrollTopNext = true;
@@ -1721,13 +1760,11 @@ const App = {
   applyMemoryImport(){
     const mi = this.state.memoryImport;
     if (!mi) return;
-    const kinds = ['foods','ingredients','usda'];
     let added = 0, overwritten = 0, skipped = 0, duplicated = 0;
-    kinds.forEach(kind => {
-      mi.autoAdd[kind].forEach(item => {
-        this.state.memory[kind].push({ ...item, id:this.genId(item.name||kind), updated:'Just now' });
-        added++;
-      });
+    mi.newItems.forEach(n => {
+      if (!n.include){ skipped++; return; }
+      this.state.memory[n.kind].push({ ...n.item, id:this.genId(n.item.name||n.kind), updated:'Just now' });
+      added++;
     });
     mi.conflicts.forEach(c => {
       if (c.choice === 'skip'){ skipped++; return; }
@@ -2551,6 +2588,16 @@ function photoThumb(item){
 }
 const ROW_ACTION_BTN = 'background:none;border:none;cursor:pointer;color:var(--muted);padding:8px;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;';
 function memoryRowActions(kind, item){
+  const libSt = App.state.library;
+  if (libSt.selectMode){
+    const checked = !!libSt.selected[kind+':'+item.id];
+    return `
+    <button onclick="event.stopPropagation();App.toggleLibrarySelected('${kind}','${item.id}')" style="${ROW_ACTION_BTN}">
+      <div style="width:22px;height:22px;border-radius:6px;border:1.5px solid ${checked?'var(--brand)':'var(--border)'};background:${checked?'var(--brand)':'transparent'};display:flex;align-items:center;justify-content:center;">
+        ${checked ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
+      </div>
+    </button>`;
+  }
   const isComposite = kind === 'foods' && Array.isArray(item.components);
   const canMove = (kind === 'foods' || kind === 'ingredients') && !isComposite;
   const moveTo = kind === 'foods' ? 'Ingredients' : 'Saved foods';
@@ -2715,10 +2762,14 @@ function renderLibrary(){
     </div>
   </div>`;
 
+  const selectedCount = Object.keys(st.selected).length;
   return `
     <div class="topbar">
-      <div class="disp" style="font-size:20px;font-weight:800;margin-bottom:2px;">Memory &amp; library</div>
-      <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">Saved foods, ingredients &amp; learned rules — update anytime</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+        <div class="disp" style="font-size:20px;font-weight:800;">Memory &amp; library</div>
+        <button onclick="App.toggleLibrarySelectMode()" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>
+      </div>
+      <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">${st.selectMode ? 'Tap items to select, then share them together.' : 'Saved foods, ingredients &amp; learned rules — update anytime'}</div>
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input placeholder="Search memory..." oninput="App.filterLibraryRows(this.value)"/>
@@ -2733,7 +2784,15 @@ function renderLibrary(){
       <div id="lib-extras">${extras}</div>
       ${groups}
     </div>
-    ${bottomNav('library')}
+    ${st.selectMode ? `
+      <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;display:flex;gap:8px;">
+        <button onclick="App.cancelLibrarySelect()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="App.shareSelectedMemoryItems()" ${selectedCount===0?'disabled':''} style="flex:2;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Share ${selectedCount>0 ? selectedCount+' item'+(selectedCount>1?'s':'') : ''}
+        </button>
+      </div>
+    ` : bottomNav('library')}
   `;
 }
 
@@ -3044,7 +3103,6 @@ function renderTrends(){
 function renderMemoryImportReview(){
   const mi = App.state.memoryImport;
   const kindLabel = { foods:'Saved food', ingredients:'Ingredient', usda:'USDA reference' };
-  const totalAutoAdd = mi.autoAdd.foods.length + mi.autoAdd.ingredients.length + mi.autoAdd.usda.length;
   const choices = [['skip','Skip'],['duplicate','Add as duplicate'],['overwrite','Overwrite']];
   const kcalOf = x => x ? (x.kcal ?? x.kcalPer100 ?? '—') : '—';
   return `
@@ -3053,37 +3111,59 @@ function renderMemoryImportReview(){
         <button onclick="App.cancelMemoryImport()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <div class="disp" style="font-size:18px;font-weight:800;">Resolve duplicates</div>
+        <div class="disp" style="font-size:18px;font-weight:800;">Review import</div>
       </div>
       <div style="font-size:12px;color:var(--ink-2);line-height:1.4;">
-        ${totalAutoAdd>0 ? `${totalAutoAdd} new item${totalAutoAdd===1?'':'s'} will be added automatically. ` : ''}${mi.conflicts.length} item${mi.conflicts.length===1?'':'s'} already ${mi.conflicts.length===1?'exists':'exist'} in your memory — choose what to do with each below.
+        ${mi.newItems.length>0 ? `${mi.newItems.length} new item${mi.newItems.length===1?'':'s'}. ` : ''}${mi.conflicts.length>0 ? `${mi.conflicts.length} item${mi.conflicts.length===1?'':'s'} already ${mi.conflicts.length===1?'exists':'exist'} — choose what to do with each below.` : ''}
       </div>
     </div>
     <div class="scroll-area" style="padding:14px 18px 90px 18px;">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-        <div style="font-size:11px;color:var(--muted);flex-shrink:0;">Apply to all:</div>
-        <div class="seg" style="flex:1;">
-          <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('skip')">Skip</button>
-          <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('duplicate')">Duplicate</button>
-          <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('overwrite')">Overwrite</button>
+      ${mi.newItems.length>0 ? `
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">New items</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${mi.conflicts.length>0?'18':'0'}px;">
+          ${mi.newItems.map((n,i) => `
+            <div class="card pad-sm" style="display:flex;align-items:center;gap:10px;opacity:${n.include?'1':'0.5'};">
+              <div onclick="App.toggleNewItemInclude(${i})" style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:pointer;">
+                <div style="width:20px;height:20px;flex-shrink:0;border-radius:6px;border:1.5px solid ${n.include?'var(--brand)':'var(--border)'};background:${n.include?'var(--brand)':'transparent'};display:flex;align-items:center;justify-content:center;">
+                  ${n.include ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
+                </div>
+                <div style="min-width:0;">
+                  <div style="font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${n.item.name}</div>
+                  <div style="font-size:10.5px;color:var(--muted);">${kindLabel[n.kind]}</div>
+                </div>
+              </div>
+              <div class="num" style="font-size:12.5px;font-weight:700;color:var(--ink-2);flex-shrink:0;">${kcalOf(n.item)} kcal</div>
+            </div>
+          `).join('')}
         </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        ${mi.conflicts.map((c,i) => {
-          const existing = App.state.memory[c.kind].find(x => x.id === c.existingId);
-          return `
-          <div class="card pad-sm">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-              <div style="font-size:13.5px;font-weight:700;">${c.incoming.name}</div>
-              <span class="pill pill-neutral">${kindLabel[c.kind]}</span>
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Incoming: ${kcalOf(c.incoming)} kcal &nbsp;·&nbsp; Existing: ${kcalOf(existing)} kcal</div>
-            <div class="seg">
-              ${choices.map(([id,label]) => `<button class="seg-btn" style="flex:1;${c.choice===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setMemoryImportChoice(${i},'${id}')">${label}</button>`).join('')}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
+      ` : ''}
+      ${mi.conflicts.length>0 ? `
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">Already in your memory</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="font-size:11px;color:var(--muted);flex-shrink:0;">Apply to all:</div>
+          <div class="seg" style="flex:1;">
+            <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('skip')">Skip</button>
+            <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('duplicate')">Duplicate</button>
+            <button class="seg-btn" style="flex:1;" onclick="App.setAllMemoryImportChoices('overwrite')">Overwrite</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${mi.conflicts.map((c,i) => {
+            const existing = App.state.memory[c.kind].find(x => x.id === c.existingId);
+            return `
+            <div class="card pad-sm">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <div style="font-size:13.5px;font-weight:700;">${c.incoming.name}</div>
+                <span class="pill pill-neutral">${kindLabel[c.kind]}</span>
+              </div>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Incoming: ${kcalOf(c.incoming)} kcal &nbsp;·&nbsp; Existing: ${kcalOf(existing)} kcal</div>
+              <div class="seg">
+                ${choices.map(([id,label]) => `<button class="seg-btn" style="flex:1;${c.choice===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setMemoryImportChoice(${i},'${id}')">${label}</button>`).join('')}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      ` : ''}
     </div>
     <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;display:flex;gap:8px;">
       <button onclick="App.cancelMemoryImport()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
