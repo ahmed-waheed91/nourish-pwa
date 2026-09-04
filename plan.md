@@ -4,14 +4,14 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-02. The original four features (PDF export, live USDA lookup, real OCR,
-composite Saved Foods) plus a large batch shipped 2026-08-28 are all live in both apps — see "Four
-functional features" and items 5-9 below for the 2026-08-28 batch (memory sharing, cross-tab
-search, delete-a-day, Notes-tab removal, portion-by-percentage, portion-by-weight, fixed meal
-order) and their confirmation status (most are user-confirmed on real device; the two most recent —
-portion-by-weight, fixed meal order — are built/self-tested but not yet confirmed). No feature is
-in progress right now — check with the user for what's next. See "Immediate next steps" and
-"Standing watch item" near the end of this file before starting new work._
+_Last updated 2026-09-04. The original four features (PDF export, live USDA lookup, real OCR,
+composite Saved Foods) plus two large batches (2026-08-28 and 2026-09-04) are all live in both apps
+and **user-confirmed working** — see "Four functional features" / items 5-9 for the 2026-08-28
+batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal, portion-by-percentage,
+portion-by-weight, fixed meal order), and "Three features (2026-09-04)" below for the newest batch
+(backdated logging, sharing individual memory items, and an Android back button that actually
+behaves like one). No feature is in progress right now — check with the user for what's next. See
+"Immediate next steps" and "Standing watch item" near the end of this file before starting new work._
 
 ## Cross-machine continuity (why this file is here, in git)
 
@@ -449,13 +449,19 @@ through several rounds of upfront design Q&A, followed by two rounds of real-dev
 Then: fixed the GitHub repo's blank "Website" field for install-link discoverability, and moved this
 checkpoint file into the git repo (from the parent project folder) so it stays in sync across the
 user's two development machines via the same git push/pull habit as the code, after confirming that
-a Claude Code session itself (browser or desktop) does not carry over between machines. Most
-recently (2026-08-28, one long session): a large batch of functional features and fixes — memory
+a Claude Code session itself (browser or desktop) does not carry over between machines. Then (2026-08-28, one long session): a large batch of functional features and fixes — memory
 sharing between users, cross-tab search (twice — the Library screen was the one the user actually
 meant, not just Add Food), delete-a-past-day, removed the dead "Notes" tab, a real Trends-chart
 tooltip overflow bug, portion logging by percentage then by weight, and a fixed meal display order.
-Full detail for all of it is in "Four functional features" and items 5-9 below — see "Immediate
-next steps" for what's confirmed vs. still awaiting real-device confirmation.
+Full detail for all of it is in "Four functional features" and items 5-9 below. Most recently
+(2026-09-04, one long session): three more user-requested features, each shipped and confirmed one
+at a time — backdated logging (add food/water/weight to a past day), sharing a single or multiple
+memory items via the native share sheet, and an Android back button that navigates within the app
+instead of closing it. The share feature and the back button each took real, non-obvious debugging
+across multiple rounds of on-device failure before landing correctly (Web Share's user-activation
+and file-type-safelist quirks; a back-button design that needed to be a fixed depth, not a replay of
+screens visited) — full detail, including the exact platform gotchas, is in "Three features
+(2026-09-04)" below; worth reading in full before touching either area again.
 
 ## Four functional features (2026-08-28) — implemented in both apps, user-confirmed working
 
@@ -651,6 +657,155 @@ user actually meant; fixed as item 5 below) plus one unrelated real bug the user
      call sites if this is ever extended (e.g. History's day-detail view doesn't currently show a
      meal-by-meal breakdown at all, only aggregate day totals, so there was nothing to fix there).
 
+## Three features (2026-09-04) — implemented in both apps, all user-confirmed working
+
+Requested together in one session, built and confirmed **one at a time** per the established
+working preference. All three are **functional** changes and went into both apps in the same pass.
+
+### 10. Backdated logging — add food/water/weight to a past day
+
+"In case of forgotten entries" — previously the only way to add a food item was to the live
+`today` day; there was no way to retroactively log something to yesterday or an earlier day.
+
+- **Entry point**: History → Day view (expand a past day → **"Log a forgotten item to this day"**
+  button, next to "Delete this day") and History → Month view (click any **past** date, including
+  ones with nothing logged yet — the calendar previously only made *today* clickable when empty;
+  now any past day is too). Both call `App.startBackdateLog(date)`.
+- **Mechanism**: `App.state.addfood.targetDate` (normally `null`) holds the date being backdated.
+  `getOrCreateMeal()` — the one function every add-food path (`confirmAddSelectedFoods`,
+  `addScaledItemToMeal`, `addComposedFoodToMeal`) already funnels through — checks it and, when
+  set, resolves the target meal against `App.getOrCreateHistoryDay(date)` instead of
+  `state.today`. That new helper finds (or creates, inserting in the correct **sorted-by-date**
+  position — `dayHistory` is chronologically ascending, a "forgotten" day with zero prior entries
+  is a real gap in it) the `dayHistory` entry for that date. After any add, `recomputeHistoryDay(date)`
+  re-runs `computeConsumedTotals()` against that day's `meals` so its aggregate calorie/macro
+  totals stay correct — the exact same computation `checkDayRollover()` already does for the live
+  day, just retargeted.
+- **Add Food screen reused as-is** for the actual food-picking UI (search/select/portion, all three
+  tabs, composed recipes) — a **"Logging to [date]"** banner appears at the top when `targetDate`
+  is set, with its own water (+250ml/+500ml) and weight quick-entry fields
+  (`App.setBackdateWater`/`saveBackdateWeight`, writing directly into that day's `dayHistory`
+  entry) so a fully forgotten day can be backfilled in one pass, not just food. **Done** button
+  (`App.exitAddFood`) returns to History and clears `targetDate`; normal (non-backdate) Add Food
+  entry points were routed through a new `App.openAddFood()` wrapper that explicitly clears
+  `targetDate` first, so a stale backdate session from a previous visit can never leak into a
+  fresh "+ Log food" tap.
+- **Known, accepted gap**: Month view only shows the current month (no prev/next navigation, a
+  pre-existing limitation) — a day with zero entries in a *previous* month can't be backdated this
+  way. Not fixed, since "forgotten entries" in practice means recent days.
+
+### 11. Share a single memory item (and, after feedback, several at once)
+
+Went through **three real rounds of on-device failure** before landing correctly — worth reading
+in full if this code is touched again, since the root causes are non-obvious platform quirks, not
+logic bugs.
+
+- **UI**: Memory & Library → each Saved Food/Ingredient/USDA row got a Share icon button
+  (`App.shareMemoryItem(kind, id)`), next to Move/Edit/Delete. Builds a payload in the **same
+  shape as the existing memory export** (`{app, type:'memory', version, exportedAt, memory:{foods,
+  ingredients, usda}}`), just scoped to the one item, and hands it to `navigator.share()`.
+- **Round 1 bug — "tapping it only highlights the item, no share sheet"**: the very first version
+  had `navigator.share({...}).catch(()=>{})` — an **empty catch that silently swallowed any
+  rejection**, so a failed share looked like nothing happened at all. Fixed by making every
+  fallback tier actually do something (fall through to a text-only share, then to a plain file
+  download) instead of a no-op catch.
+- **Round 2 bug — "NotAllowedError: Permission Denied", every time**: root cause is that
+  **`navigator.share()` consumes the tap's user-activation the instant it's called, whether it
+  resolves or rejects** — so retrying a *second* `navigator.share()` call from inside the first
+  one's `.catch()` (round 1's fix) is **guaranteed to fail**, since by then there's no valid user
+  gesture left. Reproduced this exactly in a test harness by mocking `share()` to accept-then-
+  reject and confirming the retry always failed. Fixed by deciding the payload **once**, up front,
+  using `navigator.canShare()` — a pure capability check that does *not* consume activation — and
+  committing to exactly one `share()` call.
+- **Round 3 bug — still "Permission Denied" every time, even after round 2's fix**: this exposed a
+  **real Android/Chromium platform restriction, not a bug in the retry logic at all**. Web Share's
+  file-attachment path only allows a curated safe list of MIME types/extensions for security
+  reasons, and `.json` isn't on it — **`navigator.canShare({files:[jsonFile]})` can report `true`
+  (a false positive) while the actual `share()` call for that same file rejects every time.**
+  There is no reliable client-side way to detect this in advance. **Fixed by dropping file-sharing
+  entirely** — `shareMemoryItem`/`shareJsonAsText` now share **text only** (`navigator.share({title,
+  text})`), which has no such MIME restriction and is far more universally supported.
+  ⚠️ **Don't reintroduce file-based Web Share for JSON payloads in this app** — it will pass
+  `canShare()` and then fail on real Android devices.
+- **Recipient side, to keep sharing genuinely useful without an auto-attached file**: Export →
+  Import memory gained a second option, **"Import from pasted text"** — a textarea +
+  button (`App.handleMemoryImportPaste`) alongside the existing file picker. The shared message is
+  the intro line + the full JSON, so pasting it back in and tapping Import runs through the exact
+  same parse/merge/conflict logic as a file import (both `handleMemoryImportFile` and
+  `handleMemoryImportPaste` now funnel through one shared `processMemoryImportText(rawText,
+  sourceLabel, invalidJsonMsg, wrongShapeMsg)`).
+- **User feedback after round 3 confirmed working, two follow-up asks, both shipped together**:
+  1. **Couldn't select more than one item to share.** Library gained a **Select** mode (top-right
+     toggle button, replaces the normal per-row action icons with a checkbox while active, replaces
+     the bottom nav bar with Cancel/Share buttons while active) — `App.toggleLibrarySelectMode`,
+     `toggleLibrarySelected(kind,id)`, `shareSelectedMemoryItems()`. Selection can span across the
+     Saved Foods/Ingredients/USDA tabs (tracked as `kind:id` keys in `state.library.selected`, not
+     tab-scoped), and shares everything selected in one `navigator.share()` call.
+  2. **The recipient couldn't see what was about to be imported** (name/calories) unless there was
+     a name conflict — a zero-conflict import (the common case for a single freshly-shared item)
+     previously just auto-added silently with a one-line count. **The review screen
+     (`renderMemoryImportReview`) now always shows**, whether or not there are conflicts — every
+     incoming item, conflicting or not, is listed with its name and calories.
+     `mi.autoAdd` (a `{foods:[],ingredients:[],usda:[]}` grouped object) was replaced with
+     `mi.newItems` (a flat `[{kind,item,include:true}]` array) so each non-conflicting item also
+     gets its own include/exclude checkbox (`App.toggleNewItemInclude(i)`), matching the
+     skip/duplicate/overwrite control conflicting items already had. `applyMemoryImport()` updated
+     to match (`mi.newItems.forEach` instead of the old per-kind `autoAdd` loop).
+
+### 12. Android hardware/gesture back button navigates within the app
+
+Two rounds here too — the first shipped version technically worked but didn't match the user's
+actual mental model, and fixing that exposed a second, subtler bug.
+
+- **What the user actually wants** (their words, this is the spec): from **any** non-Today tab,
+  back goes **straight to Today** — never through whichever other tabs happened to be visited in
+  between. If a closeable sub-panel is open on the current tab (an edit form, a delete/move
+  confirm, Library's select bar, History's delete-day card, Export's import review, an Add Food
+  backdate session), back closes **just that** first — same as its own X/Cancel — then a second
+  back goes to Today.
+- **Round 1 (wrong model, not reshipped as-is)**: pushed one `history` entry per `setScreen()` call
+  and replayed them via `popstate` — so History→Trends→Memory pushed 3 entries, and back stepped
+  Memory→Trends→History→Today, i.e. **exactly the sequence visited**, not "any tab → Today
+  directly." User confirmed it "worked" (a back press did *something* sensible-looking) but flagged
+  it didn't match their expectation once described precisely.
+- **Round 2, current design — a fixed 2-level depth, not a history of screens visited**:
+  - `App.hasOpenOverlay()` / `App.closeOpenOverlay()` — the single place that knows what counts as
+    an open sub-panel per screen (`library.form`/`.composer`/`.confirmDeleteKey`/`.confirmMoveKey`/
+    `.selectMode`; `history.confirmDeleteDate`; top-level `memoryImport`; `addfood.targetDate`) and
+    how to close it (routes to the existing `closeForm`/`closeComposer`/`cancelDelete`/`cancelMove`/
+    `cancelLibrarySelect`/`cancelDeleteDay`/`cancelMemoryImport`/`exitAddFood`). Add any *new*
+    closeable sub-panel to both of these, or back won't know about it.
+  - `App._syncBackStack()`, called at the end of **every** `render()` (one hook, not sprinkled
+    through individual actions): computes `desired` depth — `0` = Today, `1` = away from Today,
+    `2` = away **and** an overlay open — from live state, compares to the tracked `App._depth`,
+    and `history.pushState`s when going deeper. Switching between two non-Today tabs is depth-flat
+    (1→1), so no entry is pushed — this is *why* back goes straight to Today regardless of which
+    tabs were visited.
+  - `popstate` handler (BOOT section, bottom of `index.html`): on a pop, loops
+    `while (tracked depth > target depth)`, each iteration calling `closeOpenOverlay()` if one's
+    open, else `setScreen('today')` — i.e. it **re-derives the correct action from current live
+    state**, it does not replay a stored screen name. This is what makes "any tab → Today" and
+    "close overlay, then Today" both fall out of the same simple loop.
+  - **A real, subtler bug found while verifying this**: an overlay's own X/Cancel button (or a
+    direct "go to Today" tap) used to close by mutating state directly, then letting `_syncBackStack`
+    call `history.replaceState` to bring the stack's depth marker down — but the *original* entry at
+    that depth (pushed when the screen was first entered) was still sitting immediately below it,
+    now duplicated. The **next** back press would pop to that duplicate (same depth number, no
+    actual change) and silently do nothing — a "dead" back press requiring an extra press to
+    actually leave. **Fixed by routing every overlay-close UI control through
+    `App.backOneLevel()`** (`history.back()` when depth > 0, letting the *same* live-state-derived
+    popstate loop above perform the actual close — never mutating state directly from a UI tap) —
+    and `setScreen()` itself now does the equivalent (`history.go(-depth)`) for any direct jump to
+    `'today'` (bottom-nav tap, etc.). Verified explicitly: open an edit form → tap its X → **one**
+    subsequent back press reaches Today, not two. ⚠️ **Any future closeable overlay must go through
+    `backOneLevel()`/`closeOpenOverlay()`, never close itself by mutating state directly from an
+    onclick** — that reintroduces the dead-back-press bug.
+- **Scope, deliberately**: only the 6 top-level screens (Today/History/Trends/Memory/Export/
+  Settings) plus Add Food, and the specific sub-panels listed above. Accordion expand/collapse on
+  Today, and switching tabs while a *different* tab's overlay is left open in the background
+  (rare — nothing currently does this), are not covered; chosen as the simpler, lower-risk option
+  when this was scoped with the user up front.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -664,19 +819,21 @@ just inert bytes in the file. Verdict: keep it as-is.
 the desktop view specifically — ever becomes significant enough to matter**, e.g. noticeably
 slower initial load/parse, meaningfully larger download even after gzip, or the single-file
 architecture itself becoming unwieldy to maintain. This app is a single monolithic `index.html`
-(currently ~206 KB) with no build step/bundler/minification — there's no established threshold for
-"too big" yet, so use judgment: a good trigger point is when total file size roughly doubles from
-this ~206 KB baseline, or when any one addition alone is large relative to the whole file (unlike
-the desktop view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked.
+with no build step/bundler/minification — there's no established threshold for "too big" yet, so
+use judgment: a good trigger point is when total file size roughly doubles from the original ~206
+KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
+view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
+as of 2026-09-04: ~232 KB** (up from ~211 KB at the start of this session's three features) — still
+well under the doubling trigger, not flagged, but noting the running total here so the next check
+has an accurate comparison point instead of comparing against the stale original baseline.
 
 ## Immediate next steps (pick up here)
 
-No feature is in progress. As of 2026-09-02: items 1-7 above (memory sharing, cross-tab search in
-both Add Food and Memory & Library, delete-a-day, Notes-tab removal, the Trends tooltip fix, and
-portion-by-percentage) are shipped and confirmed working. **Items 8 (portion-by-weight) and 9
-(fixed meal order) are built and self-tested but not yet confirmed by the user on a real device** —
-that's the natural next thing to check if the user brings this project up again without a new,
-specific ask. Ask what's next rather than assuming.
+No feature is in progress. As of 2026-09-04: **everything shipped to date is confirmed working by
+the user on a real device** — items 1-9 (2026-08-28 batch) and items 10-12 (2026-09-04 batch, see
+"Three features" above: backdated logging, memory-item sharing with multi-select and a "paste to
+import" recipient path, and the redesigned Android back button). Nothing is queued. Ask what's next
+rather than assuming.
 
 Two open threads to keep in mind if they come back up, neither active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
