@@ -142,6 +142,9 @@
   .pill-brand{ background:var(--brand-tint); color:var(--brand-dark); }
   .src-tag{ display:none; margin-right:6px; vertical-align:middle; }
   .src-tag.show{ display:inline-block; }
+  .row-menu-item{ display:block; width:100%; text-align:left; padding:10px 14px; background:none; border:none; border-bottom:1px solid var(--border); font-size:12.5px; font-weight:600; color:var(--ink); cursor:pointer; font-family:inherit; white-space:nowrap; -webkit-tap-highlight-color:transparent; }
+  .row-menu-item:last-child{ border-bottom:none; }
+  .row-menu-item.critical{ color:var(--critical); }
 
   .dot{ width:8px; height:8px; border-radius:4px; flex-shrink:0; }
 
@@ -626,7 +629,7 @@ const App = {
       usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
     builtinFoodsSeeded: true,
-    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, shareStatus:null, selectMode:false, selected:{} },
+    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{} },
     history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
@@ -669,7 +672,7 @@ const App = {
     const screen = this.state.screen;
     if (screen === 'library'){
       const st = this.state.library;
-      return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.selectMode);
+      return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode);
     }
     if (screen === 'history') return !!this.state.history.confirmDeleteDate;
     if (screen === 'exportScreen') return !!this.state.memoryImport;
@@ -684,6 +687,7 @@ const App = {
       if (st.composer) return this.closeComposer();
       if (st.confirmDeleteKey) return this.cancelDelete();
       if (st.confirmMoveKey) return this.cancelMove();
+      if (st.confirmArchiveKey) return this.cancelArchive();
       if (st.selectMode) return this.cancelLibrarySelect();
     }
     if (screen === 'history' && this.state.history.confirmDeleteDate) return this.cancelDeleteDay();
@@ -1391,17 +1395,27 @@ const App = {
     this.state.library.confirmDeleteKey = null;
     this.render();
   },
-  // Archiving/reinstating just drops or restores one row, so both remove the row's DOM node
-  // directly instead of a full render() — that would otherwise wipe whichever search box
-  // (main library search or the archive tab's own) the user has typed into.
-  archiveItem(kind, id){
+  requestArchive(kind, id){ this.state.library.confirmArchiveKey = kind+':'+id; this.render(); },
+  cancelArchive(){ this.state.library.confirmArchiveKey = null; this.render(); },
+  // Reinstating just restores one row, so it removes the row's DOM node directly instead of a
+  // full render() — that would otherwise wipe whichever search box (main library search or the
+  // archive tab's own) the user has typed into. Archiving itself goes through a confirm card
+  // first (like Move/Delete), which already re-renders to show that card, so there's no such
+  // search box to protect by the time the archive is actually committed.
+  confirmArchive(kind, id){
     const item = this.state.memory[kind].find(x => x.id === id);
     if (!item) return;
     item.archived = true;
     if (this.state.library.openId === id) this.state.library.openId = null;
-    const row = document.getElementById(`lib-row-${kind}-${id}`);
-    if (row) row.remove(); else this.render();
+    this.state.library.confirmArchiveKey = null;
+    this.render();
   },
+  toggleRowMenu(kind, id){
+    const key = kind+':'+id;
+    this.state.library.openMenuKey = this.state.library.openMenuKey === key ? null : key;
+    this.render();
+  },
+  closeRowMenu(){ this.state.library.openMenuKey = null; this.render(); },
   reinstateItem(kind, id){
     const item = this.state.memory[kind].find(x => x.id === id);
     if (!item) return;
@@ -2719,23 +2733,22 @@ function memoryRowActions(kind, item){
   const canMove = (kind === 'foods' || kind === 'ingredients') && !isComposite;
   const moveTo = kind === 'foods' ? 'Ingredients' : 'Saved foods';
   const editCall = isComposite ? `App.openComposer('${item.id}')` : `App.editMemoryItem('${kind}','${item.id}')`;
+  const menuKey = kind+':'+item.id;
+  const menuOpen = libSt.openMenuKey === menuKey;
   return `
-    <button onclick="event.stopPropagation();App.shareMemoryItem('${kind}','${item.id}')" title="Share" style="${ROW_ACTION_BTN}">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
-    ${canMove ? `
-    <button onclick="event.stopPropagation();App.requestMove('${kind}','${item.id}')" title="Move to ${moveTo}" style="${ROW_ACTION_BTN}">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 8h12m0 0l-4-4m4 4l-4 4M17 16H5m0 0l4 4m-4-4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>` : ''}
-    <button onclick="event.stopPropagation();App.archiveItem('${kind}','${item.id}')" title="Archive" style="${ROW_ACTION_BTN}">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4" width="17" height="4.5" rx="1.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M4.5 8.7V18a2 2 0 002 2h11a2 2 0 002-2V8.7" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 13h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-    </button>
-    <button onclick="event.stopPropagation();${editCall}" style="${ROW_ACTION_BTN}">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-    </button>
-    <button onclick="event.stopPropagation();App.requestDelete('${kind}','${item.id}')" style="${ROW_ACTION_BTN}">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
+    <div style="position:relative;" onclick="event.stopPropagation()">
+      <button onclick="App.toggleRowMenu('${kind}','${item.id}')" title="Actions" style="${ROW_ACTION_BTN}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="5" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="19" r="1.8" fill="currentColor"/></svg>
+      </button>
+      ${menuOpen ? `
+      <div style="position:absolute;top:100%;right:0;margin-top:2px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 16px rgba(11,11,11,0.15);min-width:160px;z-index:30;overflow:hidden;">
+        <button class="row-menu-item" onclick="App.closeRowMenu();App.shareMemoryItem('${kind}','${item.id}')">Share</button>
+        ${canMove ? `<button class="row-menu-item" onclick="App.closeRowMenu();App.requestMove('${kind}','${item.id}')">Move to ${moveTo}</button>` : ''}
+        <button class="row-menu-item" onclick="App.closeRowMenu();App.requestArchive('${kind}','${item.id}')">Archive</button>
+        <button class="row-menu-item" onclick="App.closeRowMenu();${editCall}">Edit</button>
+        <button class="row-menu-item critical" onclick="App.closeRowMenu();App.requestDelete('${kind}','${item.id}')">Delete</button>
+      </div>` : ''}
+    </div>
   `;
 }
 function memoryConfirmCard(kind, item){
@@ -2754,6 +2767,15 @@ function memoryConfirmMoveCard(kind, item){
     <div style="display:flex;gap:8px;">
       <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
       <button onclick="App.confirmMove('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Move</button>
+    </div>
+  </div>`;
+}
+function memoryConfirmArchiveCard(kind, item){
+  return `<div class="card pad-sm" style="border-color:var(--brand);">
+    <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Archive &ldquo;${item.name}&rdquo;? You can reinstate it anytime from the Archive tab.</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+      <button onclick="App.confirmArchive('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Archive</button>
     </div>
   </div>`;
 }
@@ -2785,10 +2807,11 @@ function renderArchiveRow(kind, item){
 function renderFoodLibraryRow(f, st){
   if (st.confirmDeleteKey === 'foods:'+f.id) return `<div id="lib-row-foods-${f.id}" data-name="${f.name.toLowerCase()}">${memoryConfirmCard('foods', f)}</div>`;
   if (st.confirmMoveKey === 'foods:'+f.id) return `<div id="lib-row-foods-${f.id}" data-name="${f.name.toLowerCase()}">${memoryConfirmMoveCard('foods', f)}</div>`;
+  if (st.confirmArchiveKey === 'foods:'+f.id) return `<div id="lib-row-foods-${f.id}" data-name="${f.name.toLowerCase()}">${memoryConfirmArchiveCard('foods', f)}</div>`;
   const open = st.openId === f.id;
   const isComposite = Array.isArray(f.components);
   return `
-  <div id="lib-row-foods-${f.id}" data-name="${f.name.toLowerCase()}" class="card" style="overflow:hidden;">
+  <div id="lib-row-foods-${f.id}" data-name="${f.name.toLowerCase()}" class="card" style="overflow:visible;">
     <div class="accordion-head pad-sm" onclick="App.toggleLibraryOpen('${f.id}')">
       <div style="display:flex;align-items:center;gap:8px;min-width:0;">
         ${photoThumb(f)}
@@ -2833,6 +2856,7 @@ function renderFoodLibraryRow(f, st){
 function renderIngredientLibraryRow(ing, st){
   if (st.confirmDeleteKey === 'ingredients:'+ing.id) return `<div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}">${memoryConfirmCard('ingredients', ing)}</div>`;
   if (st.confirmMoveKey === 'ingredients:'+ing.id) return `<div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}">${memoryConfirmMoveCard('ingredients', ing)}</div>`;
+  if (st.confirmArchiveKey === 'ingredients:'+ing.id) return `<div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}">${memoryConfirmArchiveCard('ingredients', ing)}</div>`;
   return `
   <div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}" class="card pad-sm">
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -2850,6 +2874,7 @@ function renderIngredientLibraryRow(ing, st){
 }
 function renderUsdaLibraryRow(u, st){
   if (st.confirmDeleteKey === 'usda:'+u.id) return `<div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}">${memoryConfirmCard('usda', u)}</div>`;
+  if (st.confirmArchiveKey === 'usda:'+u.id) return `<div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}">${memoryConfirmArchiveCard('usda', u)}</div>`;
   return `
   <div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}" class="card pad-sm">
     <div style="display:flex;align-items:center;justify-content:space-between;">
