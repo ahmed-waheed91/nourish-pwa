@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nourish-v3';
+const CACHE_NAME = 'nourish-v4';
 const PRECACHE = [
   './',
   './index.html',
@@ -40,7 +40,7 @@ self.addEventListener('fetch', (event) => {
     // network-first for the app shell so updates are picked up when online,
     // fall back to the cached shell when offline
     event.respondWith(
-      fetch(req).then((res) => {
+      fetch(req, { cache: 'no-store' }).then((res) => {
         const copy = res.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy));
         return res;
