@@ -4,14 +4,18 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-04. The original four features (PDF export, live USDA lookup, real OCR,
-composite Saved Foods) plus two large batches (2026-08-28 and 2026-09-04) are all live in both apps
-and **user-confirmed working** — see "Four functional features" / items 5-9 for the 2026-08-28
-batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal, portion-by-percentage,
-portion-by-weight, fixed meal order), and "Three features (2026-09-04)" below for the newest batch
-(backdated logging, sharing individual memory items, and an Android back button that actually
-behaves like one). No feature is in progress right now — check with the user for what's next. See
-"Immediate next steps" and "Standing watch item" near the end of this file before starting new work._
+_Last updated 2026-09-11. The original four features (PDF export, live USDA lookup, real OCR,
+composite Saved Foods) plus three large batches (2026-08-28, 2026-09-04, 2026-09-11) are all live in
+both apps and **user-confirmed working** — see "Four functional features" / items 5-9 for the
+2026-08-28 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal,
+portion-by-percentage, portion-by-weight, fixed meal order), "Three features (2026-09-04)" for that
+batch (backdated logging, sharing individual memory items, an Android back button that actually
+behaves like one), and "Session fixes and a new Archive feature (2026-09-11)" below for the newest
+batch (two real bugs found via on-device reports — an Add Food search reset, and a PWA update-
+staleness bug caused by GitHub Pages' HTTP cache headers — plus a new Archive section in the Memory
+tab, itself revised twice after user feedback). No feature is in progress right now — check with the
+user for what's next. See "Immediate next steps" and "Standing watch item" near the end of this file
+before starting new work._
 
 ## Cross-machine continuity (why this file is here, in git)
 
@@ -461,7 +465,16 @@ instead of closing it. The share feature and the back button each took real, non
 across multiple rounds of on-device failure before landing correctly (Web Share's user-activation
 and file-type-safelist quirks; a back-button design that needed to be a fixed depth, not a replay of
 screens visited) — full detail, including the exact platform gotchas, is in "Three features
-(2026-09-04)" below; worth reading in full before touching either area again.
+(2026-09-04)" below; worth reading in full before touching either area again. Most recently
+(2026-09-11): two real bugs reported from actual on-device use, each fixed and confirmed — a search
+box that silently reset whenever a saved food was selected while logging, and a PWA update-staleness
+bug (GitHub Pages' `Cache-Control: max-age=600` header meant a freshly pushed update could stay
+invisible on-device for up to 10 minutes, even across a full app close/relaunch, until the service
+worker's fetch was changed to bypass HTTP cache). Then a new feature: an **Archive** section in the
+Memory tab for occasionally-used items, which itself went through one full round of user feedback
+after shipping (missing a confirmation step, and a cramped row of action buttons) before landing in
+its current form. Full detail for all of this is in "Session fixes and a new Archive feature
+(2026-09-11)" below.
 
 ## Four functional features (2026-08-28) — implemented in both apps, user-confirmed working
 
@@ -806,6 +819,122 @@ actual mental model, and fixing that exposed a second, subtler bug.
   (rare — nothing currently does this), are not covered; chosen as the simpler, lower-risk option
   when this was scoped with the user up front.
 
+## Session fixes and a new Archive feature (2026-09-11)
+
+Two real bugs reported from actual on-device use, both fixed and confirmed, followed by one new
+feature (an Archive section in Memory & library) that itself needed a round of revision after user
+feedback. All changes in this section are **functional** and went into both apps in the same pass.
+
+### 13. Add Food search silently reset when selecting a saved food
+
+**Report**: "whenever i try to log food and search something and then select that item. the item
+just goes back to where it was and search disappears." Confirmed and root-caused before touching
+code — worth the pattern, since it recurs elsewhere in this app (see item 14's Archive rows, which
+deliberately reused the same fix).
+
+- **Root cause**: Add Food's search (`App.filterAddFoodRows`) is pure DOM manipulation — it hides/
+  shows rows and toggles the search `<input>`'s own value, never touches `state`. But tapping a row
+  to select it (`toggleSelected`), adjusting its portion via the 100/75/50/25% chips
+  (`setSelectedPortion`, the non-`{live:true}` chip-click path), and expanding a composite/recipe row
+  (`toggleAddFoodSavedExpand`) all called a full `App.render()` — which rebuilds `#addfood-groups`
+  and the search `<input>` from scratch. Since the input has no `value=` binding, this wiped the
+  typed search text back to empty and re-showed the full unfiltered list, so the just-selected item
+  appeared to "snap back" to its normal position, un-findable without re-searching.
+- **Fix — patch the one row's DOM node instead of a full render()**: `App.patchAddFoodRow(id)` finds
+  the food, re-renders just `renderSavedFoodRow(food, state.addfood)`, and swaps that one row's DOM
+  node in place (`row.replaceWith(newRow)`), reapplying the `.src-tag.show` class if a search is
+  active. `toggleSelected`/`setSelectedPortion`/`toggleAddFoodSavedExpand` now call this first and
+  only fall back to a full `render()` if the row isn't found (e.g. it's been filtered out of the
+  current tab). `toggleAddFoodSavedExpand` patches **two** rows when switching which composite item
+  is expanded — the newly-expanded one and whichever was previously expanded (since only one can be
+  open at a time and the old one's DOM needs to visually collapse too).
+  ⚠️ **This is the general pattern for any future one-row UI toggle in a searchable list**: don't
+  call a bare `render()` from an action that only changes one row's own state — patch that row's DOM
+  node directly (give the row a stable `id`, e.g. `food-row-${id}`, to make this possible) so
+  whatever search/filter state lives outside `state` survives the interaction.
+- **Root-cause investigation for the actual live report, once the code fix shipped, is item 13a below
+  — that part was a deployment/caching issue, not a further logic bug.**
+
+### 13a. Update didn't reach the device — GitHub Pages HTTP cache, not a logic bug
+
+After item 13 shipped and was pushed, the user reported it still wasn't working — even after a full
+close/relaunch of the app (ruled out "just needs a fresh launch" as the explanation). Investigated
+with real data before guessing again:
+
+- `curl -I https://ahmed-waheed91.github.io/nourish-pwa/index.html` showed
+  **`Cache-Control: max-age=600`** — GitHub Pages caches `index.html` for 10 minutes. The service
+  worker's navigate handler already did a "network-first" `fetch(req)` on every app launch, but a
+  bare `fetch()` still honors the browser's own HTTP cache — so within that 10-minute window after a
+  deploy, the "network" fetch was satisfied straight from the browser's disk cache, never actually
+  reaching GitHub Pages for the new bytes, regardless of how many times the app was closed/reopened.
+- **Fix**: `service-worker.js`'s navigate handler now does `fetch(req, { cache: 'no-store' })`,
+  forcing every app launch to truly bypass HTTP caching and hit the network when online (falling back
+  to the cached shell offline, unchanged). Also bumped `CACHE_NAME` to `nourish-v4` to purge whatever
+  got cached during the stale window.
+  ⚠️ **`billifit-pwa`'s service worker already had `{ cache: 'no-store' }`** on this exact fetch —
+  this was a real, pre-existing gap between the two apps' service workers (not something introduced
+  this session), only caught while debugging this report. Nourish's was the one missing it; now both
+  match.
+- **Takeaway for any future "I pushed it but the device shows the old version" report**: check the
+  live response headers (`curl -I <url>`) before assuming it's a code bug or a relaunch problem —
+  GitHub Pages' own HTTP caching is enough on its own to explain up to ~10 minutes of staleness, and
+  compounds with anything in the service worker that doesn't explicitly force a network round-trip.
+
+### 14. Archive section in Memory & library
+
+User request: "a separate section in memory tab for Archives. for anything saved that is used
+occasionally. it should have its own search area and should have an option to reinstate it back to
+which ever section it was archived from." Shipped in three passes — the initial build, then two
+fixes after the user tried it and reported real problems.
+
+- **Data model — a flag on the existing item, not a separate archive array**: archiving sets
+  `item.archived = true` on the item **in place**, inside whichever of `memory.foods` /
+  `memory.ingredients` / `memory.usda` it already lives in — it is *not* moved to a new list. This
+  was a deliberate choice: the item stays fully usable everywhere outside the Memory tab (e.g.
+  logging it via Add Food) exactly as before, it's just hidden from its normal tab's list and from
+  the main "Search memory..." box. "Which section it was archived from" falls out for free, since
+  the item never left that section's array — no separate bookkeeping field needed for it.
+- **UI**: a 4th tab, **Archive**, alongside Saved foods/Ingredients/USDA (`renderLibrary`'s `tabs`
+  array and the `['foods','ingredients','usda','archive']` valid-tab guard). Archived items from all
+  three kinds are combined into one alphabetically-sorted list (`renderArchiveRow(kind, item)`, each
+  row tagged with its kind via `srcTag`, always shown — unlike the other tabs' `.src-tag`, which only
+  appears while cross-tab searching). Each archive row has **Reinstate** (clears `.archived`) and a
+  Delete icon (reuses the existing `requestDelete`/`confirmDelete`/`memoryConfirmCard` flow
+  unchanged — archived items delete exactly like any other memory item).
+- **Archive gets its own dedicated search box** (`App.filterArchiveRows`, scoped to
+  `#lib-archive-group [data-name]`), separate from the shared "Search memory..." box — per the
+  user's explicit ask. The shared box's cross-tab reveal logic (`filterLibraryRows`) was changed to
+  explicitly exclude the `archive` kind from its "show all matching tabs while searching" behavior,
+  so archived items never leak into the main cross-tab search results.
+- **Archive/reinstate reuse item 13's DOM-patch pattern, not a full `render()`**, for the same
+  reason: `App.confirmArchive`/`App.reinstateItem` remove the specific row's DOM node directly
+  (`row.remove()`) rather than re-rendering the whole screen, so whichever search box (main or
+  archive) the user has typed into survives the action. Reinstating the last archived item also
+  injects the "Nothing archived yet." empty-state message directly, since nothing else will re-render
+  it.
+- **Round 1 user feedback, both fixed together — "it does not ask for confirmation... and there are
+  too many buttons in a row causing it to be cramped up":**
+  1. **Missing confirmation**: archiving used to apply immediately on tap. Now goes through the same
+     confirm-card pattern as Move/Delete — `App.requestArchive(kind,id)` sets
+     `state.library.confirmArchiveKey`, the row renders `memoryConfirmArchiveCard` in place (Cancel /
+     Archive), and only `App.confirmArchive` actually sets the flag. Wired into the existing
+     hardware-back-button overlay system (`hasOpenOverlay`/`closeOpenOverlay` now also check/clear
+     `confirmArchiveKey`), so back correctly dismisses this confirm card exactly like Delete/Move's.
+     ⚠️ Since showing the confirm card already re-renders the row (same as Move/Delete always did),
+     this step doesn't bother with the DOM-patch trick above — the search box is already reset by
+     that point, same pre-existing (unreported, out of scope) behavior Move/Delete already have.
+  2. **Cramped row**: each item's row had grown to 5 separate icon buttons (Share, Move, Archive,
+     Edit, Delete). Replaced with a single "⋯" kebab button (`App.toggleRowMenu(kind,id)`) that opens
+     a small absolute-positioned dropdown (`.row-menu-item` rows) listing the same 5 actions as text,
+     closing itself (`App.closeRowMenu()`) before running whichever action was tapped.
+     ⚠️ **The Saved-foods row's outer wrapper had `overflow:hidden`** (to clip its accordion body) —
+     since the new dropdown is positioned `absolute` relative to that same row, `overflow:hidden`
+     silently clipped it. Changed to `overflow:visible` (confirmed via screenshot that removing the
+     clip doesn't cause any square-corner visual regression, since no child element has a full-bleed
+     background reaching the row's rounded edge). **Any future absolutely-positioned popover inside a
+     Saved-foods row needs to keep this in mind** — Ingredient/USDA rows never had the `overflow:hidden`
+     wrapper in the first place, so they were never affected.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -823,17 +952,19 @@ with no build step/bundler/minification — there's no established threshold for
 use judgment: a good trigger point is when total file size roughly doubles from the original ~206
 KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
 view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
-as of 2026-09-04: ~232 KB** (up from ~211 KB at the start of this session's three features) — still
-well under the doubling trigger, not flagged, but noting the running total here so the next check
-has an accurate comparison point instead of comparing against the stale original baseline.
+as of 2026-09-11: ~241 KB** (up from ~232 KB at the 2026-09-04 checkpoint, ~211 KB original baseline)
+— still well under the doubling trigger, not flagged, but noting the running total here so the next
+check has an accurate comparison point instead of comparing against the stale original baseline.
 
 ## Immediate next steps (pick up here)
 
-No feature is in progress. As of 2026-09-04: **everything shipped to date is confirmed working by
-the user on a real device** — items 1-9 (2026-08-28 batch) and items 10-12 (2026-09-04 batch, see
+No feature is in progress. As of 2026-09-11: **everything shipped to date is confirmed working by
+the user on a real device** — items 1-9 (2026-08-28 batch), items 10-12 (2026-09-04 batch, see
 "Three features" above: backdated logging, memory-item sharing with multi-select and a "paste to
-import" recipient path, and the redesigned Android back button). Nothing is queued. Ask what's next
-rather than assuming.
+import" recipient path, and the redesigned Android back button), and items 13-14 (2026-09-11 batch,
+see "Session fixes and a new Archive feature" above: the Add Food search-reset fix, the GitHub-Pages
+HTTP-cache staleness fix, and the Archive section with its confirm-card and row-menu revisions).
+Nothing is queued. Ask what's next rather than assuming.
 
 Two open threads to keep in mind if they come back up, neither active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
