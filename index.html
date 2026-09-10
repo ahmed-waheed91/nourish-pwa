@@ -774,10 +774,25 @@ const App = {
   },
 
   setAddFoodTab(id){ this.state.addfood.activeTab = id; this.render(); },
+  // Swaps one saved-food row's DOM node in place instead of a full render() — keeps the live
+  // search filter (search text + which rows are hidden) intact while selecting/expanding a row.
+  // Returns false (caller should fall back to render()) if the row isn't on screen to patch.
+  patchAddFoodRow(id){
+    const food = this.state.memory.foods.find(f => f.id === id);
+    const row = document.getElementById(`food-row-${id}`);
+    if (!food || !row) return false;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderSavedFoodRow(food, this.state.addfood);
+    const newRow = tmp.firstElementChild;
+    row.replaceWith(newRow);
+    const searchInput = document.getElementById('addfood-search-input');
+    if (searchInput && searchInput.value.trim()) newRow.querySelectorAll('.src-tag').forEach(tag => tag.classList.add('show'));
+    return true;
+  },
   toggleSelected(id){
     const s = this.state.addfood.selected;
     if (s[id]) delete s[id]; else s[id] = 100;
-    this.render();
+    if (!this.patchAddFoodRow(id)) this.render();
   },
   setSelectedPortion(id, pct, opts){
     const s = this.state.addfood.selected;
@@ -794,7 +809,7 @@ const App = {
       }
       return;
     }
-    this.render();
+    if (!this.patchAddFoodRow(id)) this.render();
   },
   setSelectedWeight(id, grams){
     const s = this.state.addfood.selected;
@@ -1262,8 +1277,11 @@ const App = {
   },
   toggleAddFoodSavedExpand(id){
     const st = this.state.addfood;
-    st.expandedSavedId = st.expandedSavedId === id ? null : id;
-    this.render();
+    const prev = st.expandedSavedId;
+    st.expandedSavedId = prev === id ? null : id;
+    let patched = this.patchAddFoodRow(id);
+    if (prev && prev !== id) patched = this.patchAddFoodRow(prev) && patched;
+    if (!patched) this.render();
   },
   scaleComposedComponent(foodId, componentId, inputEl){
     const food = this.state.memory.foods.find(x => x.id === foodId);
@@ -2248,7 +2266,7 @@ function renderSavedFoodRow(f, st){
   if (Array.isArray(f.components)){
     const expanded = st.expandedSavedId === f.id;
     return `
-    <div data-name="${f.name.toLowerCase()}" class="card pad-sm">
+    <div id="food-row-${f.id}" data-name="${f.name.toLowerCase()}" class="card pad-sm">
       <div onclick="App.toggleAddFoodSavedExpand('${f.id}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
         <div style="min-width:0;">
           <div style="font-size:13.5px;font-weight:700;">${srcTag('Saved','pill-brand')}${f.name}</div>
@@ -2298,7 +2316,7 @@ function renderSavedFoodRow(f, st){
   const sel = !!st.selected[f.id];
   const pct = sel ? st.selected[f.id] : 100;
   return `
-  <div data-name="${f.name.toLowerCase()}" class="pad-sm" style="background:var(--card);border:1.5px solid ${sel?'var(--brand)':'var(--border)'};border-radius:13px;">
+  <div id="food-row-${f.id}" data-name="${f.name.toLowerCase()}" class="pad-sm" style="background:var(--card);border:1.5px solid ${sel?'var(--brand)':'var(--border)'};border-radius:13px;">
     <div onclick="App.toggleSelected('${f.id}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
       <div style="min-width:0;">
         <div style="font-size:13.5px;font-weight:700;">${srcTag('Saved','pill-brand')}${f.name}</div>
@@ -2465,7 +2483,7 @@ function renderAddFood(){
       </div>
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <input placeholder="Search saved foods, ingredients, USDA..." oninput="App.filterAddFoodRows(this.value)"/>
+        <input id="addfood-search-input" placeholder="Search saved foods, ingredients, USDA..." oninput="App.filterAddFoodRows(this.value)"/>
       </div>
       <div class="seg" style="margin-top:12px;">
         ${tabs.map(([id,label]) => `<button class="seg-btn" style="flex:1;${st.activeTab===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setAddFoodTab('${id}')">${label}</button>`).join('')}
