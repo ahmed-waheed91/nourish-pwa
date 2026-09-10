@@ -994,7 +994,8 @@ const App = {
     const groups = document.querySelectorAll('#lib-groups [data-kind]');
     groups.forEach(group => {
       const kind = group.getAttribute('data-kind');
-      group.style.display = (searching || kind === activeTab) ? 'flex' : 'none';
+      if (kind === 'archive'){ group.style.display = activeTab === 'archive' ? 'flex' : 'none'; return; }
+      group.style.display = (kind === activeTab || (searching && activeTab !== 'archive')) ? 'flex' : 'none';
       group.querySelectorAll('[data-name]').forEach(row => {
         row.style.display = (!q || row.getAttribute('data-name').includes(q)) ? '' : 'none';
         row.querySelectorAll('.src-tag').forEach(tag => tag.classList.toggle('show', searching));
@@ -1389,6 +1390,34 @@ const App = {
     this.state.memory[kind] = this.state.memory[kind].filter(x => x.id !== id);
     this.state.library.confirmDeleteKey = null;
     this.render();
+  },
+  // Archiving/reinstating just drops or restores one row, so both remove the row's DOM node
+  // directly instead of a full render() — that would otherwise wipe whichever search box
+  // (main library search or the archive tab's own) the user has typed into.
+  archiveItem(kind, id){
+    const item = this.state.memory[kind].find(x => x.id === id);
+    if (!item) return;
+    item.archived = true;
+    if (this.state.library.openId === id) this.state.library.openId = null;
+    const row = document.getElementById(`lib-row-${kind}-${id}`);
+    if (row) row.remove(); else this.render();
+  },
+  reinstateItem(kind, id){
+    const item = this.state.memory[kind].find(x => x.id === id);
+    if (!item) return;
+    delete item.archived;
+    const row = document.getElementById(`lib-archive-row-${kind}-${id}`);
+    if (row){
+      const group = document.getElementById('lib-archive-group');
+      row.remove();
+      if (group && !group.querySelector('[data-name]')) group.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;margin-top:10px;">Nothing archived yet.</div>';
+    } else this.render();
+  },
+  filterArchiveRows(query){
+    const q = query.trim().toLowerCase();
+    document.querySelectorAll('#lib-archive-group [data-name]').forEach(row => {
+      row.style.display = (!q || row.getAttribute('data-name').includes(q)) ? '' : 'none';
+    });
   },
   setHistoryView(v){ this.state.history.view = v; this.render(); },
   toggleHistoryRow(i){ const h=this.state.history; h.openIdx = h.openIdx===i ? null : i; this.render(); },
@@ -2698,6 +2727,9 @@ function memoryRowActions(kind, item){
     <button onclick="event.stopPropagation();App.requestMove('${kind}','${item.id}')" title="Move to ${moveTo}" style="${ROW_ACTION_BTN}">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 8h12m0 0l-4-4m4 4l-4 4M17 16H5m0 0l4 4m-4-4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>` : ''}
+    <button onclick="event.stopPropagation();App.archiveItem('${kind}','${item.id}')" title="Archive" style="${ROW_ACTION_BTN}">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4" width="17" height="4.5" rx="1.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M4.5 8.7V18a2 2 0 002 2h11a2 2 0 002-2V8.7" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 13h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <button onclick="event.stopPropagation();${editCall}" style="${ROW_ACTION_BTN}">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
     </button>
@@ -2725,15 +2757,38 @@ function memoryConfirmMoveCard(kind, item){
     </div>
   </div>`;
 }
+function renderArchiveRow(kind, item){
+  if (App.state.library.confirmDeleteKey === kind+':'+item.id) return `<div id="lib-archive-row-${kind}-${item.id}" data-name="${item.name.toLowerCase()}">${memoryConfirmCard(kind, item)}</div>`;
+  const kindLabel = kind === 'foods' ? 'Saved' : (kind === 'ingredients' ? 'Ingredient' : 'USDA');
+  const kindCls = kind === 'foods' ? 'pill-brand' : (kind === 'ingredients' ? 'pill-neutral' : 'pill-usda');
+  return `
+  <div id="lib-archive-row-${kind}-${item.id}" data-name="${item.name.toLowerCase()}" class="card pad-sm">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+        ${photoThumb(item)}
+        <div style="min-width:0;">
+          <div style="font-size:13.5px;font-weight:700;"><span class="pill ${kindCls} src-tag show">${kindLabel}</span>${item.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px;">${item.kcal} kcal</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <button onclick="event.stopPropagation();App.requestDelete('${kind}','${item.id}')" title="Delete" style="${ROW_ACTION_BTN}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button onclick="App.reinstateItem('${kind}','${item.id}')" style="flex-shrink:0;padding:7px 12px;border-radius:9px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Reinstate</button>
+      </div>
+    </div>
+  </div>`;
+}
 
 /* ---------- Library ---------- */
 function renderFoodLibraryRow(f, st){
-  if (st.confirmDeleteKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmCard('foods', f)}</div>`;
-  if (st.confirmMoveKey === 'foods:'+f.id) return `<div data-name="${f.name.toLowerCase()}">${memoryConfirmMoveCard('foods', f)}</div>`;
+  if (st.confirmDeleteKey === 'foods:'+f.id) return `<div id="lib-row-foods-${f.id}" data-name="${f.name.toLowerCase()}">${memoryConfirmCard('foods', f)}</div>`;
+  if (st.confirmMoveKey === 'foods:'+f.id) return `<div id="lib-row-foods-${f.id}" data-name="${f.name.toLowerCase()}">${memoryConfirmMoveCard('foods', f)}</div>`;
   const open = st.openId === f.id;
   const isComposite = Array.isArray(f.components);
   return `
-  <div data-name="${f.name.toLowerCase()}" class="card" style="overflow:hidden;">
+  <div id="lib-row-foods-${f.id}" data-name="${f.name.toLowerCase()}" class="card" style="overflow:hidden;">
     <div class="accordion-head pad-sm" onclick="App.toggleLibraryOpen('${f.id}')">
       <div style="display:flex;align-items:center;gap:8px;min-width:0;">
         ${photoThumb(f)}
@@ -2776,10 +2831,10 @@ function renderFoodLibraryRow(f, st){
   </div>`;
 }
 function renderIngredientLibraryRow(ing, st){
-  if (st.confirmDeleteKey === 'ingredients:'+ing.id) return `<div data-name="${ing.name.toLowerCase()}">${memoryConfirmCard('ingredients', ing)}</div>`;
-  if (st.confirmMoveKey === 'ingredients:'+ing.id) return `<div data-name="${ing.name.toLowerCase()}">${memoryConfirmMoveCard('ingredients', ing)}</div>`;
+  if (st.confirmDeleteKey === 'ingredients:'+ing.id) return `<div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}">${memoryConfirmCard('ingredients', ing)}</div>`;
+  if (st.confirmMoveKey === 'ingredients:'+ing.id) return `<div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}">${memoryConfirmMoveCard('ingredients', ing)}</div>`;
   return `
-  <div data-name="${ing.name.toLowerCase()}" class="card pad-sm">
+  <div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}" class="card pad-sm">
     <div style="display:flex;align-items:center;justify-content:space-between;">
       <div style="display:flex;align-items:center;gap:8px;min-width:0;">
         ${photoThumb(ing)}
@@ -2794,9 +2849,9 @@ function renderIngredientLibraryRow(ing, st){
   </div>`;
 }
 function renderUsdaLibraryRow(u, st){
-  if (st.confirmDeleteKey === 'usda:'+u.id) return `<div data-name="${u.name.toLowerCase()}">${memoryConfirmCard('usda', u)}</div>`;
+  if (st.confirmDeleteKey === 'usda:'+u.id) return `<div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}">${memoryConfirmCard('usda', u)}</div>`;
   return `
-  <div data-name="${u.name.toLowerCase()}" class="card pad-sm">
+  <div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}" class="card pad-sm">
     <div style="display:flex;align-items:center;justify-content:space-between;">
       <div style="display:flex;align-items:center;gap:8px;min-width:0;">
         ${photoThumb(u)}
@@ -2812,8 +2867,8 @@ function renderUsdaLibraryRow(u, st){
 }
 function renderLibrary(){
   const st = App.state.library;
-  if (!['foods','ingredients','usda'].includes(st.activeTab)) st.activeTab = 'foods';
-  const tabs = [['foods','Saved foods'],['ingredients','Ingredients'],['usda','USDA']];
+  if (!['foods','ingredients','usda','archive'].includes(st.activeTab)) st.activeTab = 'foods';
+  const tabs = [['foods','Saved foods'],['ingredients','Ingredients'],['usda','USDA'],['archive','Archive']];
   const formHere = k => st.form && st.form.kind === k ? renderMemoryForm(st.form) : '';
 
   let extras = '';
@@ -2836,17 +2891,35 @@ function renderLibrary(){
         Used for unlabeled/generic foods — apply these exact figures consistently.
       </div>
       ${formHere('usda')}${st.form && st.form.kind==='usda' ? '' : addMemoryButton('usda','Add a reference item')}`;
+  } else if (st.activeTab === 'archive'){
+    extras = `
+      <div style="background:var(--surface);border-radius:11px;padding:10px 12px;margin-bottom:10px;font-size:11.5px;color:var(--ink-2);line-height:1.4;">
+        Items you use occasionally, tucked out of the way. Reinstate one to bring it back to its original section.
+      </div>
+      <div class="search" style="margin-bottom:10px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input placeholder="Search archive..." oninput="App.filterArchiveRows(this.value)"/>
+      </div>`;
   }
+
+  const archived = [
+    ...App.state.memory.foods.filter(f => f.archived).map(item => ({kind:'foods', item})),
+    ...App.state.memory.ingredients.filter(ing => ing.archived).map(item => ({kind:'ingredients', item})),
+    ...App.state.memory.usda.filter(u => u.archived).map(item => ({kind:'usda', item})),
+  ].sort((a,b) => a.item.name.localeCompare(b.item.name));
 
   const groups = `<div id="lib-groups">
     <div data-kind="foods" style="display:${st.activeTab==='foods'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.foods.map(f => renderFoodLibraryRow(f, st)).join('')}
+      ${App.state.memory.foods.filter(f => !f.archived).map(f => renderFoodLibraryRow(f, st)).join('')}
     </div>
     <div data-kind="ingredients" style="display:${st.activeTab==='ingredients'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.ingredients.map(ing => renderIngredientLibraryRow(ing, st)).join('')}
+      ${App.state.memory.ingredients.filter(ing => !ing.archived).map(ing => renderIngredientLibraryRow(ing, st)).join('')}
     </div>
     <div data-kind="usda" style="display:${st.activeTab==='usda'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.usda.map(u => renderUsdaLibraryRow(u, st)).join('')}
+      ${App.state.memory.usda.filter(u => !u.archived).map(u => renderUsdaLibraryRow(u, st)).join('')}
+    </div>
+    <div id="lib-archive-group" data-kind="archive" style="display:${st.activeTab==='archive'?'flex':'none'};flex-direction:column;gap:8px;">
+      ${archived.length ? archived.map(({kind,item}) => renderArchiveRow(kind, item)).join('') : '<div style="text-align:center;color:var(--muted);font-size:12px;margin-top:10px;">Nothing archived yet.</div>'}
     </div>
   </div>`;
 
@@ -2855,14 +2928,16 @@ function renderLibrary(){
     <div class="topbar">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
         <div class="disp" style="font-size:20px;font-weight:800;">Memory &amp; library</div>
-        <button onclick="${st.selectMode ? 'App.backOneLevel()' : 'App.toggleLibrarySelectMode()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>
+        ${st.activeTab!=='archive' ? `<button onclick="${st.selectMode ? 'App.backOneLevel()' : 'App.toggleLibrarySelectMode()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>` : ''}
       </div>
       <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">${st.selectMode ? 'Tap items to select, then share them together.' : 'Saved foods, ingredients &amp; learned rules — update anytime'}</div>
+      ${st.activeTab!=='archive' ? `
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input placeholder="Search memory..." oninput="App.filterLibraryRows(this.value)"/>
       </div>
       <div id="lib-context-label" style="display:none;font-size:11.5px;color:var(--muted);margin-top:10px;text-transform:uppercase;letter-spacing:0.04em;">Matching saved foods, ingredients &amp; USDA</div>
+      ` : ''}
       <div class="seg" style="margin-top:12px;overflow-x:auto;">
         ${tabs.map(([id,label]) => `<button class="seg-btn" style="flex-shrink:0;${st.activeTab===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setLibraryTab('${id}')">${label}</button>`).join('')}
       </div>
