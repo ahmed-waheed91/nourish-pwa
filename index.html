@@ -617,7 +617,7 @@ const App = {
     view: 'mobile',
     screen: 'today',
     today: { expandedStat:null, expandedMeal:null, waterMl:0, notesOpen:false, weightKg:null, confirmRemoveKey:null,
-      dailyNote:'', noteSaved:false, meals: [] },
+      dailyNote:'', noteSaved:false, meals: [], macroInfoOpen:false },
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
     storageAlert: null,
@@ -670,6 +670,7 @@ const App = {
   // to Today. hasOpenOverlay/closeOpenOverlay list every such sub-panel; add new ones here.
   hasOpenOverlay(){
     const screen = this.state.screen;
+    if (screen === 'today') return !!this.state.today.macroInfoOpen;
     if (screen === 'library'){
       const st = this.state.library;
       return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode);
@@ -681,6 +682,7 @@ const App = {
   },
   closeOpenOverlay(){
     const screen = this.state.screen;
+    if (screen === 'today' && this.state.today.macroInfoOpen) return this.closeMacroInfo();
     if (screen === 'library'){
       const st = this.state.library;
       if (st.form) return this.closeForm();
@@ -703,8 +705,8 @@ const App = {
   _syncBackStack(){
     if (this._navigatingFromPopstate) return;
     const away = this.state.screen !== 'today';
-    const overlay = away && this.hasOpenOverlay();
-    const desired = overlay ? 2 : (away ? 1 : 0);
+    const overlay = this.hasOpenOverlay();
+    const desired = away ? (overlay ? 2 : 1) : (overlay ? 1 : 0);
     const current = this._depth || 0;
     if (desired === current) return;
     if (desired > current) history.pushState({ depth: desired }, '', location.href);
@@ -713,6 +715,8 @@ const App = {
   },
 
   toggleStat(id){ const t=this.state.today; t.expandedStat = t.expandedStat===id ? null : id; this.render(); },
+  openMacroInfo(){ this.state.today.macroInfoOpen = true; this.render(); },
+  closeMacroInfo(){ this.state.today.macroInfoOpen = false; this.render(); },
   toggleMeal(id){ const t=this.state.today; t.expandedMeal = t.expandedMeal===id ? null : id; this.render(); },
   requestRemoveItem(mealId, idx){ this.state.today.confirmRemoveKey = mealId+':'+idx; this.render(); },
   cancelRemoveItem(){ this.state.today.confirmRemoveKey = null; this.render(); },
@@ -842,7 +846,7 @@ const App = {
       this.state.dayHistory.push({ date: old, ...consumed, waterMl: t.waterMl, weightKg: t.weightKg, meals: JSON.parse(JSON.stringify(t.meals)), note: t.dailyNote });
     }
     t.meals = []; t.waterMl = 0; t.weightKg = null; t.dailyNote = '';
-    t.expandedMeal = null; t.expandedStat = null; t.notesOpen = false; t.confirmRemoveKey = null;
+    t.expandedMeal = null; t.expandedStat = null; t.notesOpen = false; t.confirmRemoveKey = null; t.macroInfoOpen = false;
     this.state.dayLog.currentDate = real;
     this.saveLocal();
   },
@@ -2157,7 +2161,12 @@ function renderToday(){
       </div>
 
       <div class="card pad" style="margin-bottom:14px;">
-        <div style="font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:10px;">Macro split · share of calories</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Macro split · share of calories</div>
+          <button onclick="App.openMacroInfo()" title="How this is calculated" style="width:22px;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--border);color:var(--ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1.15" fill="currentColor"/></svg>
+          </button>
+        </div>
         <div style="height:14px;border-radius:7px;overflow:hidden;display:flex;">
           ${macro.map(([l,pct,c]) => `<div style="width:${pct}%;background:${c};"></div>`).join('')}
         </div>
@@ -2297,6 +2306,49 @@ function renderToday(){
     </button>
 
     ${bottomNav('today')}
+
+    ${st.macroInfoOpen ? renderMacroInfoModal(consumed, macroCals, macro) : ''}
+  `;
+}
+function renderMacroInfoModal(consumed, macroCals, macro){
+  const rows = [
+    { label:'Protein', color:'var(--protein)', grams: consumed.protein, mult:4, kcal: macroCals.protein, pct: macro[0][1] },
+    { label:'Carbs', color:'var(--carbs)', grams: consumed.carbs, mult:4, kcal: macroCals.carbs, pct: macro[1][1] },
+    { label:'Fat', color:'var(--fat)', grams: consumed.fat, mult:9, kcal: macroCals.fat, pct: macro[2][1] },
+  ];
+  const macroCalSum = Math.round(macroCals.protein + macroCals.carbs + macroCals.fat);
+  const hasData = macroCalSum > 0;
+  return `
+    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
+      <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:320px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div style="font-size:14.5px;font-weight:800;">How the macro split is calculated</div>
+          <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div style="font-size:12.5px;color:var(--ink-2);line-height:1.55;margin-bottom:12px;">
+          Each macro's grams are converted to calories first — protein and carbs count as 4 kcal per gram, fat counts as 9 kcal per gram. Every macro's percentage is then its share of those combined calories, not its share of total grams.
+        </div>
+        <div style="background:var(--surface);border-radius:12px;padding:12px;">
+          ${rows.map(r => `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                <div class="dot" style="width:8px;height:8px;border-radius:3px;background:${r.color};flex-shrink:0;"></div>
+                <div style="font-size:12px;font-weight:700;">${r.label}</div>
+              </div>
+              <div class="num" style="font-size:11.5px;color:var(--ink-2);white-space:nowrap;">${Math.round(r.grams*10)/10}g × ${r.mult} = ${Math.round(r.kcal)} kcal</div>
+              <div class="num" style="font-size:12.5px;font-weight:800;color:var(--ink);flex-shrink:0;">${r.pct}%</div>
+            </div>
+          `).join('')}
+          <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;">
+            <div style="font-size:11.5px;font-weight:700;color:var(--ink-2);">Total macro calories</div>
+            <div class="num" style="font-size:11.5px;font-weight:800;">${macroCalSum} kcal</div>
+          </div>
+        </div>
+        ${!hasData ? `<div style="font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.4;">Log food today to see your own numbers here.</div>` : ''}
+      </div>
+    </div>
   `;
 }
 
