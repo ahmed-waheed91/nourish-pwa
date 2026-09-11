@@ -797,6 +797,23 @@ const App = {
     if (searchInput && searchInput.value.trim()) newRow.querySelectorAll('.src-tag').forEach(tag => tag.classList.add('show'));
     return true;
   },
+  patchLibraryRow(kind, id){
+    const item = this.state.memory[kind] && this.state.memory[kind].find(x => x.id === id);
+    const row = document.getElementById(`lib-row-${kind}-${id}`);
+    if (!item || !row) return false;
+    const renderFn = kind === 'foods' ? renderFoodLibraryRow : (kind === 'ingredients' ? renderIngredientLibraryRow : renderUsdaLibraryRow);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderFn(item, this.state.library);
+    const newRow = tmp.firstElementChild;
+    row.replaceWith(newRow);
+    const searchInput = document.getElementById('lib-search-input');
+    const q = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    if (q){
+      newRow.style.display = newRow.getAttribute('data-name').includes(q) ? '' : 'none';
+      newRow.querySelectorAll('.src-tag').forEach(tag => tag.classList.add('show'));
+    }
+    return true;
+  },
   toggleSelected(id){
     const s = this.state.addfood.selected;
     if (s[id]) delete s[id]; else s[id] = 100;
@@ -1371,8 +1388,13 @@ const App = {
     if (!this.state.addfood.targetDate) this.setScreen('today');
   },
 
-  requestMove(kind, id){ this.state.library.confirmMoveKey = kind+':'+id; this.render(); },
-  cancelMove(){ this.state.library.confirmMoveKey = null; this.render(); },
+  requestMove(kind, id){ this.state.library.confirmMoveKey = kind+':'+id; if (!this.patchLibraryRow(kind, id)) this.render(); },
+  cancelMove(){
+    const key = this.state.library.confirmMoveKey;
+    this.state.library.confirmMoveKey = null;
+    if (key){ const [kind, id] = key.split(':'); if (this.patchLibraryRow(kind, id)) return; }
+    this.render();
+  },
   confirmMove(fromKind, id){
     const toKind = fromKind === 'foods' ? 'ingredients' : 'foods';
     const fromList = this.state.memory[fromKind];
@@ -1392,34 +1414,54 @@ const App = {
     this.state.library.activeTab = toKind;
     this.render();
   },
-  requestDelete(kind, id){ this.state.library.confirmDeleteKey = kind+':'+id; this.render(); },
-  cancelDelete(){ this.state.library.confirmDeleteKey = null; this.render(); },
+  requestDelete(kind, id){ this.state.library.confirmDeleteKey = kind+':'+id; if (!this.patchLibraryRow(kind, id)) this.render(); },
+  cancelDelete(){
+    const key = this.state.library.confirmDeleteKey;
+    this.state.library.confirmDeleteKey = null;
+    if (key){ const [kind, id] = key.split(':'); if (this.patchLibraryRow(kind, id)) return; }
+    this.render();
+  },
+  // The row is removed from the DOM directly rather than via a full render() — that would
+  // otherwise wipe whichever search the user has typed into (same fix as request/cancel above).
   confirmDelete(kind, id){
     this.state.memory[kind] = this.state.memory[kind].filter(x => x.id !== id);
     this.state.library.confirmDeleteKey = null;
+    const row = document.getElementById(`lib-row-${kind}-${id}`);
+    if (row) row.remove(); else this.render();
+  },
+  requestArchive(kind, id){ this.state.library.confirmArchiveKey = kind+':'+id; if (!this.patchLibraryRow(kind, id)) this.render(); },
+  cancelArchive(){
+    const key = this.state.library.confirmArchiveKey;
+    this.state.library.confirmArchiveKey = null;
+    if (key){ const [kind, id] = key.split(':'); if (this.patchLibraryRow(kind, id)) return; }
     this.render();
   },
-  requestArchive(kind, id){ this.state.library.confirmArchiveKey = kind+':'+id; this.render(); },
-  cancelArchive(){ this.state.library.confirmArchiveKey = null; this.render(); },
-  // Reinstating just restores one row, so it removes the row's DOM node directly instead of a
-  // full render() — that would otherwise wipe whichever search box (main library search or the
-  // archive tab's own) the user has typed into. Archiving itself goes through a confirm card
-  // first (like Move/Delete), which already re-renders to show that card, so there's no such
-  // search box to protect by the time the archive is actually committed.
+  // Archiving removes the item from its current tab's view (foods/ingredients/usda groups filter
+  // out archived items), so — like confirmDelete — the row is removed from the DOM directly
+  // instead of a full render() that would wipe the search box.
   confirmArchive(kind, id){
     const item = this.state.memory[kind].find(x => x.id === id);
     if (!item) return;
     item.archived = true;
     if (this.state.library.openId === id) this.state.library.openId = null;
     this.state.library.confirmArchiveKey = null;
-    this.render();
+    const row = document.getElementById(`lib-row-${kind}-${id}`);
+    if (row) row.remove(); else this.render();
   },
   toggleRowMenu(kind, id){
     const key = kind+':'+id;
     this.state.library.openMenuKey = this.state.library.openMenuKey === key ? null : key;
+    if (!this.patchLibraryRow(kind, id)) this.render();
+  },
+  closeRowMenu(){
+    const openKey = this.state.library.openMenuKey;
+    this.state.library.openMenuKey = null;
+    if (openKey){
+      const [kind, id] = openKey.split(':');
+      if (this.patchLibraryRow(kind, id)) return;
+    }
     this.render();
   },
-  closeRowMenu(){ this.state.library.openMenuKey = null; this.render(); },
   reinstateItem(kind, id){
     const item = this.state.memory[kind].find(x => x.id === id);
     if (!item) return;
@@ -3011,7 +3053,7 @@ function renderLibrary(){
       ${st.activeTab!=='archive' ? `
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <input placeholder="Search memory..." oninput="App.filterLibraryRows(this.value)"/>
+        <input id="lib-search-input" placeholder="Search memory..." oninput="App.filterLibraryRows(this.value)"/>
       </div>
       <div id="lib-context-label" style="display:none;font-size:11.5px;color:var(--muted);margin-top:10px;text-transform:uppercase;letter-spacing:0.04em;">Matching saved foods, ingredients &amp; USDA</div>
       ` : ''}
