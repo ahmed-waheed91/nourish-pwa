@@ -2208,6 +2208,7 @@ function renderToday(){
   const calStatus = statusFor('calories', calConsumed);
   const calPct = Math.min(100, Math.round((calConsumed/calTarget.high)*100));
   const calBadgeText = calStatus==='good' ? 'On track' : (calStatus==='warning' ? 'Under' : 'Over');
+  const calCardBg = calStatus==='good' ? 'var(--brand)' : (calStatus==='warning' ? 'var(--warning)' : 'var(--critical)');
   const calCaption = calStatus==='critical'
     ? `${Math.round(calConsumed-calTarget.high).toLocaleString()} over`
     : (calStatus==='warning'
@@ -2245,7 +2246,7 @@ function renderToday(){
         </div>
       ` : ''}
 
-      <div style="background:var(--brand);border-radius:20px;padding:20px;color:#fff;margin-bottom:14px;">
+      <div style="background:${calCardBg};border-radius:20px;padding:20px;color:#fff;margin-bottom:14px;">
         <div style="display:flex;align-items:baseline;justify-content:space-between;">
           <div>
             <div style="font-size:12px;opacity:0.75;text-transform:uppercase;letter-spacing:0.04em;">Calories</div>
