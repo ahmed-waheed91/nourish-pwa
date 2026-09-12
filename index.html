@@ -545,7 +545,7 @@ function saveFileToDevice(filename, text){
 /* ---------- Targets (editable in Settings) ---------- */
 function defaultTargets(){
   return {
-    calories: { kind:'ceiling', value:1900, unit:'kcal' },
+    calories: { kind:'range', low:1500, high:1700, unit:'kcal' },
     protein: { kind:'range', low:135, high:155, unit:'g' },
     carbs: { kind:'range', low:150, high:190, unit:'g' },
     fat: { kind:'range', low:50, high:70, unit:'g' },
@@ -1801,6 +1801,12 @@ const App = {
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
       this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
+      // Calories used to be a single "stay under" ceiling; it's now a low-high range like the
+      // other macros. Anyone whose saved data (or an older backup file) still has the old shape
+      // gets migrated to the new 1,500-1,700 default rather than left with a broken calorie target.
+      if (!this.state.targets.calories || this.state.targets.calories.kind !== 'range'){
+        this.state.targets.calories = { kind:'range', low:1500, high:1700, unit:'kcal' };
+      }
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
@@ -2049,6 +2055,12 @@ const App = {
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
+      // Calories used to be a single "stay under" ceiling; it's now a low-high range like the
+      // other macros. Anyone whose saved data (or an older backup file) still has the old shape
+      // gets migrated to the new 1,500-1,700 default rather than left with a broken calorie target.
+      if (!this.state.targets.calories || this.state.targets.calories.kind !== 'range'){
+        this.state.targets.calories = { kind:'range', low:1500, high:1700, unit:'kcal' };
+      }
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
@@ -2194,8 +2206,13 @@ function renderToday(){
   const calTarget = App.state.targets.calories;
   const calConsumed = consumed.calories;
   const calStatus = statusFor('calories', calConsumed);
-  const calPct = Math.min(100, Math.round((calConsumed/calTarget.value)*100));
-  const calLeft = calTarget.value - calConsumed;
+  const calPct = Math.min(100, Math.round((calConsumed/calTarget.high)*100));
+  const calBadgeText = calStatus==='good' ? 'On track' : (calStatus==='warning' ? 'Under' : 'Over');
+  const calCaption = calStatus==='critical'
+    ? `${Math.round(calConsumed-calTarget.high).toLocaleString()} over`
+    : (calStatus==='warning'
+      ? `${Math.round(calTarget.low-calConsumed).toLocaleString()} under`
+      : `${Math.round(calTarget.high-calConsumed).toLocaleString()} left`);
   const stats = buildTodayStats(consumed, st.expandedStat);
 
   const weightTarget = targetInfo('weight');
@@ -2234,13 +2251,13 @@ function renderToday(){
             <div style="font-size:12px;opacity:0.75;text-transform:uppercase;letter-spacing:0.04em;">Calories</div>
             <div class="num disp" style="font-size:34px;font-weight:800;margin-top:2px;">${calConsumed.toLocaleString()} <span style="font-size:15px;font-weight:600;opacity:0.75;">kcal</span></div>
           </div>
-          <div style="background:rgba(255,255,255,0.16);border-radius:20px;padding:6px 12px;font-size:12px;font-weight:700;">${calStatus==='good' ? 'On track' : 'Over ceiling'}</div>
+          <div style="background:rgba(255,255,255,0.16);border-radius:20px;padding:6px 12px;font-size:12px;font-weight:700;">${calBadgeText}</div>
         </div>
         <div style="height:8px;border-radius:5px;background:rgba(255,255,255,0.22);margin-top:14px;overflow:hidden;">
           <div style="height:100%;width:${calPct}%;border-radius:5px;background:#fff;"></div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;opacity:0.8;">
-          <span>0</span><span>Ceiling ${calTarget.value.toLocaleString()} kcal · ${calLeft>=0 ? calLeft.toLocaleString()+' left' : Math.abs(calLeft).toLocaleString()+' over'}</span>
+          <span>0</span><span>${calTarget.low.toLocaleString()}–${calTarget.high.toLocaleString()} kcal · ${calCaption}</span>
         </div>
       </div>
 
@@ -3297,7 +3314,7 @@ function renderHistory(){
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;">
         <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-2);"><div class="dot" style="background:var(--good);"></div>On track</div>
-        <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-2);"><div class="dot" style="background:var(--critical);"></div>Over ceiling</div>
+        <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-2);"><div class="dot" style="background:var(--critical);"></div>Off track</div>
       </div>`;
   }
 
@@ -3855,7 +3872,7 @@ function renderDesktop(){
     return {path, bandY:yFor(bandHigh).toFixed(1), bandH:Math.max(2,(yFor(bandLow)-yFor(bandHigh))).toFixed(1), avg, count:n};
   }
   const calT = App.state.targets.calories, protT = App.state.targets.protein;
-  const calSpark = buildSpark('calories', calT.value*0.9, calT.value);
+  const calSpark = buildSpark('calories', calT.low, calT.high);
   const protSpark = buildSpark('protein', protT.low, protT.high);
 
   const savedShortcuts = [
@@ -3927,7 +3944,7 @@ function renderDesktop(){
                 <rect x="0" y="${calSpark.bandY}" width="260" height="${calSpark.bandH}" fill="rgba(28,92,75,0.10)" rx="3"/>
                 <path d="${calSpark.path}" fill="none" stroke="var(--protein)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              <div style="font-size:11px;color:var(--muted);margin-top:4px;">avg ${calSpark.avg} kcal over ${calSpark.count} days · target &lt; ${calT.value.toLocaleString()}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px;">avg ${calSpark.avg} kcal over ${calSpark.count} days · target ${calT.low.toLocaleString()}–${calT.high.toLocaleString()} kcal</div>
             ` : `<div style="height:70px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;padding:0 10px;">Not enough data yet</div>`}
           </div>
           <div class="card pad">
