@@ -4,18 +4,22 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-11. The original four features (PDF export, live USDA lookup, real OCR,
-composite Saved Foods) plus three large batches (2026-08-28, 2026-09-04, 2026-09-11) are all live in
-both apps and **user-confirmed working** — see "Four functional features" / items 5-9 for the
-2026-08-28 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal,
+_Last updated 2026-09-12. The original four features (PDF export, live USDA lookup, real OCR,
+composite Saved Foods) plus four large batches (2026-08-28, 2026-09-04, 2026-09-11, 2026-09-12) are
+all live in both apps and **user-confirmed working** — see "Four functional features" / items 5-9 for
+the 2026-08-28 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal,
 portion-by-percentage, portion-by-weight, fixed meal order), "Three features (2026-09-04)" for that
 batch (backdated logging, sharing individual memory items, an Android back button that actually
-behaves like one), and "Session fixes and a new Archive feature (2026-09-11)" below for the newest
-batch (two real bugs found via on-device reports — an Add Food search reset, and a PWA update-
-staleness bug caused by GitHub Pages' HTTP cache headers — plus a new Archive section in the Memory
-tab, itself revised twice after user feedback). No feature is in progress right now — check with the
-user for what's next. See "Immediate next steps" and "Standing watch item" near the end of this file
-before starting new work._
+behaves like one), "Session fixes and a new Archive feature (2026-09-11)" for that batch (an Add Food
+search reset, a PWA update-staleness bug caused by GitHub Pages' HTTP cache headers, and a new
+Archive section in the Memory tab), and "Session features and fixes (2026-09-12)" below for the
+newest batch (a Macro-split explainer popup with its own back-button handling; a second, adjacent
+round of the same search-reset bug found in the Memory tab's row-actions menu; a "Quick add" one-time
+food-logging path that doesn't touch Memory, plus a related meal-target-switch bug found while
+building it; and the Calories target changed from a fixed ceiling to a low-high range, now
+color-coded on the Today card like the other macros). No feature is in progress right now — check
+with the user for what's next. See "Immediate next steps" and "Standing watch item" near the end of
+this file before starting new work._
 
 ## Cross-machine continuity (why this file is here, in git)
 
@@ -935,6 +939,151 @@ fixes after the user tried it and reported real problems.
      Saved-foods row needs to keep this in mind** — Ingredient/USDA rows never had the `overflow:hidden`
      wrapper in the first place, so they were never affected.
 
+## Session features and fixes (2026-09-12)
+
+Five pieces of work, requested and shipped one at a time in one session: a new explainer popup, a
+second round of the item-13 search-reset bug (found in a different screen), a new one-time-logging
+feature (plus a related bug found while building it), and a target-model change for Calories.
+
+### 15. Macro-split explainer popup, with its own Android back-button handling
+
+User asked why the Macro-split percentages on Today don't match the raw gram split, then asked for a
+button explaining the math in place. An (i) button in the top-right corner of the "Macro split · share
+of calories" card (`App.openMacroInfo()`) opens a popup (`renderMacroInfoModal`) showing the
+calorie-conversion formula (protein/carbs = 4 kcal/g, fat = 9 kcal/g) and a live breakdown of today's
+actual grams → kcal → % for each macro, plus the combined macro-calorie total.
+
+- **First real overlay that lives on the Today screen itself** — every prior closeable panel
+  (confirm cards, forms, the Library select bar) only ever appeared on non-Today screens, so
+  `hasOpenOverlay`/`closeOpenOverlay`/`_syncBackStack` had a hardcoded assumption baked in: overlay
+  depth was only ever computed when `screen !== 'today'`. Extended `hasOpenOverlay`/`closeOpenOverlay`
+  to also check `state.today.macroInfoOpen` regardless of screen, and fixed `_syncBackStack`'s depth
+  formula (`away ? (overlay?2:1) : (overlay?1:0)`, was `overlay ? 2 : (away?1:0)` which structurally
+  could never register an overlay while `away` was false) so the hardware/gesture back button closes
+  just the popup instead of doing nothing or leaving Today. **Any future popup/overlay opened directly
+  from Today must reuse this same pair of checks**, not just wire its own X button, or back-button
+  support silently won't work for it.
+- Rendered as a real centered modal with a dim backdrop (`position:absolute;inset:0` inside `.phone`,
+  since `.phone` is already `position:relative;overflow:hidden`) — the first modal-with-backdrop
+  pattern in either app; every other "overlay" to date has been an inline card within the screen's own
+  content flow. Backdrop tap and the X button both call `App.backOneLevel()`, same convention as every
+  other closeable panel.
+
+### 16. Memory tab's row-actions menu had the same search-reset bug as item 13 — a second, adjacent instance
+
+User: "the same thing on the memory tab that was happening when selecting an item after searching. is
+now also happening when i click those 3 dots after searching." `App.toggleRowMenu`/`closeRowMenu`
+(the "⋯" kebab menu added in item 14's second revision) called a full `render()`, which wipes the
+search box and the filtered list — the exact bug class from item 13, just in a different control that
+was added *after* item 13 shipped, so it was never covered by that fix.
+
+- Fixed with the same DOM-patch pattern as `patchAddFoodRow`: new `App.patchLibraryRow(kind, id)`
+  re-renders one row via the correct kind-specific render function
+  (`renderFoodLibraryRow`/`renderIngredientLibraryRow`/`renderUsdaLibraryRow`) and swaps just that
+  node, re-applying the current search's hide/show + `.src-tag` state read from a newly-added
+  `id="lib-search-input"` on the search box (it had no id before this). `toggleRowMenu`/`closeRowMenu`
+  now call this instead of `render()`.
+- **Testing this surfaced the exact gap item 14 had already flagged and explicitly left unfixed**
+  ("this step doesn't bother with the DOM-patch trick... same pre-existing, out-of-scope behavior
+  Move/Delete already have" — see item 14 above): opening the Move/Archive/Delete confirm card from
+  the kebab menu, and cancelling out of it, were *also* still calling full `render()`. Fixed the same
+  way — `requestMove`/`cancelMove`/`requestDelete`/`cancelDelete`/`requestArchive`/`cancelArchive` all
+  patch the row now (falling back to `render()` if the row isn't found). `confirmDelete`/`confirmArchive`
+  (the actual commit step) remove the row's DOM node directly instead — a Delete or Archive commit
+  always makes the item disappear from the current tab's list, and a full render can't correctly do
+  that resurgence-free while a search filter is live, so a direct `row.remove()` (same technique
+  `reinstateItem` already used) is both simpler and correct. `confirmMove` still does a full `render()`
+  since it also switches `activeTab` to the destination tab — a real tab change, not a same-screen
+  toggle, so there's no single row to patch and no search-state contradiction (switching tabs already
+  resets the search today, same as tapping a tab manually).
+- **Any future button added to a searchable list row must route through a per-row patch (or a direct
+  DOM removal for anything that visually removes the row) instead of `App.render()`** — this is now
+  the third time this exact bug class has been found (Add Food selection in item 13, the kebab menu
+  and its Move/Archive/Delete confirm flow here), always by a different control added without
+  re-checking this rule.
+
+### 17. "Quick add" — log a one-time item without saving it to Memory, plus a meal-target-switch bug found while building it
+
+User: "I need the ability to log food without actually saving it in memory. So a name and macros for
+one time use." Every existing way to type in nutrition info (the Add Food "Quick lookup" box, the
+manual-entry form inside "Build from ingredients") ended up creating a permanent Memory entry first,
+then required selecting that entry to actually log it — there was no path that logged straight to
+today without also planting something in Memory.
+
+- **New 4th tab on the Log food screen, "Quick add"** (`renderQuickAddForm`): Name plus
+  Calories/Protein/Carbs/Fat (Fiber/Sugar/Sodium optional, confirmed with the user before building —
+  they wanted the optional fields too). `App.quickAddLog()` pushes the entry directly into
+  `getOrCreateMeal(targetMeal).items` (today, or the backdated day if `targetDate` is set) — nothing
+  is written to `memory.foods`/`ingredients`/`usda`, so it never appears in the Memory tab, isn't
+  searchable, and isn't archivable (there's nothing there to archive). Verified directly: seeded a
+  logged item via this path, confirmed it appears in the meal breakdown and macro totals, and confirmed
+  zero matching entries in any `memory.*` array afterward.
+- Reused existing plumbing rather than inventing new state: `getOrCreateMeal`, the same
+  `val`/`num` DOM-read helpers `saveForm`/`composerAddManualComponent` already use, and the same
+  bottom meal-chip bar every other Add Food tab shares — the search box and the "Saved/Ingredients/USDA"
+  cross-tab search machinery are simply hidden while this tab is active (same conditional-render
+  pattern as the Archive tab hiding Library's main search).
+- **Real bug found while testing this, unrelated to Quick add itself but directly adjacent**: tapping a
+  different meal chip (Breakfast/Lunch/Snack/Dinner) called `App.setTargetMeal` → full `render()` →
+  silently wiped whatever was typed into the Quick add form, **and** any weight already typed into an
+  Ingredients/USDA row's input before hitting "+ Add" — same search/typed-input-lives-only-in-the-DOM
+  bug class as items 13/16, just triggered by the meal-target selector instead of a search box. Fixed
+  by patching in place instead: `App.patchAddFoodTargetMeal()` toggles the chip's `.active` class
+  (via a new `id="addfood-meal-chips"` wrapper + `data-meal` attributes), updates the bottom action
+  button's text (`id="addfood-bottom-btn"`), and updates every visible row's "+ Add to X" label text
+  (new `id="addbtn-foods-*"`/`addbtn-ingredients-*"`/`addbtn-usda-*"` on those buttons) — all without
+  touching any `<input>` element's value. `setTargetMeal` now calls this instead of `render()`,
+  falling back to `render()` if the patch targets aren't found (mirrors the `patchAddFoodRow`/
+  `patchLibraryRow` fallback convention). **Any future control that changes `state.addfood.targetMeal`
+  must go through this same patch, not a raw `render()`.**
+
+### 18. Calories target changed from a fixed ceiling to a low-high range
+
+User: "i want to change the Calorie target, from a fixed value and under to a range like protein."
+The target system (`defaultTargets()`/`targetInfo()`/`statusFor()`/`statusLabelFor()`/`detailFor()`/
+`pdfTargetRangeLabel()`/`pdfDetailLabel()`) was already fully generic across `kind:'range'`/`'ceiling'`/
+`'floor'` — Protein/Carbs/Fat/Water/Weight were already `kind:'range'`, so Settings' target editor,
+status pill colors, Trends, and the PDF export all picked up Calories-as-a-range automatically with
+**zero changes**, the same way they already handle Protein. Two things needed hand-written changes:
+
+- **The Today hero Calories card** (`renderToday`) is bespoke, unlike the small Protein/Carbs/Fat
+  tiles — it had its own ceiling-only math (`calPct` against a single `.value`, a 2-state "On
+  track"/"Over ceiling" badge, a "Ceiling X kcal · Y left/over" caption). Reworked for 3 states:
+  `calBadgeText` is Under/On track/Over, `calCaption` shows the right phrasing for each
+  (`"N under"`/`"N left"`/`"N over"`), the progress bar fills against `.high` instead of the old
+  single ceiling value, and the caption line shows the actual `low–high` range instead of `0`. The
+  desktop dashboard's calorie sparkline (`buildSpark('calories', ...)`) previously faked a band as
+  `[value*0.9, value]` since there was no real low bound before — now uses the real `calT.low`/
+  `calT.high`, same as `protSpark` already did.
+- **Default range: 1,500–1,700 kcal** (was a 1,900 kcal ceiling), per the user's explicit answer when
+  asked. **Migration for existing data**: anyone's saved `localStorage` (or an older exported backup
+  file) still has the old `{kind:'ceiling', value:1900}` shape — `loadLocal()` and the backup-import
+  handler both now check `targets.calories.kind !== 'range'` after the normal merge and replace it
+  with the new range default if so, rather than leaving a broken calorie target that would show `NaN`
+  once the hero card started reading `.low`/`.high`. **Any future target-shape change needs the same
+  migration-on-load treatment in both of those places**, not just a `defaultTargets()` edit — a fresh
+  install picks up a new default automatically, but existing saved state never re-reads
+  `defaultTargets()` for a key it already has a value for.
+- Also rewrote the History calendar's status-dot legend text from "Over ceiling" to "Off track" —
+  that dot's red color (`dotColor`/hardcoded `var(--critical)`) has always meant "not good" as a single
+  boolean bucket, identical to how Protein's non-good days are shown (this was already true before
+  today, not something this change introduced) — but the literal word "ceiling" became inaccurate
+  once a calorie day can be "not good" by being *under* the range, not just over it. Deliberately did
+  **not** build a real 3-color (red/amber/green) system for the calendar dots/Trends bar charts — that
+  binary-bucket treatment is a pre-existing, consistent design across every range-based target
+  already (Protein's dots/bars work exactly the same way), not something unique to Calories that
+  needed fixing to match its new range shape.
+
+### 19. Calories card colored red/amber/green by status
+
+Follow-up in the same session: "How about colored calories tab? Red if it is over, green if it is in
+range and i am not sure about the color for under." The hero card's background was always solid
+`var(--brand)` regardless of status, even though item 18 already made it say Under/On track/Over.
+`calCardBg` now switches the card's background: `var(--critical)` when over, `var(--warning)` when
+under, `var(--brand)` when in range — asked the user to confirm amber/`var(--warning)` specifically
+since that's the same color already used for "Under" on the Protein/Carbs/Fat/Fiber tiles, confirmed
+before implementing.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -952,26 +1101,31 @@ with no build step/bundler/minification — there's no established threshold for
 use judgment: a good trigger point is when total file size roughly doubles from the original ~206
 KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
 view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
-as of 2026-09-11: ~241 KB** (up from ~232 KB at the 2026-09-04 checkpoint, ~211 KB original baseline)
-— still well under the doubling trigger, not flagged, but noting the running total here so the next
-check has an accurate comparison point instead of comparing against the stale original baseline.
+as of 2026-09-12: ~247 KB** (up from ~241 KB at the 2026-09-11 checkpoint, ~232 KB at 2026-09-04,
+~211 KB original baseline) — still well under the doubling trigger, not flagged, but noting the
+running total here so the next check has an accurate comparison point instead of comparing against
+the stale original baseline.
 
 ## Immediate next steps (pick up here)
 
-No feature is in progress. As of 2026-09-11: **everything shipped to date is confirmed working by
+No feature is in progress. As of 2026-09-12: **everything shipped to date is confirmed working by
 the user on a real device** — items 1-9 (2026-08-28 batch), items 10-12 (2026-09-04 batch, see
 "Three features" above: backdated logging, memory-item sharing with multi-select and a "paste to
-import" recipient path, and the redesigned Android back button), and items 13-14 (2026-09-11 batch,
-see "Session fixes and a new Archive feature" above: the Add Food search-reset fix, the GitHub-Pages
-HTTP-cache staleness fix, and the Archive section with its confirm-card and row-menu revisions).
-Nothing is queued. Ask what's next rather than assuming.
+import" recipient path, and the redesigned Android back button), items 13-14 (2026-09-11 batch, see
+"Session fixes and a new Archive feature" above: the Add Food search-reset fix, the GitHub-Pages
+HTTP-cache staleness fix, and the Archive section with its confirm-card and row-menu revisions), and
+items 15-19 (2026-09-12 batch, see "Session features and fixes" above: the Macro-split explainer
+popup, a second round of the search-reset bug found in the Memory tab's row-actions menu, the Quick
+add one-time-logging feature plus a meal-target-switch bug found while building it, Calories moving
+from a ceiling to a low-high range, and the Calories card being colored by status). Nothing is
+queued. Ask what's next rather than assuming.
 
 Two open threads to keep in mind if they come back up, neither active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
   asked to leave it alone for now — don't touch OCR code unless asked).
 - The Limited Edition App's icon redesign is **paused**, not abandoned — see BilliFit's own
-  `plan.md` "Icon work paused" section. A yellow-background/bigger-cat icon already shipped and is
-  live; a further redesign is waiting on the user supplying their own artwork (a square PNG,
-  ≥512×512, opaque background). Do not attempt another from-memory recreation of reference art if
-  this comes up again — the whole point of pausing was that approach wasn't working; wait for the
-  file.
+  `plan.md` "Icon work paused" section, and its newly-added note about a set of already-regenerated
+  icon files that turned out to have been sitting **uncommitted** in that repo's working tree since
+  2026-08-28 (found 2026-09-12) — resolve that before doing any further icon work, since the live
+  site currently still shows the icon from *before* that regeneration, not what this file previously
+  described as shipped.
