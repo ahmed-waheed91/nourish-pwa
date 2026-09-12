@@ -850,7 +850,32 @@ const App = {
     const pctEl = document.getElementById(`sel-pct-${id}`);
     if (pctEl) pctEl.value = Math.round(pct*10)/10;
   },
-  setTargetMeal(m){ this.state.addfood.targetMeal = m; this.render(); },
+  // Patches just the meal chips, the bottom action button, and each row's "+ Add to X" label
+  // instead of a full render() — that would otherwise wipe any weight/percentage the user has
+  // typed into a row (or the Quick add form) but hasn't submitted yet.
+  setTargetMeal(m){
+    this.state.addfood.targetMeal = m;
+    if (!this.patchAddFoodTargetMeal()) this.render();
+  },
+  patchAddFoodTargetMeal(){
+    const st = this.state.addfood;
+    const chipsWrap = document.getElementById('addfood-meal-chips');
+    const bottomBtn = document.getElementById('addfood-bottom-btn');
+    if (!chipsWrap || !bottomBtn) return false;
+    chipsWrap.querySelectorAll('[data-meal]').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-meal') === st.targetMeal);
+    });
+    if (st.activeTab === 'quick'){
+      bottomBtn.textContent = `Log to ${st.targetMeal} · not saved to memory`;
+    } else {
+      const addCount = Object.values(st.selected).filter(Boolean).length;
+      bottomBtn.textContent = `Add to ${st.targetMeal} · ${addCount>0 ? addCount+' item'+(addCount>1?'s':'') : 'select items'}`;
+    }
+    document.querySelectorAll('[id^="addbtn-foods-"], [id^="addbtn-ingredients-"], [id^="addbtn-usda-"]').forEach(btn => {
+      if (!btn.textContent.includes('Added')) btn.textContent = '+ Add to ' + st.targetMeal;
+    });
+    return true;
+  },
 
   checkDayRollover(){
     const real = todayISO();
@@ -959,6 +984,23 @@ const App = {
     });
     if (st.targetDate) this.recomputeHistoryDay(st.targetDate);
     st.selected = {};
+    st.addedFlash = `Added to ${meal.name} ✓`;
+    this.render();
+    if (!st.targetDate) this.setScreen('today');
+  },
+  // A one-off entry logged straight into today's (or the backdated day's) meal — nothing is
+  // written to state.memory, so it never appears in the Memory tab and can't be reused later.
+  quickAddLog(){
+    const val = id => (document.getElementById(id)?.value ?? '').trim();
+    const num = id => parseFloat(document.getElementById(id)?.value) || 0;
+    const st = this.state.addfood;
+    const meal = this.getOrCreateMeal(st.targetMeal);
+    meal.items.push({
+      name: val('quickadd-name') || 'Quick add',
+      kcal: Math.round(num('quickadd-kcal')), p: num('quickadd-p'), c: num('quickadd-c'), f: num('quickadd-f'),
+      fib: num('quickadd-fib'), sugar: num('quickadd-sugar'), sodium: Math.round(num('quickadd-sodium')),
+    });
+    if (st.targetDate) this.recomputeHistoryDay(st.targetDate);
     st.addedFlash = `Added to ${meal.name} ✓`;
     this.render();
     if (!st.targetDate) this.setScreen('today');
@@ -2444,7 +2486,7 @@ function renderSavedFoodRow(f, st){
           }).join('')}
           <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px;">
             <div style="font-size:12.5px;font-weight:700;">Total: <span id="cf-total-${f.id}">${f.kcal}</span> kcal</div>
-            <button onclick="App.addComposedFoodToMeal('${f.id}')" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===f.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+            <button id="addbtn-foods-${f.id}" onclick="App.addComposedFoodToMeal('${f.id}')" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===f.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
           </div>
         </div>
       ` : ''}
@@ -2499,7 +2541,7 @@ function renderIngredientAddRow(ing, st){
     <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
       <input id="w-ingredients-${ing.id}" type="number" value="100" oninput="App.scaleRow('${ing.id}', ${ing.kcalPer100}, this)"/>
       <div style="font-size:12.5px;color:var(--muted);flex:1;">${ing.unit} used</div>
-      <button onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===ing.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+      <button id="addbtn-ingredients-${ing.id}" onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===ing.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
     </div>
   </div>`;
 }
@@ -2518,14 +2560,14 @@ function renderUsdaAddRow(u, st){
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
       <input id="w-usda-${u.id}" type="number" value="100" oninput="App.scaleRow('${u.id}', ${u.kcalPer100}, this)"/>
       <div style="font-size:12.5px;color:var(--muted);flex:1;">g used</div>
-      <button onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===u.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+      <button id="addbtn-usda-${u.id}" onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===u.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
     </div>
   </div>`;
 }
 
 function renderAddFood(){
   const st = App.state.addfood;
-  const tabs = [['saved','Saved'],['ingredients','Ingredients'],['usda','USDA']];
+  const tabs = [['saved','Saved'],['ingredients','Ingredients'],['usda','USDA'],['quick','Quick add']];
   const mealDefs = ['Breakfast','Lunch','Snack','Dinner'];
   const addCount = Object.values(st.selected).filter(Boolean).length;
 
@@ -2618,10 +2660,12 @@ function renderAddFood(){
         </button>
         <div class="disp" style="font-size:18px;font-weight:800;">Log food</div>
       </div>
+      ${st.activeTab!=='quick' ? `
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input id="addfood-search-input" placeholder="Search saved foods, ingredients, USDA..." oninput="App.filterAddFoodRows(this.value)"/>
       </div>
+      ` : ''}
       <div class="seg" style="margin-top:12px;">
         ${tabs.map(([id,label]) => `<button class="seg-btn" style="flex:1;${st.activeTab===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setAddFoodTab('${id}')">${label}</button>`).join('')}
       </div>
@@ -2629,19 +2673,46 @@ function renderAddFood(){
 
     <div class="scroll-area" style="padding:14px 18px 14px 18px;">
       ${backdateBanner}
+      ${st.activeTab==='quick' ? renderQuickAddForm() : `
       <div id="addfood-context-label" style="font-size:11.5px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;">
         ${st.activeTab==='saved' ? 'From your memory' : (st.activeTab==='ingredients' ? 'Raw ingredients · scale by weight' : 'USDA FoodData Central')}
       </div>
       ${quickLookup}${groups}
+      `}
     </div>
 
     <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;">
-      <div style="display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;">
-        ${mealDefs.map(m => `<button class="chip ${st.targetMeal===m?'active':''}" onclick="App.setTargetMeal('${m}')">${m}</button>`).join('')}
+      <div id="addfood-meal-chips" style="display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;">
+        ${mealDefs.map(m => `<button class="chip ${st.targetMeal===m?'active':''}" data-meal="${m}" onclick="App.setTargetMeal('${m}')">${m}</button>`).join('')}
       </div>
-      <button onclick="App.confirmAddSelectedFoods()" ${addCount===0?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${addCount===0?'0.5':'1'};">
+      ${st.activeTab==='quick' ? `
+      <button id="addfood-bottom-btn" onclick="App.quickAddLog()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
+        Log to ${st.targetMeal} · not saved to memory
+      </button>
+      ` : `
+      <button id="addfood-bottom-btn" onclick="App.confirmAddSelectedFoods()" ${addCount===0?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${addCount===0?'0.5':'1'};">
         Add to ${st.targetMeal} · ${addCount>0 ? addCount+' item'+(addCount>1?'s':'') : 'select items'}
       </button>
+      `}
+    </div>
+  `;
+}
+function renderQuickAddForm(){
+  const fields = [['quickadd-kcal','Calories (kcal)'],['quickadd-p','Protein (g)'],['quickadd-c','Carbs (g)'],['quickadd-f','Fat (g)'],['quickadd-fib','Fiber (g, optional)'],['quickadd-sugar','Sugar (g, optional)'],['quickadd-sodium','Sodium (mg, optional)']];
+  return `
+    <div class="card pad">
+      <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:2px;">Log something once</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-bottom:12px;line-height:1.4;">For a one-off item you won't eat again — this is logged to today only and isn't saved to Memory.</div>
+      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Name</label>
+      <input id="quickadd-name" type="text" placeholder="e.g. Restaurant biryani" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
+      <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:8px;">
+        ${fields.map(([id,label]) => `
+          <div>
+            <label style="display:block;font-size:10.5px;color:var(--muted);margin-bottom:3px;">${label}</label>
+            <input id="${id}" type="number" step="0.1" style="width:100%;text-align:left;"/>
+          </div>
+        `).join('')}
+      </div>
     </div>
   `;
 }
