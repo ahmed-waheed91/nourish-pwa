@@ -4,22 +4,24 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-12. The original four features (PDF export, live USDA lookup, real OCR,
-composite Saved Foods) plus four large batches (2026-08-28, 2026-09-04, 2026-09-11, 2026-09-12) are
-all live in both apps and **user-confirmed working** — see "Four functional features" / items 5-9 for
-the 2026-08-28 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal,
+_Last updated 2026-09-14. The original four features (PDF export, live USDA lookup, real OCR,
+composite Saved Foods) plus five large batches (2026-08-28, 2026-09-04, 2026-09-11, 2026-09-12,
+2026-09-14) are all live and **user-confirmed working** — see "Four functional features" / items 5-9
+for the 2026-08-28 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal,
 portion-by-percentage, portion-by-weight, fixed meal order), "Three features (2026-09-04)" for that
 batch (backdated logging, sharing individual memory items, an Android back button that actually
 behaves like one), "Session fixes and a new Archive feature (2026-09-11)" for that batch (an Add Food
 search reset, a PWA update-staleness bug caused by GitHub Pages' HTTP cache headers, and a new
-Archive section in the Memory tab), and "Session features and fixes (2026-09-12)" below for the
-newest batch (a Macro-split explainer popup with its own back-button handling; a second, adjacent
-round of the same search-reset bug found in the Memory tab's row-actions menu; a "Quick add" one-time
-food-logging path that doesn't touch Memory, plus a related meal-target-switch bug found while
-building it; and the Calories target changed from a fixed ceiling to a low-high range, now
-color-coded on the Today card like the other macros). No feature is in progress right now — check
-with the user for what's next. See "Immediate next steps" and "Standing watch item" near the end of
-this file before starting new work._
+Archive section in the Memory tab), "Session features and fixes (2026-09-12)" for that batch (a
+Macro-split explainer popup with its own back-button handling; a second, adjacent round of the same
+search-reset bug found in the Memory tab's row-actions menu; a "Quick add" one-time food-logging path
+that doesn't touch Memory, plus a related meal-target-switch bug found while building it; and the
+Calories target changed from a fixed ceiling to a low-high range, now color-coded on the Today card
+like the other macros), and "App icon replaced with custom artwork (2026-09-14)" below for the newest
+batch — **this app's icon is now Ahmed's own Photoshop artwork, this is a Nourish-only cosmetic
+change, do not port to BilliFit**. No feature is in progress right now — check with the user for
+what's next. See "Immediate next steps" and "Standing watch item" near the end of this file before
+starting new work._
 
 ## Cross-machine continuity (why this file is here, in git)
 
@@ -425,6 +427,19 @@ shared `localStorage` origin, not two isolated copies.
   (`Get-CimInstance Win32_Process -Filter "ProcessId=$id"`), since a stale server left listening on
   a port will silently serve old code to the next test and waste time debugging a "bug" that's
   actually just stale cache.
+  - **`Start-Job` is not a safe way to background this server** (confirmed 2026-09-14) — a job
+    started with `Start-Job` dies as soon as the PowerShell tool call that launched it returns, even
+    though the tool call itself can be marked `run_in_background: true`; that flag backgrounds the
+    *tool call*, not the job's own process lifetime. Always use the `Start-Process -WindowStyle
+    Hidden` pattern above (a real separate OS process) for anything that needs to survive into a
+    later, separate tool call.
+- **Image resizing/compositing with no Node/Python on this machine (confirmed 2026-09-14)**:
+  PowerShell's built-in `System.Drawing` (`Add-Type -AssemblyName System.Drawing`) needs no install
+  and covers everything needed for icon work — `Bitmap`/`Graphics.DrawImage` with
+  `InterpolationMode.HighQualityBicubic` for resizing, `Graphics.Clear(color)` to flatten
+  transparency or pad a maskable icon's safe zone, `bitmap.GetPixel(x,y)` to sample a source image's
+  own background color rather than hardcoding one. No ImageMagick (`magick`/`convert`) was present
+  either — `System.Drawing` is the fallback on a fresh Windows machine with neither.
 - Real bugs hit and fixed this project (don't reintroduce): `App.state.history` naming collision;
   a reactive-vs-guessed-threshold bug in the storage failsafe; a day-rollover check that only ran
   once at boot instead of on every app resume; `getOrCreateMeal` matching on the wrong id format
@@ -1084,6 +1099,67 @@ under, `var(--brand)` when in range — asked the user to confirm amber/`var(--w
 since that's the same color already used for "Under" on the Protein/Carbs/Fat/Fiber tiles, confirmed
 before implementing.
 
+## App icon replaced with custom artwork (2026-09-14) — Nourish-only, cosmetic, not ported to BilliFit
+
+Ahmed designed a new logo in Photoshop and wanted it as the app icon, replacing the original
+icon set from the initial PWA build. **This is purely aesthetic — per the Original-vs-Limited-Edition
+rule, it stays Nourish-only and must never be ported to BilliFit.** Went through several rounds as
+the artwork itself changed, each pushed live and checked on Ahmed's real phone.
+
+- **Format given up front**: square PNG, ≥512×512 (this determines every smaller size, all derived
+  from it — no need for the user to export multiple sizes themselves).
+- **Round 1 — transparent artwork**: Ahmed's first export had no background. Generated
+  `icon-512.png`/`icon-192.png`/`favicon-32.png` as true transparent PNGs, `apple-touch-icon.png`
+  flattened onto the app's off-white `background_color` (iOS renders transparent areas as black, so
+  this one can never stay transparent), and `icon-512-maskable.png` similarly flattened with the
+  artwork scaled to ~75% and centered — **maskable icons cannot have transparency by spec**: Android
+  applies its own shape mask (circle/squircle/rounded-square depending on launcher) over the full
+  bleed image, and needs real pixels to mask, not a transparent gap.
+  - **Ahmed then asked why the home-screen icon still showed a white background** despite his source
+    file being transparent. Diagnosed and explained: `manifest.json` declares two icon roles —
+    `icon-512.png`/`icon-192.png` (`purpose:"any"`, genuinely transparent) and
+    `icon-512-maskable.png` (`purpose:"maskable"`, required opaque) — Android's home-screen install
+    path uses the **maskable** one specifically, so what he was seeing was correct, expected behavior
+    for that icon role, not a leftover bug. **Worth remembering for any future icon change**: "the
+    icon still has a background" is very likely someone looking at the maskable variant, not the
+    plain one — check `purpose` in `manifest.json` before assuming the wrong file was used.
+  - Ahmed decided against troubleshooting further and chose to **drop transparency entirely** rather
+    than accept a launcher-dependent black-corner risk on non-masking launchers.
+- **Round 2 — single opaque source file**: Ahmed deleted the transparent/white-background pair and
+  replaced them with one flattened PNG (`icons/Nourish Logo.png`, kept in the repo as the source of
+  truth for any future resize — commit it alongside the generated set whenever it's replaced). All
+  five generated files now composite straight from this one opaque source, no separate background
+  logic needed; the maskable variant samples the **source's own corner pixel** as its padding fill
+  color (instead of a hardcoded app background color) so the safe-zone padding is invisible/seamless
+  regardless of what background color the artwork itself uses.
+- **Round 3 — background color tweak**: Ahmed edited the same file's background color once more
+  (amber/orange → soft cream) and asked for it repushed; same regenerate-from-source-file pipeline,
+  no code changes needed, since everything derives from `icons/Nourish Logo.png` at request time.
+- **Real gotcha re-encountered each round, same root class as item 13a's GitHub-Pages-cache fix but a
+  different cache layer**: replacing the icon **file bytes** alone is never enough to reach an
+  already-installed device — `service-worker.js`'s fetch handler is cache-first for everything except
+  navigation requests, and icons are in `PRECACHE` under a fixed `CACHE_NAME`. Since only the icon
+  *contents* changed, not `service-worker.js` itself, the browser had no signal anything changed and
+  kept serving the old cached icon bytes indefinitely — a hard refresh alone does **not** fix this,
+  since it's the service worker (a separate cache layer from HTTP/browser cache) doing the serving.
+  **`CACHE_NAME` must be bumped on every icon (or any `PRECACHE` file's content-only) change** —
+  bumped `nourish-v4` → `v5` → `v6` → `v7` → `v8` across this session's rounds. ⚠️ **Any future asset
+  swap where only file contents change (not the referencing HTML/JS) needs this same manual
+  `CACHE_NAME` bump** — there's no automatic content-hash/versioning in this app's build (there is no
+  build step at all).
+- **Generation method**: no ImageMagick or Python/PIL on this machine this session (checked, both
+  absent) — used PowerShell's built-in `System.Drawing` (`Add-Type -AssemblyName System.Drawing`,
+  `Bitmap`/`Graphics.DrawImage` with `HighQualityBicubic` interpolation) instead, no install needed.
+  Confirmed bounding-box math on the first transparent source (content occupied ~76%×64% of the
+  512×512 canvas, roughly centered) before deciding on a 75-80% maskable safe-zone scale factor.
+- **Local test-server gotcha hit again this session, worth remembering**: `Start-Job`-based
+  background PowerShell jobs (used in earlier sessions) **die when the parent PowerShell tool call's
+  process exits** — they are not truly detached, despite `run_in_background: true` on the *tool call*
+  itself. Switched to writing the server script to a `.ps1` file and launching it via
+  `Start-Process -FilePath powershell.exe -ArgumentList '-File',<path> -WindowStyle Hidden`, a real
+  separate OS process that survives between tool calls. **Prefer `Start-Process` over `Start-Job` for
+  any future local test server that needs to stay up across multiple tool calls.**
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1108,17 +1184,19 @@ the stale original baseline.
 
 ## Immediate next steps (pick up here)
 
-No feature is in progress. As of 2026-09-12: **everything shipped to date is confirmed working by
+No feature is in progress. As of 2026-09-14: **everything shipped to date is confirmed working by
 the user on a real device** — items 1-9 (2026-08-28 batch), items 10-12 (2026-09-04 batch, see
 "Three features" above: backdated logging, memory-item sharing with multi-select and a "paste to
 import" recipient path, and the redesigned Android back button), items 13-14 (2026-09-11 batch, see
 "Session fixes and a new Archive feature" above: the Add Food search-reset fix, the GitHub-Pages
-HTTP-cache staleness fix, and the Archive section with its confirm-card and row-menu revisions), and
+HTTP-cache staleness fix, and the Archive section with its confirm-card and row-menu revisions),
 items 15-19 (2026-09-12 batch, see "Session features and fixes" above: the Macro-split explainer
 popup, a second round of the search-reset bug found in the Memory tab's row-actions menu, the Quick
 add one-time-logging feature plus a meal-target-switch bug found while building it, Calories moving
-from a ceiling to a low-high range, and the Calories card being colored by status). Nothing is
-queued. Ask what's next rather than assuming.
+from a ceiling to a low-high range, and the Calories card being colored by status), and the
+2026-09-14 app-icon replacement (see "App icon replaced with custom artwork" above — Nourish-only,
+cosmetic, source file kept at `icons/Nourish Logo.png`). Nothing is queued. Ask what's next rather
+than assuming.
 
 Two open threads to keep in mind if they come back up, neither active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
@@ -1128,4 +1206,6 @@ Two open threads to keep in mind if they come back up, neither active right now:
   icon files that turned out to have been sitting **uncommitted** in that repo's working tree since
   2026-08-28 (found 2026-09-12) — resolve that before doing any further icon work, since the live
   site currently still shows the icon from *before* that regeneration, not what this file previously
-  described as shipped.
+  described as shipped. **When BilliFit's icon work resumes, read this file's "App icon replaced with
+  custom artwork (2026-09-14)" section first** — the maskable-icon-requires-opacity explanation and
+  the `CACHE_NAME`-bump-on-every-icon-change gotcha both apply identically there.
