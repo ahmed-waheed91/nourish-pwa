@@ -483,13 +483,22 @@ async function fetchUsdaFood(name, apiKey){
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
     let food = null;
+    let firstMatch = null; // earliest-tier hit, kept as a fallback if no tier reports fiber at all
     for (const tier of USDA_DATA_TYPE_TIERS){
       const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(name)}&pageSize=3&dataType=${encodeURIComponent(tier)}`;
       const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) throw new Error('bad response');
       const data = await res.json();
-      if (data.foods && data.foods.length){ food = data.foods[0]; break; }
+      if (data.foods && data.foods.length){
+        const candidate = data.foods[0];
+        if (!firstMatch) firstMatch = candidate;
+        // Some Foundation-tier records omit fiber (and other nutrients) entirely rather than
+        // reporting it as 0 — keep trying lower tiers until one actually includes it.
+        const hasFiber = (candidate.foodNutrients||[]).some(n => n.nutrientId === USDA_NUTRIENT_IDS.fib);
+        if (hasFiber){ food = candidate; break; }
+      }
     }
+    if (!food) food = firstMatch;
     if (!food) return { notFound:true };
     const per100 = { kcal:0, p:0, c:0, f:0, fib:0, sugar:0, sodium:0 };
     const kcalById = {};
