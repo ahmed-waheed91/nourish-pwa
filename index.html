@@ -476,39 +476,83 @@ function findLocalFood(name, nameNorm){
 /* ---------- Live USDA FoodData Central lookup ---------- */
 /* API key lives only in this device's localStorage (Settings screen) — never hardcoded/committed. */
 const USDA_NUTRIENT_IDS = { p:1003, c:1005, f:1004, fib:1079, sugar:2000, sodium:1093 };
+const USDA_SUGAR_ALT_ID = 1063; // Foundation-tier records often report sugar under this id instead of 2000
 const USDA_KCAL_IDS = [1008, 2047, 2048]; // Energy; Foundation-tier foods use the Atwater-factor ids instead of 1008
 const USDA_DATA_TYPE_TIERS = ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'];
+
+// The search endpoint's own top result isn't always the plain food (a flavored/processed product
+// can outrank it within a tier) — require every query word (or its de-pluralized stem) to appear
+// in the description before trusting a match; falls back to the API's own top pick otherwise.
+function usdaFoodMatchesQuery(food, queryWords){
+  const desc = (food.description||'').toLowerCase();
+  return queryWords.every(w => {
+    if (desc.includes(w)) return true;
+    const stem = w.replace(/e?s$/,'');
+    return stem.length>=3 && desc.includes(stem);
+  });
+}
+// Pulls per-100g macros from one USDA food record and reports how many of our 7 tracked values
+// (kcal + 6 macros) were actually present, vs silently defaulted to 0 — some tiers (esp.
+// Foundation) omit nutrients entirely instead of reporting them as zero.
+function extractUsdaPer100(food){
+  const per100 = { kcal:0, p:0, c:0, f:0, fib:0, sugar:0, sodium:0 };
+  const found = {};
+  const kcalById = {};
+  (food.foodNutrients||[]).forEach(n => {
+    Object.keys(USDA_NUTRIENT_IDS).forEach(key => {
+      if (n.nutrientId === USDA_NUTRIENT_IDS[key] && !found[key]){ per100[key] = n.value || 0; found[key] = true; }
+    });
+    if (!found.sugar && n.nutrientId === USDA_SUGAR_ALT_ID){ per100.sugar = n.value || 0; found.sugar = true; }
+    if (USDA_KCAL_IDS.includes(n.nutrientId)) kcalById[n.nutrientId] = n.value || 0;
+  });
+  const kcalId = USDA_KCAL_IDS.find(id => kcalById[id] != null);
+  per100.kcal = kcalId != null ? kcalById[kcalId] : 0;
+  if (kcalId != null) found.kcal = true;
+  const completeness = ['p','c','f','fib','sugar','sodium','kcal'].filter(k => found[k]).length;
+  return { per100, completeness };
+}
 async function fetchUsdaFood(name, apiKey){
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    let food = null;
-    let firstMatch = null; // earliest-tier hit, kept as a fallback if no tier reports fiber at all
-    for (const tier of USDA_DATA_TYPE_TIERS){
-      const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(name)}&pageSize=3&dataType=${encodeURIComponent(tier)}`;
-      const res = await fetch(url, { signal: controller.signal });
-      if (!res.ok) throw new Error('bad response');
-      const data = await res.json();
-      if (data.foods && data.foods.length){
-        const candidate = data.foods[0];
-        if (!firstMatch) firstMatch = candidate;
-        // Some Foundation-tier records omit fiber (and other nutrients) entirely rather than
-        // reporting it as 0 — keep trying lower tiers until one actually includes it.
-        const hasFiber = (candidate.foodNutrients||[]).some(n => n.nutrientId === USDA_NUTRIENT_IDS.fib);
-        if (hasFiber){ food = candidate; break; }
+    const queryWords = name.toLowerCase().split(/\s+/).filter(Boolean);
+    // Tiers are fetched in parallel (was sequential) — now that a low-quality match in an early
+    // tier can be skipped in favor of a more complete one, we may need to inspect all 4 anyway,
+    // so doing it concurrently keeps a lookup to one round-trip instead of up to four.
+    const results = await Promise.all(USDA_DATA_TYPE_TIERS.map(async (tier, tierIdx) => {
+      try {
+        const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(name)}&pageSize=3&dataType=${encodeURIComponent(tier)}`;
+        const res = await fetch(url, { signal: controller.signal });
+        if (res.status === 429) return { tierIdx, status:'rateLimited' };
+        if (res.status === 401 || res.status === 403) return { tierIdx, status:'badKey' };
+        if (!res.ok) return { tierIdx, status:'error' };
+        const data = await res.json();
+        const foods = data.foods || [];
+        if (!foods.length) return { tierIdx, status:'empty' };
+        const food = foods.find(f => usdaFoodMatchesQuery(f, queryWords)) || foods[0];
+        return { tierIdx, status:'ok', food };
+      } catch (e){
+        return { tierIdx, status:'error' }; // includes this tier's fetch being aborted by the shared timeout
       }
+    }));
+
+    const candidates = results.filter(r => r.status === 'ok').sort((a,b) => a.tierIdx - b.tierIdx);
+    if (!candidates.length){
+      if (results.every(r => r.status === 'error')) return { noConnection:true };
+      if (results.some(r => r.status === 'rateLimited')) return { rateLimited:true };
+      if (results.some(r => r.status === 'badKey')) return { badKey:true };
+      return { notFound:true };
     }
-    if (!food) food = firstMatch;
-    if (!food) return { notFound:true };
-    const per100 = { kcal:0, p:0, c:0, f:0, fib:0, sugar:0, sodium:0 };
-    const kcalById = {};
-    (food.foodNutrients||[]).forEach(n => {
-      Object.keys(USDA_NUTRIENT_IDS).forEach(key => { if (n.nutrientId === USDA_NUTRIENT_IDS[key]) per100[key] = n.value || 0; });
-      if (USDA_KCAL_IDS.includes(n.nutrientId)) kcalById[n.nutrientId] = n.value || 0;
+
+    // Pick whichever tier's match has the most complete nutrient data, not just the
+    // highest-priority tier — a Foundation match missing fiber loses out to SR Legacy's
+    // complete record; ties still favor the earlier (higher-quality) tier via the sorted order.
+    let best = null, bestScore = -1, bestPer100 = null;
+    candidates.forEach(c => {
+      const { per100, completeness } = extractUsdaPer100(c.food);
+      if (completeness > bestScore){ bestScore = completeness; best = c; bestPer100 = per100; }
     });
-    const kcalId = USDA_KCAL_IDS.find(id => kcalById[id] != null);
-    per100.kcal = kcalId != null ? kcalById[kcalId] : 0;
-    return { notFound:false, name:food.description, per100, fdcId:food.fdcId };
+    return { notFound:false, name:best.food.description, per100:bestPer100, fdcId:best.food.fdcId };
   } catch (e){
     return { noConnection:true };
   } finally {
@@ -1132,7 +1176,11 @@ const App = {
     const apiRes = await fetchUsdaFood(parsed.name, this.state.usdaApiKey);
     if (st.lookupQuery !== raw) return; // query changed while waiting on the network
     st.lookupLoading = false;
-    if (apiRes.noConnection){
+    if (apiRes.rateLimited){
+      st.lookupResult = { rateLimited:true, query:raw };
+    } else if (apiRes.badKey){
+      st.lookupResult = { badKey:true, query:raw };
+    } else if (apiRes.noConnection){
       st.lookupResult = { noConnection:true, query:raw };
     } else if (apiRes.notFound){
       st.lookupResult = { notFound:true, query:raw };
@@ -1143,7 +1191,7 @@ const App = {
   },
   saveLookupToMemory(){
     const r = this.state.addfood.lookupResult;
-    if (!r || r.notFound || r.noConnection || r.saved || r.alreadySaved) return;
+    if (!r || r.notFound || r.noConnection || r.rateLimited || r.badKey || r.saved || r.alreadySaved) return;
     const already = this.state.memory.usda.some(x => x.name.toLowerCase() === r.name.toLowerCase());
     if (!already){
       const per = r.per100;
@@ -2642,6 +2690,16 @@ function renderAddFood(){
       resultHtml = `<div style="margin-top:10px;padding:12px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">
         &ldquo;${r.query}&rdquo; isn't in your saved foods, and no USDA API key is set up yet, so live search can't run.
         <button onclick="App.setScreen('settings')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--warning);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Add a USDA API key in Settings</button>
+      </div>`;
+    } else if (r && r.rateLimited){
+      resultHtml = `<div style="margin-top:10px;padding:12px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">
+        USDA FoodData Central is rate-limiting this API key — too many searches too quickly. Wait a minute and try again.
+        ${App.state.usdaApiKey==='DEMO_KEY' ? '<button onclick="App.setScreen(\'settings\')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--warning);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Get your own free API key in Settings</button>' : ''}
+      </div>`;
+    } else if (r && r.badKey){
+      resultHtml = `<div style="margin-top:10px;padding:12px;background:var(--critical-tint);color:var(--critical);border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">
+        Your USDA API key was rejected — it may be mistyped or revoked.
+        <button onclick="App.setScreen('settings')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Check API key in Settings</button>
       </div>`;
     } else if (r && r.noConnection){
       resultHtml = `<div style="margin-top:10px;padding:10px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:11.5px;font-weight:600;line-height:1.4;">Couldn't find &ldquo;${r.query}&rdquo; in your saved foods, and couldn't reach the internet to search USDA FoodData Central. Check your connection and try again.</div>`;
