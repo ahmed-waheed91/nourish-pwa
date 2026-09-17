@@ -828,6 +828,22 @@ const App = {
     const s = this.state.addfood.selected;
     if (s[id]) delete s[id]; else s[id] = 100;
     if (!this.patchAddFoodRow(id)) this.render();
+    else this.syncAddFoodBottomButton();
+  },
+  // Keeps the bottom "Add to X · N items" button in sync when a row is patched in place
+  // (toggleSelected skips the full render() to preserve the live search filter, so the
+  // button's text/disabled state would otherwise go stale until something else re-renders).
+  syncAddFoodBottomButton(){
+    const st = this.state.addfood;
+    const bottomBtn = document.getElementById('addfood-bottom-btn');
+    if (!bottomBtn) return false;
+    const addCount = Object.values(st.selected).filter(Boolean).length;
+    bottomBtn.textContent = st.activeTab === 'quick'
+      ? `Log to ${st.targetMeal} · not saved to memory`
+      : `Add to ${st.targetMeal} · ${addCount>0 ? addCount+' item'+(addCount>1?'s':'') : 'select items'}`;
+    bottomBtn.disabled = st.activeTab !== 'quick' && addCount === 0;
+    bottomBtn.style.opacity = bottomBtn.disabled ? '0.5' : '1';
+    return true;
   },
   setSelectedPortion(id, pct, opts){
     const s = this.state.addfood.selected;
@@ -875,12 +891,7 @@ const App = {
     chipsWrap.querySelectorAll('[data-meal]').forEach(btn => {
       btn.classList.toggle('active', btn.getAttribute('data-meal') === st.targetMeal);
     });
-    if (st.activeTab === 'quick'){
-      bottomBtn.textContent = `Log to ${st.targetMeal} · not saved to memory`;
-    } else {
-      const addCount = Object.values(st.selected).filter(Boolean).length;
-      bottomBtn.textContent = `Add to ${st.targetMeal} · ${addCount>0 ? addCount+' item'+(addCount>1?'s':'') : 'select items'}`;
-    }
+    this.syncAddFoodBottomButton();
     document.querySelectorAll('[id^="addbtn-foods-"], [id^="addbtn-ingredients-"], [id^="addbtn-usda-"]').forEach(btn => {
       if (!btn.textContent.includes('Added')) btn.textContent = '+ Add to ' + st.targetMeal;
     });
