@@ -4,22 +4,24 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-14. The original four features (PDF export, live USDA lookup, real OCR,
-composite Saved Foods) plus five large batches (2026-08-28, 2026-09-04, 2026-09-11, 2026-09-12,
-2026-09-14) are all live and **user-confirmed working** — see "Four functional features" / items 5-9
-for the 2026-08-28 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal,
-portion-by-percentage, portion-by-weight, fixed meal order), "Three features (2026-09-04)" for that
-batch (backdated logging, sharing individual memory items, an Android back button that actually
-behaves like one), "Session fixes and a new Archive feature (2026-09-11)" for that batch (an Add Food
-search reset, a PWA update-staleness bug caused by GitHub Pages' HTTP cache headers, and a new
-Archive section in the Memory tab), "Session features and fixes (2026-09-12)" for that batch (a
+_Last updated 2026-09-18. The original four features (PDF export, live USDA lookup, real OCR,
+composite Saved Foods) plus six large batches (2026-08-28, 2026-09-04, 2026-09-11, 2026-09-12,
+2026-09-14, 2026-09-18) are all live and **user-confirmed working** — see "Four functional features"
+/ items 5-9 for the 2026-08-28 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab
+removal, portion-by-percentage, portion-by-weight, fixed meal order), "Three features (2026-09-04)"
+for that batch (backdated logging, sharing individual memory items, an Android back button that
+actually behaves like one), "Session fixes and a new Archive feature (2026-09-11)" for that batch (an
+Add Food search reset, a PWA update-staleness bug caused by GitHub Pages' HTTP cache headers, and a
+new Archive section in the Memory tab), "Session features and fixes (2026-09-12)" for that batch (a
 Macro-split explainer popup with its own back-button handling; a second, adjacent round of the same
 search-reset bug found in the Memory tab's row-actions menu; a "Quick add" one-time food-logging path
 that doesn't touch Memory, plus a related meal-target-switch bug found while building it; and the
 Calories target changed from a fixed ceiling to a low-high range, now color-coded on the Today card
-like the other macros), and "App icon replaced with custom artwork (2026-09-14)" below for the newest
-batch — **this app's icon is now Ahmed's own Photoshop artwork, this is a Nourish-only cosmetic
-change, do not port to BilliFit**. No feature is in progress right now — check with the user for
+like the other macros), "App icon replaced with custom artwork (2026-09-14)" for that batch — Nourish
+-only cosmetic change, never ported to BilliFit — and "Fiber:carbs ratio, Add-food selection bug, and
+USDA lookup reliability overhaul (2026-09-18)" below for the newest batch — **all three items in this
+batch are functional changes and are shipped identically in both apps**, per the
+Original-vs-Limited-Edition rule. No feature is in progress right now — check with the user for
 what's next. See "Immediate next steps" and "Standing watch item" near the end of this file before
 starting new work._
 
@@ -264,6 +266,12 @@ day — totals only."
   on `m.id === mealName.toLowerCase()`, but meal ids always carry a random suffix, so that
   condition was never true — every add to a meal created a duplicate group. Fixed to match on
   `m.name` only.
+- **⚠️ Superseded 2026-09-18**: the tier-priority description above (stop at the first tier with any
+  hit) is no longer how `fetchUsdaFood()` works — it was found to silently return 0 for fiber (and
+  potentially other nutrients) when a higher-priority tier's record simply omits them. See "Fiber:
+  carbs ratio, Add-food selection bug, and USDA lookup reliability overhaul (2026-09-18)" below for
+  the full rewrite (completeness scoring across all tiers, parallel fetching, relevance filtering,
+  distinct rate-limit/bad-key states).
 
 ## Real OCR for label photos — DONE, confirmed working
 
@@ -1160,6 +1168,125 @@ the artwork itself changed, each pushed live and checked on Ahmed's real phone.
   separate OS process that survives between tool calls. **Prefer `Start-Process` over `Start-Job` for
   any future local test server that needs to stay up across multiple tool calls.**
 
+## Fiber:carbs ratio, Add-food selection bug, and USDA lookup reliability overhaul (2026-09-18) — both apps
+
+Three separate items from the same session, all functional (not cosmetic) so all shipped
+identically in `pwa/` and `billifit-pwa/` per the Original-vs-Limited-Edition rule — see
+`billifit-pwa/plan.md` for that side's copy of this same entry.
+
+### 20. Per-meal fiber:carbs ratio
+
+User wants to track the fiber:carbs ratio of a single meal (a meal eaten in one sitting — a lunch
+eaten two hours apart across two sittings "doesn't really count"). Discussed the options before
+building anything:
+1. **Trust the existing meal grouping as-is** — compute the ratio from whichever items are already
+   grouped under a meal label (Breakfast/Lunch/Snack/Dinner), no time-based validation. Cheapest,
+   but doesn't actually enforce "one sitting."
+2. **Add a per-item timestamp** (`addedAt`) and only show the ratio when all of a meal's items fall
+   within a short window (e.g. 30-60 min) — the "real" fix, but a schema change (no item currently
+   carries a timestamp at all).
+3. **Manual "eaten together" tagging**, sidestepping time inference entirely.
+
+**User picked option 1 for now**, explicitly reserving option 2 as a fallback if it turns out to
+matter in practice ("if need be we can come back and change it").
+
+- `mealFiberCarbs(meal)` sums `c`/`fib` across a meal's items and returns `null` if the meal has no
+  carbs at all (so the row doesn't render for e.g. a pure-protein meal).
+- **Display went through two iterations at the user's request.** First shipped as raw grams + a
+  percentage (`10g : 40g (25%)`). User then asked for a simplified, rounded ratio instead — "10:40
+  would show as 1:4" — plus a quality hint with explicit thresholds: **≤1:5 Perfect, 1:5-1:10 Good,
+  1:10-1:15 Acceptable, >1:15 Bad** (carbs per 1g fiber, rounded). Final `mealFiberCarbs()` returns
+  `{ carbs, fiber, ratio, tier, label }`; `ratio` is `null` (rendered as "No fiber", tier `crit`)
+  when a meal has carbs but zero fiber, since the ratio is undefined rather than infinite-good or
+  infinite-bad. Reuses the app's existing 3-tier pill system (`pill-good`/`pill-warn`/`pill-crit`,
+  green/amber/red) — Perfect and Good both render green, Acceptable amber, Bad red, since the app
+  only has 3 status colors and 4 labels.
+- Shown in the **Today → Meal breakdown** accordion's expanded state, both the mobile layout
+  (`renderToday`) and the separate desktop layout (`renderDesktop`) — this app renders those two
+  independently rather than sharing markup, so every "Meal breakdown" change needs updating in both
+  places (same pattern as any other per-meal display change).
+
+### 21. Add Food: selecting an item didn't enable the "Add" button until switching tabs
+
+User-reported bug: "when i select an item it does not let me click add unless i switch tabs first."
+Root cause, found by reading the actual selection code rather than guessing: `toggleSelected(id)`
+calls `patchAddFoodRow(id)` — a targeted DOM-node swap of just that one row, used instead of a full
+`render()` specifically to preserve the live search filter text/state while selecting. But nothing
+else on the screen re-renders when the row is patched, so the bottom `#addfood-bottom-btn` ("Add to
+X · N items") — whose text/disabled state is computed from `addCount` only inside a full render
+pass — never picks up the new selection count. Switching the meal-target chip or the
+Saved/Ingredients/USDA tab happened to "fix" it because those paths call a full `render()` (or
+`patchAddFoodTargetMeal()`, which already had equivalent logic duplicated inline for that one case).
+
+Fixed by adding `App.syncAddFoodBottomButton()` — reads current `st.selected`/`st.activeTab`/
+`st.targetMeal` and directly sets the bottom button's `textContent`/`disabled`/`opacity` — called
+from `toggleSelected()` right after a successful row patch, and reused inside
+`patchAddFoodTargetMeal()` in place of its previously-duplicated version of the same logic. Verified
+live in-browser: selecting/deselecting a row now updates the button immediately, both states
+(`disabled:true, opacity:'0.5', text:'...select items'` / `disabled:false, opacity:'1', text:'...N
+item(s)'`) confirmed via direct DOM inspection.
+
+### 22. USDA lookup returning 0 fiber (raspberries) — root-caused, then a full reliability pass
+
+User-reported bug: USDA lookup for "raspberries" showed 0g fiber, "and raspberry is very high in
+fiber." Investigated against the **real** USDA FDC API (not guessed) via direct `curl`/PowerShell
+calls with `DEMO_KEY`:
+- `fetchUsdaFood()` queries `dataType` tiers in priority order (`Foundation` → `SR Legacy` →
+  `Survey (FNDDS)` → `Branded`) and previously stopped at the **first tier with any matching food**,
+  regardless of whether that record's data was actually complete.
+- Raspberries' **Foundation**-tier record (`fdcId 2346410`) genuinely has no fiber entry at all —
+  only 31 of the usual ~60+ nutrients are reported, `nutrientId 1079` ("Fiber, total dietary") isn't
+  among them. **SR Legacy**'s record (`fdcId 167755`) has the same macros plus fiber = 6.5g. The app
+  was locking onto the incomplete Foundation record and never trying SR Legacy.
+
+**First fix (shipped, then superseded same session)**: skip a tier if its match lacks a fiber entry,
+keep trying lower tiers, fall back to the first match if none report fiber. Fixed the reported bug,
+but user then asked "what other problems could we have with USDA" before pushing — prompted a wider
+audit that found the same root cause could affect other nutrients too, plus three unrelated issues.
+User's direction: **"any and all issues related to USDA need to be fixed."** Replaced the first fix
+with a broader rewrite of `fetchUsdaFood()`:
+
+- **Generalized completeness scoring** — the fiber-only check above only helped fiber; any of the 6
+  tracked macros (or kcal) can be silently missing from a given tier's record the same way. Each
+  tier's candidate is now scored by how many of the 7 tracked values (kcal + p/c/f/fib/sugar/sodium)
+  are actually *present* (not just defaulted to 0) — `extractUsdaPer100()` returns `{ per100,
+  completeness }` — and the tier with the highest completeness wins, ties broken toward the
+  earlier/higher-quality tier.
+- **Sugar had a second, unrecognized nutrient id.** Foundation-tier records report sugar under
+  `nutrientId 1063` ("Sugars, Total"); SR Legacy/Branded use `2000`. Only `2000` was recognized, so
+  a Foundation match with real sugar data still read as 0g. `USDA_SUGAR_ALT_ID = 1063` is now
+  accepted as a fallback. Confirmed directly against raspberries' real Foundation record (sugar
+  1063 = 2.68g) via a live JS call to `extractUsdaPer100()` in-browser.
+  - ⚠️ **Same class of gap may exist for other nutrients too** — only found because sugar was the
+    specific one visible in the raspberry record pulled while debugging fiber. No time was spent
+    auditing every possible alternate id for every nutrient; if a future report shows a plausible
+    nutrient reading 0g for a food that clearly has it, check for a second nutrientId the same way
+    before assuming it's the completeness-scoring or relevance logic instead.
+- **No relevance check on the search match** — the code took `foods[0]` (the API's own top-ranked
+  result within a tier) blindly, so a differently-named product could in principle outrank the plain
+  food. `usdaFoodMatchesQuery()` now requires every query word (or its de-pluralized stem, reusing
+  the same `e?s$` stemming already used elsewhere in this file for `nameNorm`) to appear in a
+  candidate's description before trusting it over the API's own ranking; falls back to `foods[0]` if
+  none of a tier's top-3 results qualify, so behavior is unchanged in the common case.
+- **429 (rate limit) and 401/403 (bad key) responses were being swallowed by the generic
+  `try/catch`** and shown to the user as "couldn't reach the internet" — misleading for what's
+  actually a quota or key problem. Both are now checked explicitly per-tier and surfaced as distinct
+  `{ rateLimited:true }` / `{ badKey:true }` results, each with its own UI message in the Quick-add
+  → USDA lookup card (`rateLimited` suggests getting a personal key if the stored key is literally
+  `DEMO_KEY`; `badKey` points to Settings to check/replace it). Verified against the **real** API:
+  hammered `DEMO_KEY` with 40 rapid requests via PowerShell to trigger a genuine 429 (38/40 came back
+  429), and used a deliberately invalid key to confirm a genuine 403.
+- **Tiers are now fetched in parallel** (`Promise.all`) instead of sequentially — now that a
+  low-completeness match in an early tier can be passed over in favor of a later tier, a lookup may
+  need to inspect all 4 anyway, so fetching them concurrently keeps it to one network round-trip
+  instead of up to four. Each tier's fetch is wrapped in its own `try`/`catch` so one tier's network
+  hiccup no longer fails the whole lookup if the others succeed — only if *every* tier errors does
+  the lookup fall back to `noConnection`.
+
+Every piece of this rewrite was checked against the live USDA API or via realistic mocked API
+response shapes (captured from real `curl`/PowerShell calls), not assumed — see the session
+transcript for the exact verification calls if the reasoning needs re-checking later.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1177,14 +1304,14 @@ with no build step/bundler/minification — there's no established threshold for
 use judgment: a good trigger point is when total file size roughly doubles from the original ~206
 KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
 view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
-as of 2026-09-12: ~247 KB** (up from ~241 KB at the 2026-09-11 checkpoint, ~232 KB at 2026-09-04,
-~211 KB original baseline) — still well under the doubling trigger, not flagged, but noting the
-running total here so the next check has an accurate comparison point instead of comparing against
-the stale original baseline.
+as of 2026-09-18: ~254 KB** (up from ~247 KB at the 2026-09-12 checkpoint, ~241 KB at 2026-09-11,
+~232 KB at 2026-09-04, ~211 KB original baseline) — still well under the doubling trigger, not
+flagged, but noting the running total here so the next check has an accurate comparison point
+instead of comparing against the stale original baseline.
 
 ## Immediate next steps (pick up here)
 
-No feature is in progress. As of 2026-09-14: **everything shipped to date is confirmed working by
+No feature is in progress. As of 2026-09-18: **everything shipped to date is confirmed working by
 the user on a real device** — items 1-9 (2026-08-28 batch), items 10-12 (2026-09-04 batch, see
 "Three features" above: backdated logging, memory-item sharing with multi-select and a "paste to
 import" recipient path, and the redesigned Android back button), items 13-14 (2026-09-11 batch, see
@@ -1193,19 +1320,21 @@ HTTP-cache staleness fix, and the Archive section with its confirm-card and row-
 items 15-19 (2026-09-12 batch, see "Session features and fixes" above: the Macro-split explainer
 popup, a second round of the search-reset bug found in the Memory tab's row-actions menu, the Quick
 add one-time-logging feature plus a meal-target-switch bug found while building it, Calories moving
-from a ceiling to a low-high range, and the Calories card being colored by status), and the
-2026-09-14 app-icon replacement (see "App icon replaced with custom artwork" above — Nourish-only,
-cosmetic, source file kept at `icons/Nourish Logo.png`). Nothing is queued. Ask what's next rather
-than assuming.
+from a ceiling to a low-high range, and the Calories card being colored by status), the 2026-09-14
+app-icon replacement (see "App icon replaced with custom artwork" above — Nourish-only, cosmetic,
+source file kept at `icons/Nourish Logo.png`), and items 20-22 (2026-09-18 batch, see "Fiber:carbs
+ratio, Add-food selection bug, and USDA lookup reliability overhaul" above — shipped identically in
+both apps). Nothing is queued. Ask what's next rather than assuming.
 
-Two open threads to keep in mind if they come back up, neither active right now:
+One open thread to keep in mind if it comes back up, not active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
   asked to leave it alone for now — don't touch OCR code unless asked).
-- The Limited Edition App's icon redesign is **paused**, not abandoned — see BilliFit's own
-  `plan.md` "Icon work paused" section, and its newly-added note about a set of already-regenerated
-  icon files that turned out to have been sitting **uncommitted** in that repo's working tree since
-  2026-08-28 (found 2026-09-12) — resolve that before doing any further icon work, since the live
-  site currently still shows the icon from *before* that regeneration, not what this file previously
-  described as shipped. **When BilliFit's icon work resumes, read this file's "App icon replaced with
-  custom artwork (2026-09-14)" section first** — the maskable-icon-requires-opacity explanation and
-  the `CACHE_NAME`-bump-on-every-icon-change gotcha both apply identically there.
+
+The Limited Edition App's icon redesign thread is now fully closed out, not just paused: the
+uncommitted 2026-08-28 icon-regeneration files flagged above in earlier checkpoints were **discarded
+at the user's explicit request on 2026-09-14** (`git checkout --` in `billifit-pwa/`, confirmed clean
+afterward) — see BilliFit's own `plan.md` for that resolution. BilliFit's live icon is still its
+original 2026-08-27 fork icon; icon work there is deferred, to be picked up fresh whenever the user
+asks. **Whenever that happens, read this file's "App icon replaced with custom artwork (2026-09-14)"
+section first** — the maskable-icon-requires-opacity explanation and the
+`CACHE_NAME`-bump-on-every-icon-change gotcha both apply identically there.
