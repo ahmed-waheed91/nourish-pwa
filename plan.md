@@ -4,10 +4,11 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-18 (second checkpoint same day). The original four features (PDF export, live
-USDA lookup, real OCR, composite Saved Foods) plus seven large batches (2026-08-28, 2026-09-04,
-2026-09-11, 2026-09-12, 2026-09-14, 2026-09-18 functional batch, 2026-09-18 visual batch) are all
-live and **user-confirmed working** — see "Four functional features" / items 5-9 for the 2026-08-28
+_Last updated 2026-09-18 (third checkpoint same day). The original four features (PDF export, live
+USDA lookup, real OCR, composite Saved Foods) plus eight large batches (2026-08-28, 2026-09-04,
+2026-09-11, 2026-09-12, 2026-09-14, 2026-09-18 functional batch, 2026-09-18 visual batch, 2026-09-18
+third batch) are all live and **user-confirmed working on a real device** — see "Four functional
+features" / items 5-9 for the 2026-08-28
 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal, portion-by-percentage,
 portion-by-weight, fixed meal order), "Three features (2026-09-04)" for that batch (backdated
 logging, sharing individual memory items, an Android back button that actually behaves like one),
@@ -21,10 +22,13 @@ fixed ceiling to a low-high range, now color-coded on the Today card like the ot
 replaced with custom artwork (2026-09-14)" for that batch — Nourish-only cosmetic change, never
 ported to BilliFit — "Fiber:carbs ratio, Add-food selection bug, and USDA lookup reliability overhaul
 (2026-09-18)" for that batch — **all three items are functional changes, shipped identically in both
-apps** — and "Visual refresh: Cobalt & Ice palette and data-driven background motifs (2026-09-18)"
-below for the newest batch — **entirely Nourish-only, per the Original-vs-Limited-Edition rule; never
-ported to BilliFit**. No feature is in progress right now — check with the user for what's next. See
-"Immediate next steps" and "Standing watch item" near the end of this file before starting new work._
+apps** — "Visual refresh: Cobalt & Ice palette and data-driven background motifs (2026-09-18)" for
+that batch — **entirely Nourish-only, per the Original-vs-Limited-Edition rule; never ported to
+BilliFit** — and "Memory bulk actions and Weekly Review (2026-09-18, third checkpoint same day)" below
+for the newest batch — **both apps, functional**: Archive/Delete added to the Memory tab's Select bar
+(double-confirmed), and reason tags on off-track days feeding a real Weekly Review. No feature is in
+progress right now — check with the user for what's next. See "Immediate next steps" and "Standing
+watch item" near the end of this file before starting new work._
 
 ## Cross-machine continuity (why this file is here, in git)
 
@@ -1399,6 +1403,82 @@ below for the exact command) — including at the Browser pane's actual 375×812
 not just the wide desktop demo-shell, after bug #1 above made clear that distinction matters for this
 app's fullscreen mobile chrome specifically.
 
+## Memory bulk actions and Weekly Review (2026-09-18, third checkpoint same day) — both apps, functional
+
+Two separate features shipped after the visual refresh batch above. Both are **functional**, not
+visual — shipped identically in Nourish and BilliFit, per the corrected two-app rule (see
+"Key user requirements/constraints"). A mid-session correction happened here: the first of these two
+was initially built Nourish-only by pattern-matching off the immediately preceding visual-only work,
+before the user caught it ("this change is not cosmetic. it is functional... Functional changes go to
+both app") — then ported to BilliFit and re-pushed. Lesson re-recorded in the assistant's own
+cross-session memory (see `feedback_nourish_workflow.md`'s "Mistake to not repeat" notes): re-derive
+scope from what the change *is*, never from what the previous task in the conversation happened to be.
+
+### 27. Memory tab: Select bar gets Archive and Delete alongside Share, both double-confirmed
+
+Previously the Library's "Select" mode (multi-select checkboxes on Saved/Ingredients/USDA rows) only
+offered **Share** for the selected items. User asked for Archive and Delete to be added there too,
+each requiring **double confirmation** before it runs.
+
+- `library` state gained `bulkAction:null` (was just `selectMode`/`selected`). `bulkAction` is
+  `{ type: 'archive'|'delete'|'share', step: 1|2 }`.
+- `App.requestBulkAction(type)` opens step 1 (a preview of what's about to happen); `App.
+  confirmBulkAction()` advances step 1→2 on the first tap and only runs the actual action
+  (`archiveSelectedMemoryItems` / `deleteSelectedMemoryItems` / the pre-existing
+  `shareSelectedMemoryItems`) on the second; `App.cancelBulkAction()` backs out to the 3-button bar
+  without leaving Select mode. Wired into `hasOpenOverlay`/`closeOpenOverlay` so the Android back
+  button closes just the confirm step first, matching every other confirm-card pattern in this app.
+- The select-mode bottom bar changed from a single "Share" button to three: Archive (neutral),
+  Delete (red, `var(--critical)`), Share (brand blue) — each disabled until at least one item is
+  checked. Step 1 shows a plain-language preview ("Delete 2 items? This can't be undone."); step 2 is
+  the actual commit button, re-stating the count ("Delete 2 items").
+- Verified live via the Browser pane's mobile viewport (375×812) and direct `App.*` calls (coordinate-
+  based clicks were flaky again in this session, same known tool quirk as before — see "testing
+  workflow" notes elsewhere in this file; falling back to `App.toggleLibrarySelected(...)` /
+  `App.requestBulkAction(...)` / `App.confirmBulkAction()` called directly is the reliable path).
+- Commits: `2159079` (Nourish, `origin/main`), `f1057dc` (BilliFit, `origin/master`).
+
+### 28. Reason tags on off-track days + a real Weekly Review
+
+User picked this from a round of "bigger, more meaningful" feature suggestions (an explicit ask for
+suggestions beyond small UX tweaks) and asked for it combined with an earlier-picked idea: a genuine
+Weekly Review instead of History's old single "X/Y days in range" average card.
+
+- **Data model**: every day record (today's live entry via `state.today.dailyTag`, and each
+  `dayHistory` entry via a new `tag` field) can carry one optional short reason string. Rolls from
+  `dailyTag` into a `dayHistory` entry's `tag` on day-rollover (`checkDayRollover`), same pattern as
+  `dailyNote`→`note`. Included in `buildBackupPayload`/`loadLocal`/the file-import restore path (three
+  places, matching `dailyNote`'s existing three-place pattern) — round-trips through backup/restore
+  and the full-JSON import correctly. `getOrCreateHistoryDay` (used by backdated logging) also seeds
+  `tag:null` on freshly-created past-day entries.
+- **Reason-tag UI**: in History's Day view, any expanded day row whose calories status isn't `'good'`
+  (i.e. over or under range) shows a "What happened this day? (optional)" prompt: six preset chips
+  (Ate out, Social event, Travel, Bad sleep, Stress, Celebration) plus "Other" for free text. Once set,
+  it renders as a single removable pill ("Reason: Ate out ✕"). The "Other" text input follows this
+  app's established pattern for live-typed fields — no `oninput`/re-render while typing, the value is
+  read from the DOM only when "Save" is tapped (`App.saveDayTagOther`) — avoiding the documented
+  focus-loss trap from re-rendering on every keystroke.
+- **Weekly Review**: History → Week view's per-week cards now show calorie-range *and* protein-range
+  hit-rate (`Cal 5/6` / `Protein 5/6` pills, was just one "in range" pill), a current streak
+  (`currentCalorieStreak()` — consecutive most-recent **completed** days with calories status
+  `'good'`, walking `dayHistory` backward; deliberately excludes the still-in-progress "today" entry
+  so it doesn't flicker), a trend line (`weekTrendLabel()` — compares the more-recent half of the
+  week's days against the earlier half, only shown once a chunk has ≥4 completed days), and an
+  auto-written one-paragraph narrative assembled from all of the above plus a tag-frequency breakdown
+  of the week's off-track days (e.g. `"Off on 2 days — 1 tagged \"Ate out\", 1 untagged."`). All of it
+  is deterministic string templating over real logged numbers — no external calls, no fabricated
+  content, consistent with the project's explicit no-fake-data rule. The current-week card gets a
+  `var(--brand)` border and the streak line to set it apart from older weeks' cards.
+- **Local-preview workflow used before pushing**: since this needed to be *experienced*, not just
+  described, sample data (a synthetic 9-day week with varied over/under/tagged/untagged days) was
+  seeded directly into the running local server's in-memory `App.state`/`localStorage` via the Browser
+  pane's `javascript_tool` — never written into `index.html` itself, and explicitly cleared
+  (`dayHistory = []`, `localStorage.removeItem(...)`) before committing/pushing. This is the pattern
+  to reuse any time a feature needs a "let me see it with realistic data first" preview: seed live in
+  the browser, never add a seed/debug code path to the shipped file, and confirm the storage is wiped
+  before the commit.
+- Commits: `21de24c` (Nourish, `origin/main`), `f70af45` (BilliFit, `origin/master`).
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1416,11 +1496,11 @@ with no build step/bundler/minification — there's no established threshold for
 use judgment: a good trigger point is when total file size roughly doubles from the original ~206
 KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
 view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
-as of 2026-09-18 (end of day, after the visual refresh batch): ~258 KB** (up from ~254 KB earlier the
-same day, ~247 KB at the 2026-09-12 checkpoint, ~241 KB at 2026-09-11, ~232 KB at 2026-09-04, ~211 KB
-original baseline) — still well under the doubling trigger, not flagged, but noting the running total
-here so the next check has an accurate comparison point instead of comparing against the stale
-original baseline.
+as of 2026-09-18 (end of day, after the Memory bulk-actions + Weekly Review batch): ~269 KB** (up from
+~258 KB after the visual refresh batch, ~254 KB earlier the same day, ~247 KB at the 2026-09-12
+checkpoint, ~241 KB at 2026-09-11, ~232 KB at 2026-09-04, ~211 KB original baseline) — still well under
+the doubling trigger, not flagged, but noting the running total here so the next check has an accurate
+comparison point instead of comparing against the stale original baseline.
 
 ## Immediate next steps (pick up here)
 
@@ -1437,10 +1517,13 @@ from a ceiling to a low-high range, and the Calories card being colored by statu
 app-icon replacement (see "App icon replaced with custom artwork" above — Nourish-only, cosmetic,
 source file kept at `icons/Nourish Logo.png`), items 20-22 (2026-09-18 functional batch, see
 "Fiber:carbs ratio, Add-food selection bug, and USDA lookup reliability overhaul" above — shipped
-identically in both apps), and items 23-26 (2026-09-18 visual batch, see "Visual refresh: Cobalt &
+identically in both apps), items 23-26 (2026-09-18 visual batch, see "Visual refresh: Cobalt &
 Ice palette and data-driven background motifs" above — **Nourish-only**, not ported to BilliFit:
 the Cobalt & Ice palette, the Slate "under range" color, the removed header avatar, and the three
-data-tied background motifs). Nothing is queued. Ask what's next rather than assuming.
+data-tied background motifs), and items 27-28 (2026-09-18 third batch, see "Memory bulk actions and
+Weekly Review" above — shipped identically in both apps: Archive/Delete added to the Memory tab's
+Select bar with double confirmation, and reason tags on off-track days feeding a real Weekly Review
+in History's Week view). Nothing is queued. Ask what's next rather than assuming.
 
 One open thread to keep in mind if it comes back up, not active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
