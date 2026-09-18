@@ -215,6 +215,9 @@
     .phone{
       width:100vw; width:100dvw; height:100vh; height:100dvh;
       border-radius:0; box-shadow:none;
+      /* Let the body's background motif show through the gaps between cards — on a real
+         phone .phone fills the whole viewport, so an opaque fill here would hide it entirely. */
+      background: transparent;
     }
   }
 </style>
@@ -224,15 +227,14 @@
      syncBgMotif() (see App.render) based on the active screen — never regenerated, just shown/hidden. -->
 <div id="bg-streak" class="bg-motif" style="position:fixed;inset:0;z-index:-1;pointer-events:none;display:none;">
   <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-    <defs><pattern id="streakPattern" width="18" height="18" patternUnits="userSpaceOnUse"><rect x="2" y="2" width="12" height="12" rx="3" fill="rgba(38,87,255,0.09)"/></pattern></defs>
+    <defs><pattern id="streakPattern" width="32" height="32" patternUnits="userSpaceOnUse"><rect x="12" y="12" width="8" height="8" rx="2" fill="rgba(38,87,255,0.05)"/></pattern></defs>
     <rect width="100%" height="100%" fill="url(#streakPattern)"/>
-    <g fill="rgba(38,87,255,0.26)">
-      <rect x="38" y="20" width="12" height="12" rx="3"/><rect x="56" y="20" width="12" height="12" rx="3"/>
-      <rect x="20" y="38" width="12" height="12" rx="3"/><rect x="128" y="56" width="12" height="12" rx="3"/>
-      <rect x="164" y="74" width="12" height="12" rx="3"/><rect x="38" y="92" width="12" height="12" rx="3"/>
-      <rect x="236" y="110" width="12" height="12" rx="3"/><rect x="92" y="128" width="12" height="12" rx="3"/>
-      <rect x="290" y="146" width="12" height="12" rx="3"/><rect x="56" y="164" width="12" height="12" rx="3"/>
-      <rect x="182" y="200" width="12" height="12" rx="3"/><rect x="20" y="236" width="12" height="12" rx="3"/>
+    <g fill="rgba(38,87,255,0.18)">
+      <rect x="76" y="44" width="8" height="8" rx="2"/><rect x="140" y="44" width="8" height="8" rx="2"/>
+      <rect x="44" y="76" width="8" height="8" rx="2"/><rect x="204" y="108" width="8" height="8" rx="2"/>
+      <rect x="268" y="140" width="8" height="8" rx="2"/><rect x="76" y="172" width="8" height="8" rx="2"/>
+      <rect x="332" y="204" width="8" height="8" rx="2"/><rect x="140" y="236" width="8" height="8" rx="2"/>
+      <rect x="300" y="300" width="8" height="8" rx="2"/><rect x="108" y="332" width="8" height="8" rx="2"/>
     </g>
   </svg>
 </div>
