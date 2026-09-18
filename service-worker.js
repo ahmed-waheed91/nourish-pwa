@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nourish-v8';
+const CACHE_NAME = 'nourish-v9';
 const PRECACHE = [
   './',
   './index.html',

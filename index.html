@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>Nourish</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#1C5C4B">
+<meta name="theme-color" content="#2657FF">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -16,34 +16,34 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,500&display=swap">
 <style>
   :root{
-    --studio-bg: #EDECE7;
-    --studio-bg-2: #E4E2DB;
-    --ink: #14181A;
-    --ink-2: #5B615F;
-    --muted: #8B908D;
-    --surface: #F8F8F6;
+    --studio-bg: #F3F6FB;
+    --studio-bg-2: #E4E9F5;
+    --ink: #141A2E;
+    --ink-2: #545E78;
+    --muted: #838BA3;
+    --surface: #F6F8FC;
     --card: #FFFFFF;
-    --border: rgba(11,11,11,0.09);
-    --brand: #1C5C4B;
-    --brand-dark: #123F34;
-    --brand-tint: #E4EFEA;
+    --border: rgba(20,40,110,0.09);
+    --brand: #2657FF;
+    --brand-dark: #1638B0;
+    --brand-tint: #DCE5FF;
     --good: #0ca30c;      --good-tint: #E7F6E4;
-    --warning: #B9790A;   --warning-tint: #FDF0D9;
+    --warning: #475569;   --warning-tint: #E2E8F0;
     --critical: #d03b3b;  --critical-tint: #FBE7E5;
     --protein: #2a78d6;
     --carbs: #eb6834;
     --fat: #1baf7a;
     --usda: #2a78d6;      --usda-tint: #E6F0FB;
     --lab-tint: #EEEEEC;  --lab-c: #5B615F;
-    --label-tint: #FDF0D9; --label-c: #B9790A;
+    --label-tint: #E2E8F0; --label-c: #475569;
     --note-bg: #FBF6E3;   --note-border: #EEDFA8;
-    --shadow: 0 24px 60px rgba(18,63,52,0.16);
+    --shadow: 0 24px 60px rgba(22,56,176,0.16);
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
   body{
     background: var(--studio-bg);
-    background-image: radial-gradient(circle at 1px 1px, rgba(18,63,52,0.07) 1px, transparent 0);
+    background-image: radial-gradient(circle at 1px 1px, rgba(38,87,255,0.08) 1px, transparent 0);
     background-size: 22px 22px;
     color: var(--ink);
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -83,7 +83,7 @@
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 8px;
-    box-shadow: 0 2px 10px rgba(18,63,52,0.05);
+    box-shadow: 0 2px 10px rgba(22,56,176,0.05);
     margin-bottom: 30px;
   }
   .seg{ display:flex; gap:4px; background: var(--surface); border-radius: 10px; padding:4px; }
@@ -172,7 +172,7 @@
 
   .fab{
     position:absolute; right:18px; bottom:92px; width:52px; height:52px; border-radius:26px;
-    background:var(--brand); box-shadow:0 8px 20px rgba(28,92,75,0.35);
+    background:var(--brand); box-shadow:0 8px 20px rgba(38,87,255,0.35);
     display:flex; align-items:center; justify-content:center; cursor:pointer; border:none;
   }
 
@@ -1661,8 +1661,8 @@ const App = {
     const pageH = doc.internal.pageSize.getHeight();
     const margin = 16;
     const contentW = pageW - margin*2;
-    const brand=[28,92,75], brandDark=[18,63,52], ink=[20,24,26], ink2=[91,97,95], muted=[139,144,141];
-    const good=[12,163,12], warning=[185,121,10], critical=[208,59,59];
+    const brand=[38,87,255], brandDark=[22,56,176], ink=[20,26,46], ink2=[84,94,120], muted=[131,139,163];
+    const good=[12,163,12], warning=[71,85,105], critical=[208,59,59];
     const protein=[42,120,214], carbs=[235,104,52], fat=[27,175,122], border=[225,225,222];
     const ensureRoom = (y, needed) => { if (y + needed > pageH - 16){ doc.addPage(); return 20; } return y; };
     const statusColorFor = s => s==='good' ? good : (s==='warning' ? warning : critical);
@@ -3539,7 +3539,7 @@ function renderTrends(){
         </div>
         ${tooltip}
         <svg viewBox="0 0 342 176" width="100%" height="176" style="overflow:visible;margin-top:6px;">
-          <rect x="0" y="${bandY.toFixed(1)}" width="342" height="${bandH.toFixed(1)}" fill="rgba(28,92,75,0.10)" rx="4"/>
+          <rect x="0" y="${bandY.toFixed(1)}" width="342" height="${bandH.toFixed(1)}" fill="rgba(38,87,255,0.10)" rx="4"/>
           <line x1="0" y1="146" x2="342" y2="146" stroke="#e1e0d9" stroke-width="1"/>
           <path d="${linePath}" fill="none" stroke="var(--protein)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
           ${showPoints ? points.map(pt => `<circle cx="${pt.x}" cy="${pt.y}" r="5" fill="${pt.color}" stroke="#fff" stroke-width="2" style="cursor:pointer;" onclick="App.selectTrendPoint(${pt.k})"/>`).join('') : ''}
@@ -4031,7 +4031,7 @@ function renderDesktop(){
             <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Calories · trend</div>
             ${calSpark ? `
               <svg viewBox="0 0 260 70" width="100%" height="70">
-                <rect x="0" y="${calSpark.bandY}" width="260" height="${calSpark.bandH}" fill="rgba(28,92,75,0.10)" rx="3"/>
+                <rect x="0" y="${calSpark.bandY}" width="260" height="${calSpark.bandH}" fill="rgba(38,87,255,0.10)" rx="3"/>
                 <path d="${calSpark.path}" fill="none" stroke="var(--protein)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               <div style="font-size:11px;color:var(--muted);margin-top:4px;">avg ${calSpark.avg} kcal over ${calSpark.count} days · target ${calT.low.toLocaleString()}–${calT.high.toLocaleString()} kcal</div>
@@ -4041,7 +4041,7 @@ function renderDesktop(){
             <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Protein · trend</div>
             ${protSpark ? `
               <svg viewBox="0 0 260 70" width="100%" height="70">
-                <rect x="0" y="${protSpark.bandY}" width="260" height="${protSpark.bandH}" fill="rgba(28,92,75,0.10)" rx="3"/>
+                <rect x="0" y="${protSpark.bandY}" width="260" height="${protSpark.bandH}" fill="rgba(38,87,255,0.10)" rx="3"/>
                 <path d="${protSpark.path}" fill="none" stroke="var(--protein)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               <div style="font-size:11px;color:var(--muted);margin-top:4px;">avg ${protSpark.avg}g over ${protSpark.count} days · target ${protT.low}–${protT.high}g</div>
