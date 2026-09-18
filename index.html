@@ -719,7 +719,7 @@ const App = {
     view: 'mobile',
     screen: 'today',
     today: { expandedStat:null, expandedMeal:null, waterMl:0, notesOpen:false, weightKg:null, confirmRemoveKey:null,
-      dailyNote:'', noteSaved:false, meals: [], macroInfoOpen:false },
+      dailyNote:'', noteSaved:false, meals: [], macroInfoOpen:false, dailyTag:null },
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
     storageAlert: null,
@@ -732,7 +732,7 @@ const App = {
     },
     builtinFoodsSeeded: true,
     library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{}, bulkAction:null },
-    history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null },
+    history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null, tagOtherFor:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
     memoryImport: null,
@@ -999,9 +999,9 @@ const App = {
     const hadActivity = t.meals.length > 0 || t.waterMl > 0 || t.weightKg != null || t.dailyNote.trim() !== '';
     if (hadActivity){
       const consumed = computeConsumedTotals(t.meals);
-      this.state.dayHistory.push({ date: old, ...consumed, waterMl: t.waterMl, weightKg: t.weightKg, meals: JSON.parse(JSON.stringify(t.meals)), note: t.dailyNote });
+      this.state.dayHistory.push({ date: old, ...consumed, waterMl: t.waterMl, weightKg: t.weightKg, meals: JSON.parse(JSON.stringify(t.meals)), note: t.dailyNote, tag: t.dailyTag });
     }
-    t.meals = []; t.waterMl = 0; t.weightKg = null; t.dailyNote = '';
+    t.meals = []; t.waterMl = 0; t.weightKg = null; t.dailyNote = ''; t.dailyTag = null;
     t.expandedMeal = null; t.expandedStat = null; t.notesOpen = false; t.confirmRemoveKey = null; t.macroInfoOpen = false;
     this.state.dayLog.currentDate = real;
     this.saveLocal();
@@ -1012,7 +1012,7 @@ const App = {
       date: this.state.dayLog.currentDate, calories:consumed.calories, protein:consumed.protein,
       carbs:consumed.carbs, fat:consumed.fat, fiber:consumed.fiber, sugar:consumed.sugar, sodium:consumed.sodium,
       waterMl: this.state.today.waterMl, weightKg: this.state.today.weightKg, isToday: true,
-      meals: this.state.today.meals, note: this.state.today.dailyNote,
+      meals: this.state.today.meals, note: this.state.today.dailyNote, tag: this.state.today.dailyTag,
     };
     const past = this.state.dayHistory.slice().reverse().map(h => ({ ...h, isToday:false }));
     return [todayEntry, ...past];
@@ -1033,7 +1033,7 @@ const App = {
   getOrCreateHistoryDay(date){
     let entry = this.state.dayHistory.find(h => h.date === date);
     if (!entry){
-      entry = { date, calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sodium:0, waterMl:0, weightKg:null, meals:[], note:'' };
+      entry = { date, calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sodium:0, waterMl:0, weightKg:null, meals:[], note:'', tag:null };
       const idx = this.state.dayHistory.findIndex(h => h.date > date);
       if (idx === -1) this.state.dayHistory.push(entry); else this.state.dayHistory.splice(idx, 0, entry);
     }
@@ -1650,6 +1650,24 @@ const App = {
     this.state.history.openIdx = null;
     this.render();
   },
+  // Reason tags: an optional one-word-or-so note on why a day landed outside its calorie range
+  // ("Ate out", "Travel", ...), surfaced in the History day view and rolled up into the Weekly
+  // Review's off-track breakdown. Today's tag lives on state.today (mirrors dailyNote); a past
+  // day's tag lives on its dayHistory entry (found/created via getOrCreateHistoryDay, same as
+  // backdated logging).
+  setDayTag(date, tag){
+    if (date === this.state.dayLog.currentDate) this.state.today.dailyTag = tag;
+    else this.getOrCreateHistoryDay(date).tag = tag;
+    this.state.history.tagOtherFor = null;
+    this.render();
+  },
+  clearDayTag(date){ this.setDayTag(date, null); },
+  openDayTagOther(date){ this.state.history.tagOtherFor = date; this.render(); },
+  saveDayTagOther(date){
+    const val = (document.getElementById(`day-tag-other-${date}`)?.value || '').trim();
+    if (val) this.setDayTag(date, val.slice(0,40));
+    else { this.state.history.tagOtherFor = null; this.render(); }
+  },
 
   setTrendCat(id){ this.state.trends.activeCat = id; this.state.trends.activePoint = null; this.render(); },
   setTrendRange(id){ this.state.trends.range = id; this.state.trends.activePoint = null; this.render(); },
@@ -1665,6 +1683,7 @@ const App = {
       waterMl: this.state.today.waterMl,
       weightKg: this.state.today.weightKg,
       dailyNote: this.state.today.dailyNote,
+      dailyTag: this.state.today.dailyTag,
       usdaApiKey: this.state.usdaApiKey,
       builtinFoodsSeeded: this.state.builtinFoodsSeeded,
       targets: this.state.targets,
@@ -1916,6 +1935,7 @@ const App = {
       if (typeof data.waterMl === 'number') this.state.today.waterMl = data.waterMl;
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
+      if (typeof data.dailyTag === 'string') this.state.today.dailyTag = data.dailyTag;
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
       this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
@@ -2220,6 +2240,7 @@ const App = {
       if (typeof data.waterMl === 'number') this.state.today.waterMl = data.waterMl;
       if (typeof data.weightKg === 'number') this.state.today.weightKg = data.weightKg;
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
+      if (typeof data.dailyTag === 'string') this.state.today.dailyTag = data.dailyTag;
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       // Calories used to be a single "stay under" ceiling; it's now a low-high range like the
@@ -3413,6 +3434,54 @@ function renderBulkActionConfirm(st){
 }
 
 /* ---------- History ---------- */
+const DAY_TAG_PRESETS = ['Ate out', 'Social event', 'Travel', 'Bad sleep', 'Stress', 'Celebration'];
+function renderDayTagBlock(d){
+  const st = App.state.history;
+  if (d.tag){
+    return `<div style="margin-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--muted);">Reason:</span>
+      <span class="pill" style="background:var(--brand-tint);color:var(--brand-dark);display:inline-flex;align-items:center;gap:6px;">${d.tag.replace(/</g,'&lt;')}
+        <button onclick="App.clearDayTag('${d.date}')" title="Remove reason" style="background:none;border:none;padding:0;cursor:pointer;color:var(--brand-dark);font-size:12px;line-height:1;font-family:inherit;">✕</button>
+      </span>
+    </div>`;
+  }
+  if (st.tagOtherFor === d.date){
+    return `<div style="margin-top:10px;">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:5px;">What happened?</div>
+      <div style="display:flex;gap:6px;">
+        <input id="day-tag-other-${d.date}" placeholder="e.g. Birthday dinner" style="flex:1;min-width:0;padding:7px 10px;border-radius:8px;border:1px solid var(--border);font-size:12px;font-family:inherit;"/>
+        <button onclick="App.saveDayTagOther('${d.date}')" style="flex-shrink:0;padding:7px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button>
+      </div>
+    </div>`;
+  }
+  return `<div style="margin-top:10px;">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">What happened this day? (optional)</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      ${DAY_TAG_PRESETS.map(t => `<button onclick="App.setDayTag('${d.date}','${t}')" style="padding:6px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--ink-2);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">${t}</button>`).join('')}
+      <button onclick="App.openDayTagOther('${d.date}')" style="padding:6px 10px;border-radius:20px;border:1px dashed var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">Other</button>
+    </div>
+  </div>`;
+}
+function currentCalorieStreak(){
+  const past = App.state.dayHistory.slice().reverse();
+  let streak = 0;
+  for (const d of past){
+    if (statusFor('calories', d.calories) === 'good') streak++; else break;
+  }
+  return streak;
+}
+function weekTrendLabel(avgDays, metric){
+  if (avgDays.length < 4) return null;
+  const half = Math.floor(avgDays.length/2);
+  const recent = avgDays.slice(0, half); // avgDays is most-recent-first
+  const earlier = avgDays.slice(avgDays.length-half);
+  const recentAvg = recent.reduce((a,x)=>a+x[metric],0)/recent.length;
+  const earlierAvg = earlier.reduce((a,x)=>a+x[metric],0)/earlier.length;
+  if (!earlierAvg) return null;
+  const diffPct = (recentAvg-earlierAvg)/earlierAvg*100;
+  if (Math.abs(diffPct) < 3) return { dir:'flat', diffPct };
+  return { dir: diffPct>0 ? 'up' : 'down', diffPct };
+}
 function renderHistory(){
   const st = App.state.history;
   const views = [['day','Day'],['week','Week'],['month','Month']];
@@ -3456,6 +3525,7 @@ function renderHistory(){
                   <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.sugar}g</div><div style="font-size:9.5px;color:var(--muted);">Sugar</div></div>
                   <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${Math.round(d.calories)}</div><div style="font-size:9.5px;color:var(--muted);">Calories</div></div>
                 </div>
+                ${statusFor('calories', d.calories) !== 'good' ? renderDayTagBlock(d) : ''}
                 ${!d.isToday ? `
                   <button onclick="App.startBackdateLog('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;border:none;background:var(--brand);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
@@ -3475,13 +3545,14 @@ function renderHistory(){
   } else if (st.view === 'week'){
     const chunks = [];
     for (let i=0; i<realDays.length; i+=7) chunks.push(realDays.slice(i, i+7));
+    const streak = currentCalorieStreak();
     body = `
       <div style="display:flex;flex-direction:column;gap:8px;">
         ${chunks.map((days, w) => {
           const avgDays = days.filter(d => !d.isToday);
           const nDays = avgDays.length;
           const oldest = days[days.length-1], newest = days[0];
-          const label = w===0 ? `This week so far (${formatShortDate(oldest.date)}–${newest.isToday?'Today':formatShortDate(newest.date)})` : `${formatShortDate(oldest.date)}–${formatShortDate(newest.date)}`;
+          const label = w===0 ? `Weekly review (${formatShortDate(oldest.date)}–${newest.isToday?'Today':formatShortDate(newest.date)})` : `${formatShortDate(oldest.date)}–${formatShortDate(newest.date)}`;
           if (!nDays){
             return `
           <div class="card pad-sm">
@@ -3492,18 +3563,41 @@ function renderHistory(){
           const avgCal = Math.round(avgDays.reduce((a,d)=>a+d.calories,0)/nDays);
           const avgProtein = Math.round((avgDays.reduce((a,d)=>a+d.protein,0)/nDays)*10)/10;
           const avgFiber = Math.round((avgDays.reduce((a,d)=>a+d.fiber,0)/nDays)*10)/10;
-          const inRange = avgDays.filter(d=>statusFor('calories', d.calories)==='good').length;
+          const calIn = avgDays.filter(d=>statusFor('calories', d.calories)==='good').length;
+          const proteinIn = avgDays.filter(d=>statusFor('protein', d.protein)==='good').length;
+          const offTrack = avgDays.filter(d=>statusFor('calories', d.calories)!=='good');
+          const tagCounts = {};
+          offTrack.forEach(d => { const key = d.tag || 'Untagged'; tagCounts[key] = (tagCounts[key]||0)+1; });
+          const tagBreakdown = Object.entries(tagCounts).sort((a,b)=>b[1]-a[1]);
+          const trend = weekTrendLabel(avgDays, 'calories');
+
+          const narrativeParts = [];
+          narrativeParts.push(`Calorie range hit on ${calIn} of ${nDays} day${nDays===1?'':'s'}, protein on ${proteinIn} of ${nDays}.`);
+          if (offTrack.length){
+            const bits = tagBreakdown.map(([tag,count]) => `${count} ${tag==='Untagged' ? 'untagged' : `tagged "${tag.replace(/</g,'&lt;')}"`}`).join(', ');
+            narrativeParts.push(`Off on ${offTrack.length} day${offTrack.length===1?'':'s'} — ${bits}.`);
+          } else {
+            narrativeParts.push(`Every completed day landed in range.`);
+          }
+          if (w===0 && streak >= 2) narrativeParts.push(`Currently on a ${streak}-day streak.`);
+          if (trend) narrativeParts.push(`Calories ${trend.dir==='flat' ? 'holding steady' : `trending ${trend.dir} ${Math.abs(Math.round(trend.diffPct))}%`} across the week.`);
+
           return `
-          <div class="card pad-sm">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div class="card pad-sm" style="${w===0?'border-color:var(--brand);':''}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
               <div style="font-size:13.5px;font-weight:700;">${label}</div>
-              <div class="pill" style="background:var(--brand-tint);color:var(--brand-dark);">${inRange}/${nDays} in range</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                <div class="pill" style="background:var(--brand-tint);color:var(--brand-dark);">Cal ${calIn}/${nDays}</div>
+                <div class="pill" style="background:var(--label-tint);color:var(--label-c);">Protein ${proteinIn}/${nDays}</div>
+              </div>
             </div>
             <div style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:6px;">
               <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:15px;font-weight:800;">${avgCal}</div><div style="font-size:9.5px;color:var(--muted);">avg kcal</div></div>
               <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:15px;font-weight:800;">${avgProtein}g</div><div style="font-size:9.5px;color:var(--muted);">avg protein</div></div>
               <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:15px;font-weight:800;">${avgFiber}g</div><div style="font-size:9.5px;color:var(--muted);">avg fiber</div></div>
             </div>
+            ${w===0 && streak >= 2 ? `<div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:11.5px;font-weight:700;color:var(--brand-dark);">🔥 ${streak}-day streak in your calorie range</div>` : ''}
+            <div style="font-size:11.5px;color:var(--ink-2);line-height:1.5;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">${narrativeParts.join(' ')}</div>
           </div>`;
         }).join('')}
       </div>
