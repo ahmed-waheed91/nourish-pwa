@@ -4,26 +4,27 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-18. The original four features (PDF export, live USDA lookup, real OCR,
-composite Saved Foods) plus six large batches (2026-08-28, 2026-09-04, 2026-09-11, 2026-09-12,
-2026-09-14, 2026-09-18) are all live and **user-confirmed working** — see "Four functional features"
-/ items 5-9 for the 2026-08-28 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab
-removal, portion-by-percentage, portion-by-weight, fixed meal order), "Three features (2026-09-04)"
-for that batch (backdated logging, sharing individual memory items, an Android back button that
-actually behaves like one), "Session fixes and a new Archive feature (2026-09-11)" for that batch (an
-Add Food search reset, a PWA update-staleness bug caused by GitHub Pages' HTTP cache headers, and a
-new Archive section in the Memory tab), "Session features and fixes (2026-09-12)" for that batch (a
-Macro-split explainer popup with its own back-button handling; a second, adjacent round of the same
-search-reset bug found in the Memory tab's row-actions menu; a "Quick add" one-time food-logging path
-that doesn't touch Memory, plus a related meal-target-switch bug found while building it; and the
-Calories target changed from a fixed ceiling to a low-high range, now color-coded on the Today card
-like the other macros), "App icon replaced with custom artwork (2026-09-14)" for that batch — Nourish
--only cosmetic change, never ported to BilliFit — and "Fiber:carbs ratio, Add-food selection bug, and
-USDA lookup reliability overhaul (2026-09-18)" below for the newest batch — **all three items in this
-batch are functional changes and are shipped identically in both apps**, per the
-Original-vs-Limited-Edition rule. No feature is in progress right now — check with the user for
-what's next. See "Immediate next steps" and "Standing watch item" near the end of this file before
-starting new work._
+_Last updated 2026-09-18 (second checkpoint same day). The original four features (PDF export, live
+USDA lookup, real OCR, composite Saved Foods) plus seven large batches (2026-08-28, 2026-09-04,
+2026-09-11, 2026-09-12, 2026-09-14, 2026-09-18 functional batch, 2026-09-18 visual batch) are all
+live and **user-confirmed working** — see "Four functional features" / items 5-9 for the 2026-08-28
+batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal, portion-by-percentage,
+portion-by-weight, fixed meal order), "Three features (2026-09-04)" for that batch (backdated
+logging, sharing individual memory items, an Android back button that actually behaves like one),
+"Session fixes and a new Archive feature (2026-09-11)" for that batch (an Add Food search reset, a
+PWA update-staleness bug caused by GitHub Pages' HTTP cache headers, and a new Archive section in the
+Memory tab), "Session features and fixes (2026-09-12)" for that batch (a Macro-split explainer popup
+with its own back-button handling; a second, adjacent round of the same search-reset bug found in the
+Memory tab's row-actions menu; a "Quick add" one-time food-logging path that doesn't touch Memory,
+plus a related meal-target-switch bug found while building it; and the Calories target changed from a
+fixed ceiling to a low-high range, now color-coded on the Today card like the other macros), "App icon
+replaced with custom artwork (2026-09-14)" for that batch — Nourish-only cosmetic change, never
+ported to BilliFit — "Fiber:carbs ratio, Add-food selection bug, and USDA lookup reliability overhaul
+(2026-09-18)" for that batch — **all three items are functional changes, shipped identically in both
+apps** — and "Visual refresh: Cobalt & Ice palette and data-driven background motifs (2026-09-18)"
+below for the newest batch — **entirely Nourish-only, per the Original-vs-Limited-Edition rule; never
+ported to BilliFit**. No feature is in progress right now — check with the user for what's next. See
+"Immediate next steps" and "Standing watch item" near the end of this file before starting new work._
 
 ## Cross-machine continuity (why this file is here, in git)
 
@@ -1287,6 +1288,117 @@ Every piece of this rewrite was checked against the live USDA API or via realist
 response shapes (captured from real `curl`/PowerShell calls), not assumed — see the session
 transcript for the exact verification calls if the reasoning needs re-checking later.
 
+## Visual refresh: Cobalt & Ice palette and data-driven background motifs (2026-09-18) — Nourish-only
+
+User didn't like the app's "vibe" and asked for color/background options. This was a purely visual
+request, so it followed the aesthetic half of the Original-vs-Limited-Edition rule throughout:
+**every change in this section is Nourish-only and was never ported to BilliFit** — the user
+explicitly reconfirmed this mid-session ("like i have said before only functional things get applied
+to both and not visual") after a self-caught mistake where a summary line said "both apps" for the
+theme swap; corrected immediately, nothing was actually applied to BilliFit.
+
+### 23. Color palette: Forest & Fog → Cobalt & Ice
+
+Built two rounds of comparison mood boards as Artifacts (real meal-card mockups per option, not just
+color swatches) before touching code:
+- Round 1 (earthy/muted: Terracotta, Slate/Teal, Plum, Olive, Graphite/Amber) — rejected outright,
+  "wrong colors entirely."
+- Round 2 (saturated/punchy on clean near-white grounds: Cobalt, Crimson, Violet, Emerald, Magenta,
+  Sunburst) — user picked **Cobalt & Ice** (`#2657FF` brand / `#1638B0` dark / `#DCE5FF` tint on an
+  `#F3F6FB` ground).
+
+Applied by updating every CSS custom property in `:root` (`--studio-bg`, `--ink`, `--ink-2`,
+`--muted`, `--surface`, `--border`, `--brand`, `--brand-dark`, `--brand-tint`, `--shadow`) plus every
+place color was hardcoded outside a `var()` instead of properly tokenized — the dotted background
+texture, the FAB shadow, the toolbar shadow, three Trends sparkline target-band fills, the PDF export
+color table (`brand`/`brandDark`/`ink`/`ink2`/`muted` RGB arrays used by `jsPDF`), `manifest.json`
+(`theme_color`, `background_color`), and the `<meta name="theme-color">` tag. Also bumped
+`service-worker.js`'s `CACHE_NAME` (`nourish-v8` → `nourish-v9`) since `manifest.json` is in the
+precache list and is served cache-first — without the bump, an already-installed PWA would never see
+the new splash-screen colors. **Lesson for next time a color token changes: grep for the literal hex,
+not just the CSS variable name** — several spots (PDF export, sparkline fills, the FAB shadow) had the
+old brand color hardcoded as an rgba()/RGB-array literal instead of referencing `var(--brand)`, and
+were missed on the first pass until an explicit hex grep caught them.
+
+### 24. "Under range" status color: orange → slate
+
+The `--warning`/`--warning-tint` pair (used for every "Under" pill/card across Today, Log food error
+states, and the storage-alert banner) started as a straight recolor of the old muddy `#B9790A` ochre
+to a cleaner amber (`#D97706`) to match the new palette — user said the *shade* was better but still
+disliked orange as a hue family. Built a second Artifact comparing four genuinely different
+directions (Golden Yellow, Deep Mustard, Slate, Berry) rendered on the real calorie card; user picked
+**Slate** (`#475569` / tint `#E2E8F0`) — calm, no warm hue, reads as "not there yet" rather than an
+alert. Also updated the identically-valued `--label-c`/`--label-tint` (the nutrition-label-scanned
+pill, which had always mirrored `--warning`'s hex) to keep the two in sync, and the PDF export's
+`warning` RGB array.
+
+### 25. Removed the decorative "A" avatar
+
+The 38×38 circle next to the settings gear on Today (`background:var(--brand);color:#fff;...>A</div>`)
+had no `onclick` — purely decorative, not a stand-in for a real avatar/profile feature. Removed on
+request; settings gear is now the only element in that header row.
+
+### 26. Per-screen background motifs, tied to what each screen actually does
+
+User wanted "some abstract, or image, or something that looks nice" for the faded background, but
+rejected two full rounds of generic abstract treatments (aurora mesh, topographic lines, nutrition
+line-icons, grain, wave ribbons; then constellation, halftone fade, isometric grid, marble swirl,
+blueprint grid) as "random stuff" and asked for something **meaningful** instead — tied to what the
+app is actually for, not decoration for its own sake. Landed on three motifs, each mirroring a real
+mechanic already in the app:
+
+- **Target Rings** (Today, Log food) — three concentric progress rings in the app's own established
+  macro colors (`var(--protein)`, `var(--carbs)`, `var(--fat)`), echoing the Macro-split section's own
+  legend colors.
+- **The Logging Streak** (History, Memory) — a faint square-grid texture (GitHub-contribution-graph
+  style) with a handful of brighter "logged" cells, echoing the day-by-day record those two screens
+  are.
+- **The Trend Line** (Trends, Export) — one continuous faint sparkline drifting across the bottom of
+  the screen, the same visual language the Trends charts themselves already use.
+- **Settings** gets no extra motif, just the base dot texture — nothing to tie it to.
+
+Implementation: three static inline `<svg>` blocks as fixed-position, `pointer-events:none`,
+`z-index:-1` divs placed right after `<body>` (never regenerated — just shown/hidden). `BG_MOTIF_BY_
+SCREEN` maps each of the 7 screen ids (`today`, `addfood`, `library`, `history`, `trends`,
+`exportScreen`, `settings`) to one of `rings`/`streak`/`trend`/`none`; `syncBgMotif(screen)` toggles
+`style.display` on the three containers and is called once at the top of every `App.render()` — cheap
+enough to run unconditionally rather than special-casing screen transitions.
+
+**The rings are driven by real data, not decoration.** `updateRingProgress()` reads today's actual
+totals via the existing `computeConsumedTotals()` and each macro's target low-bound from
+`App.state.targets`, and sets each ring's `stroke-dashoffset` to `circumference * (1 - consumed/
+target.low)`, clamped to a full ring (never overflows past 100% even if the target is exceeded).
+Verified with a real math check: pushed a mock item at exactly 50% of the protein/carbs targets,
+confirmed both rings landed at precisely half their circumference while fat stayed empty, then removed
+the test data (this test only ever touched the local test server's own localStorage, never the user's
+real deployed data — different origin entirely).
+
+**Two real bugs found during live verification on the user's actual device, both fixed same session:**
+1. **The motifs were completely invisible on a real phone.** `.phone`'s mobile media query
+   (`max-width:700px`) expands it to `100vw`/`100dvh` — the *entire* viewport — with an opaque
+   `background:var(--surface)`, which painted directly over the body-level motif layer. This was
+   missed in initial testing because the desktop-preview harness (used for verification throughout
+   this session) shows a small phone mockup with visible gray margin around it, so the motif was
+   visible there purely by accident of that harness's layout, not because the fix actually worked on
+   a real device. **Lesson: for anything involving the app's real fullscreen mobile chrome (the
+   `max-width:700px` breakpoint), verify with the Browser pane's mobile viewport preset, not just the
+   desktop demo-shell view** — they render meaningfully different DOM regions as opaque. Fixed by
+   adding `background:transparent` to `.phone` inside that media query.
+2. **Once visible, the Logging Streak grid was far too strong** at real page height — the small
+   preview swatch used in the comparison Artifact hid how dense/loud a tiling pattern reads over a
+   full, tall scrolling page. Reduced the square-to-gap ratio substantially (8px squares on a 32px
+   tile instead of 12px on 18px) and dropped the opacity (base 0.09 → 0.05, accent 0.26 → 0.18).
+3. **The rings also needed repositioning** — initially centered low enough that the opaque calorie
+   card covered most of them, only a sliver visible near the settings gear. Moved up (`top:-72px`,
+   was `64px`) and shrunk slightly (64/48/32 radius, was 80/60/40) so the whole cluster sits in the
+   header's negative space above the calorie card, and raised the opacity (track 0.10→0.14, progress
+   arc 0.32→0.45) since that's a much smaller area to read in.
+
+All verified live via a local PowerShell `HttpListener` static server (see "Known environment facts"
+below for the exact command) — including at the Browser pane's actual 375×812 mobile viewport preset,
+not just the wide desktop demo-shell, after bug #1 above made clear that distinction matters for this
+app's fullscreen mobile chrome specifically.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1304,10 +1416,11 @@ with no build step/bundler/minification — there's no established threshold for
 use judgment: a good trigger point is when total file size roughly doubles from the original ~206
 KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
 view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
-as of 2026-09-18: ~254 KB** (up from ~247 KB at the 2026-09-12 checkpoint, ~241 KB at 2026-09-11,
-~232 KB at 2026-09-04, ~211 KB original baseline) — still well under the doubling trigger, not
-flagged, but noting the running total here so the next check has an accurate comparison point
-instead of comparing against the stale original baseline.
+as of 2026-09-18 (end of day, after the visual refresh batch): ~258 KB** (up from ~254 KB earlier the
+same day, ~247 KB at the 2026-09-12 checkpoint, ~241 KB at 2026-09-11, ~232 KB at 2026-09-04, ~211 KB
+original baseline) — still well under the doubling trigger, not flagged, but noting the running total
+here so the next check has an accurate comparison point instead of comparing against the stale
+original baseline.
 
 ## Immediate next steps (pick up here)
 
@@ -1322,9 +1435,12 @@ popup, a second round of the search-reset bug found in the Memory tab's row-acti
 add one-time-logging feature plus a meal-target-switch bug found while building it, Calories moving
 from a ceiling to a low-high range, and the Calories card being colored by status), the 2026-09-14
 app-icon replacement (see "App icon replaced with custom artwork" above — Nourish-only, cosmetic,
-source file kept at `icons/Nourish Logo.png`), and items 20-22 (2026-09-18 batch, see "Fiber:carbs
-ratio, Add-food selection bug, and USDA lookup reliability overhaul" above — shipped identically in
-both apps). Nothing is queued. Ask what's next rather than assuming.
+source file kept at `icons/Nourish Logo.png`), items 20-22 (2026-09-18 functional batch, see
+"Fiber:carbs ratio, Add-food selection bug, and USDA lookup reliability overhaul" above — shipped
+identically in both apps), and items 23-26 (2026-09-18 visual batch, see "Visual refresh: Cobalt &
+Ice palette and data-driven background motifs" above — **Nourish-only**, not ported to BilliFit:
+the Cobalt & Ice palette, the Slate "under range" color, the removed header avatar, and the three
+data-tied background motifs). Nothing is queued. Ask what's next rather than assuming.
 
 One open thread to keep in mind if it comes back up, not active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
