@@ -731,7 +731,7 @@ const App = {
       usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
     builtinFoodsSeeded: true,
-    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{} },
+    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{}, bulkAction:null },
     history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
@@ -775,7 +775,7 @@ const App = {
     if (screen === 'today') return !!this.state.today.macroInfoOpen;
     if (screen === 'library'){
       const st = this.state.library;
-      return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode);
+      return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode || st.bulkAction);
     }
     if (screen === 'history') return !!this.state.history.confirmDeleteDate;
     if (screen === 'exportScreen') return !!this.state.memoryImport;
@@ -792,6 +792,7 @@ const App = {
       if (st.confirmDeleteKey) return this.cancelDelete();
       if (st.confirmMoveKey) return this.cancelMove();
       if (st.confirmArchiveKey) return this.cancelArchive();
+      if (st.bulkAction) return this.cancelBulkAction();
       if (st.selectMode) return this.cancelLibrarySelect();
     }
     if (screen === 'history' && this.state.history.confirmDeleteDate) return this.cancelDeleteDay();
@@ -2010,6 +2011,55 @@ const App = {
     st.selectMode = false;
     st.selected = {};
     this.render();
+  },
+  archiveSelectedMemoryItems(){
+    const st = this.state.library;
+    Object.keys(st.selected).forEach(key => {
+      const [kind, id] = key.split(':');
+      const item = this.state.memory[kind] && this.state.memory[kind].find(x => x.id === id);
+      if (item) item.archived = true;
+    });
+    st.selectMode = false;
+    st.selected = {};
+    this.render();
+  },
+  deleteSelectedMemoryItems(){
+    const st = this.state.library;
+    Object.keys(st.selected).forEach(key => {
+      const [kind, id] = key.split(':');
+      this.state.memory[kind] = this.state.memory[kind].filter(x => x.id !== id);
+    });
+    st.selectMode = false;
+    st.selected = {};
+    this.render();
+  },
+  // Bulk actions (share/archive/delete) from the Library select bar require two taps to
+  // execute: the first (step 1) shows what's about to happen, the second (step 2) is the
+  // actual confirmation. requestBulkAction opens step 1; confirmBulkAction advances step 1→2
+  // and only runs the action once step 2 is confirmed.
+  requestBulkAction(type){
+    const st = this.state.library;
+    if (!Object.keys(st.selected).length) return;
+    st.bulkAction = { type, step:1 };
+    this.render();
+  },
+  cancelBulkAction(){
+    this.state.library.bulkAction = null;
+    this.render();
+  },
+  confirmBulkAction(){
+    const st = this.state.library;
+    if (!st.bulkAction) return;
+    if (st.bulkAction.step === 1){
+      st.bulkAction.step = 2;
+      this.render();
+      return;
+    }
+    const type = st.bulkAction.type;
+    st.bulkAction = null;
+    if (type === 'archive') this.archiveSelectedMemoryItems();
+    else if (type === 'delete') this.deleteSelectedMemoryItems();
+    else this.shareSelectedMemoryItems();
   },
   exportMemoryOnly(){
     const json = JSON.stringify(this.buildMemoryOnlyPayload(), null, 2);
@@ -3297,7 +3347,7 @@ function renderLibrary(){
         <div class="disp" style="font-size:20px;font-weight:800;">Memory &amp; library</div>
         ${st.activeTab!=='archive' ? `<button onclick="${st.selectMode ? 'App.backOneLevel()' : 'App.toggleLibrarySelectMode()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>` : ''}
       </div>
-      <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">${st.selectMode ? 'Tap items to select, then share them together.' : 'Saved foods, ingredients &amp; learned rules — update anytime'}</div>
+      <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">${st.selectMode ? 'Tap items to select, then share, archive or delete them together.' : 'Saved foods, ingredients &amp; learned rules — update anytime'}</div>
       ${st.activeTab!=='archive' ? `
       <div class="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -3315,14 +3365,50 @@ function renderLibrary(){
       ${groups}
     </div>
     ${st.selectMode ? `
-      <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;display:flex;gap:8px;">
-        <button onclick="App.backOneLevel()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-        <button onclick="App.shareSelectedMemoryItems()" ${selectedCount===0?'disabled':''} style="flex:2;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Share ${selectedCount>0 ? selectedCount+' item'+(selectedCount>1?'s':'') : ''}
-        </button>
+      <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;">
+        ${st.bulkAction ? renderBulkActionConfirm(st) : `
+        <div style="display:flex;gap:7px;">
+          <button onclick="App.backOneLevel()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+          <button onclick="App.requestBulkAction('archive')" ${selectedCount===0?'disabled':''} style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);color:var(--ink-2);font-size:9.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 7h18M3 7l1-3h16l1 3M3 7v11a2 2 0 002 2h14a2 2 0 002-2V7M10 12h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Archive
+          </button>
+          <button onclick="App.requestBulkAction('delete')" ${selectedCount===0?'disabled':''} style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--surface);border:1px solid var(--critical);color:var(--critical);font-size:9.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Delete
+          </button>
+          <button onclick="App.requestBulkAction('share')" ${selectedCount===0?'disabled':''} style="flex:1.3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:9.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Share
+          </button>
+        </div>
+        <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:8px;">${selectedCount>0 ? selectedCount+' item'+(selectedCount>1?'s':'')+' selected' : 'Select items to continue'}</div>
+        `}
       </div>
     ` : bottomNav('library')}
+  `;
+}
+function renderBulkActionConfirm(st){
+  const count = Object.keys(st.selected).length;
+  const type = st.bulkAction.type;
+  const step = st.bulkAction.step;
+  const noun = count===1 ? 'item' : 'items';
+  const label = type === 'archive' ? 'Archive' : (type === 'delete' ? 'Delete' : 'Share');
+  const color = type === 'delete' ? 'var(--critical)' : 'var(--brand)';
+  const msgStep1 = type === 'delete'
+    ? `Delete ${count} ${noun}? This can&rsquo;t be undone.`
+    : type === 'archive'
+      ? `Archive ${count} ${noun}? You can reinstate them anytime from the Archive tab.`
+      : `Share ${count} ${noun}?`;
+  const msgStep2 = type === 'delete'
+    ? `Are you sure? ${count} ${noun} will be permanently deleted.`
+    : `Confirm: ${label.toLowerCase()} ${count} ${noun}?`;
+  return `
+    <div style="text-align:center;font-size:12.5px;font-weight:700;margin-bottom:10px;color:var(--ink);">${step===1?msgStep1:msgStep2}</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="App.cancelBulkAction()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+      <button onclick="App.confirmBulkAction()" style="flex:1;padding:12px 0;border-radius:12px;background:${color};color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">${step===1 ? 'Continue' : label+' '+count+' '+noun}</button>
+    </div>
   `;
 }
 
