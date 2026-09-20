@@ -702,12 +702,15 @@ const App = {
     desktop: { openMeal:'lunch' },
     settingsStatus: null,
     usdaApiKey: '', usdaKeyStatus: null,
+    profile: { age:null, sex:null, heightCm:null, activity:'light' },
+    maint: { open:false, adj:-300, confirmTarget:false, status:null, profileStatus:null },
   },
 
   setView(v){ this.state.view = v; this.render(); },
   setScreen(s){
     if (this.state.screen === s) return;
     if (s !== 'library' && s !== 'addfood') this.state.library.returnToLog = false;
+    if (s !== 'trends') this.state.maint.confirmTarget = false;
     if (s === 'today' && !this._navigatingFromPopstate && (this._depth||0) > 0){
       // Returning to Today directly (bottom nav, a back-arrow, etc.) rather than via the
       // hardware back button still needs to unwind through any pushed history entries first —
@@ -741,6 +744,7 @@ const App = {
       const st = this.state.library;
       return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode || st.bulkAction);
     }
+    if (screen === 'trends') return !!this.state.maint.confirmTarget;
     if (screen === 'history') return !!this.state.history.confirmDeleteDate;
     if (screen === 'exportScreen') return !!this.state.memoryImport;
     if (screen === 'addfood') return !!this.state.addfood.targetDate;
@@ -759,6 +763,7 @@ const App = {
       if (st.bulkAction) return this.cancelBulkAction();
       if (st.selectMode) return this.cancelLibrarySelect();
     }
+    if (screen === 'trends' && this.state.maint.confirmTarget) return this.cancelMaintTarget();
     if (screen === 'history' && this.state.history.confirmDeleteDate) return this.cancelDeleteDay();
     if (screen === 'exportScreen' && this.state.memoryImport) return this.cancelMemoryImport();
     if (screen === 'addfood' && this.state.addfood.targetDate) return this.exitAddFood();
@@ -1624,6 +1629,39 @@ const App = {
     else { this.state.history.tagOtherFor = null; this.render(); }
   },
 
+  // Profile inputs are read from the DOM only on Save (or right before a chip tap re-renders),
+  // never per keystroke — an oninput render() would wipe focus mid-typing.
+  readProfileInputs(){
+    const p = this.state.profile;
+    const ageEl = document.getElementById('profile-age'), hEl = document.getElementById('profile-height');
+    if (ageEl){ const a = parseInt(ageEl.value, 10); p.age = (a >= 10 && a <= 110) ? a : null; }
+    if (hEl){ const h = parseFloat(hEl.value); p.heightCm = (h >= 100 && h <= 250) ? Math.round(h*10)/10 : null; }
+  },
+  setProfileSex(s){ this.readProfileInputs(); this.state.profile.sex = s; this.render(); },
+  setProfileActivity(id){ this.readProfileInputs(); this.state.profile.activity = id; this.render(); },
+  saveProfile(){
+    this.readProfileInputs();
+    const p = this.state.profile;
+    this.state.maint.profileStatus = (p.age && p.heightCm && p.sex) ? 'Profile saved ✓' : 'Saved — add age, height and sex to get an estimate';
+    this.render();
+    setTimeout(() => { this.state.maint.profileStatus = null; this.render(); }, 2200);
+  },
+  toggleMaint(){ const mt = this.state.maint; mt.open = !mt.open; mt.confirmTarget = false; this.render(); },
+  setMaintAdj(v){ const mt = this.state.maint; mt.adj = v; mt.confirmTarget = false; this.render(); },
+  requestMaintTarget(){ this.state.maint.confirmTarget = true; this.render(); },
+  cancelMaintTarget(){ this.state.maint.confirmTarget = false; this.render(); },
+  applyMaintTarget(){
+    const mt = this.state.maint;
+    const best = bestMaintenance();
+    mt.confirmTarget = false;
+    if (!best){ this.render(); return; }
+    const r = maintenanceTargetRange(best.value, mt.adj);
+    this.state.targets.calories = { kind:'range', low:r.low, high:r.high, unit:'kcal' };
+    mt.status = `Calorie target updated to ${r.low.toLocaleString()}–${r.high.toLocaleString()} kcal ✓`;
+    this.render();
+    setTimeout(() => { if (this.state.maint.status){ this.state.maint.status = null; this.render(); } }, 2600);
+  },
+
   setTrendCat(id){ this.state.trends.activeCat = id; this.state.trends.activePoint = null; this.render(); },
   setTrendRange(id){ this.state.trends.range = id; this.state.trends.activePoint = null; this.render(); },
   selectTrendPoint(k){ const t=this.state.trends; t.activePoint = t.activePoint===k ? null : k; this.render(); },
@@ -1640,6 +1678,7 @@ const App = {
       dailyNote: this.state.today.dailyNote,
       dailyTag: this.state.today.dailyTag,
       usdaApiKey: this.state.usdaApiKey,
+      profile: this.state.profile,
       builtinFoodsSeeded: this.state.builtinFoodsSeeded,
       targets: this.state.targets,
       meals: this.state.today.meals,
@@ -1892,6 +1931,7 @@ const App = {
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
       if (typeof data.dailyTag === 'string') this.state.today.dailyTag = data.dailyTag;
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
+      if (data.profile && typeof data.profile === 'object') this.state.profile = { ...this.state.profile, ...data.profile };
       this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       // Calories used to be a single "stay under" ceiling; it's now a low-high range like the
@@ -2197,6 +2237,7 @@ const App = {
       if (typeof data.dailyNote === 'string') this.state.today.dailyNote = data.dailyNote;
       if (typeof data.dailyTag === 'string') this.state.today.dailyTag = data.dailyTag;
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
+      if (data.profile && typeof data.profile === 'object') this.state.profile = { ...this.state.profile, ...data.profile };
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       // Calories used to be a single "stay under" ceiling; it's now a low-high range like the
       // other macros. Anyone whose saved data (or an older backup file) still has the old shape
@@ -3641,6 +3682,188 @@ const TREND_CATS = [
   { id:'water', label:'Water', decimals:2 },
   { id:'weight', label:'Weight', decimals:1 },
 ];
+/* ---------- Maintenance calories ---------- */
+// Two independent estimates: a formula (Mifflin-St Jeor x activity) that works from a profile
+// alone, and a measured one derived from the user's own logged intake vs. weight trend.
+const ACTIVITY_LEVELS = [
+  { id:'sedentary', label:'Sedentary', hint:'Desk job, little or no exercise', mult:1.2 },
+  { id:'light', label:'Light', hint:'Light exercise 1–3 days a week', mult:1.375 },
+  { id:'moderate', label:'Moderate', hint:'Exercise 3–5 days a week', mult:1.55 },
+  { id:'active', label:'Very active', hint:'Hard exercise 6–7 days a week', mult:1.725 },
+];
+const KCAL_PER_KG = 7700;
+const MAINT_ADJUSTMENTS = [[-500,'−500'],[-300,'−300'],[0,'Maintain'],[250,'+250']];
+const roundTo10 = n => Math.round(n/10)*10;
+function latestWeightKg(){
+  const d = App.allRealDays().find(x => typeof x.weightKg === 'number');
+  return d ? d.weightKg : null;
+}
+function formulaMaintenance(){
+  const p = App.state.profile;
+  const w = latestWeightKg();
+  const missing = [];
+  if (!(p.age > 0)) missing.push('age');
+  if (!p.sex) missing.push('sex');
+  if (!(p.heightCm > 0)) missing.push('height');
+  if (w == null) missing.push('a logged weight');
+  if (missing.length) return { ready:false, missing };
+  const bmr = 10*w + 6.25*p.heightCm - 5*p.age + (p.sex === 'male' ? 5 : -161);
+  const level = ACTIVITY_LEVELS.find(a => a.id === p.activity) || ACTIVITY_LEVELS[1];
+  return { ready:true, bmr:Math.round(bmr), tdee:roundTo10(bmr*level.mult), weightKg:w, level };
+}
+// Maintenance = average logged intake minus the energy implied by the weight trend
+// (least-squares slope through the weigh-ins). Only completed days are used, and a day only
+// counts as "logged" if it has a plausible amount of food, so skipped days don't drag the
+// average down.
+function measuredMaintenance(){
+  const NEED_WEIGH_INS = 4, NEED_SPAN = 10, NEED_LOGGED = 10, MIN_LOGGED_KCAL = 500;
+  const past = App.state.dayHistory.slice().sort((a,b) => a.date < b.date ? -1 : 1);
+  const empty = { ready:false, weighIns:0, spanDays:0, loggedDays:0, need:{ weighIns:NEED_WEIGH_INS, span:NEED_SPAN, logged:NEED_LOGGED } };
+  if (!past.length) return empty;
+  const cutoff = dateFromISO(past[past.length-1].date);
+  cutoff.setDate(cutoff.getDate() - 27);
+  const dayNum = d => Math.round((dateFromISO(d.date) - cutoff)/86400000);
+  const win = past.filter(d => dayNum(d) >= 0);
+  const weigh = win.filter(d => typeof d.weightKg === 'number');
+  if (weigh.length < 2) return { ...empty, weighIns:weigh.length };
+  const first = dayNum(weigh[0]), last = dayNum(weigh[weigh.length-1]);
+  const spanDays = last - first + 1;
+  const logged = win.filter(d => { const n = dayNum(d); return n >= first && n <= last && d.calories >= MIN_LOGGED_KCAL; });
+  const base = { ...empty, weighIns:weigh.length, spanDays, loggedDays:logged.length };
+  if (weigh.length < NEED_WEIGH_INS || spanDays < NEED_SPAN || logged.length < NEED_LOGGED || logged.length < spanDays*0.7) return base;
+  const xs = weigh.map(dayNum), ys = weigh.map(d => d.weightKg);
+  const xm = xs.reduce((a,v)=>a+v,0)/xs.length, ym = ys.reduce((a,v)=>a+v,0)/ys.length;
+  const sxx = xs.reduce((a,x)=>a+(x-xm)*(x-xm),0);
+  if (!sxx) return base;
+  const slope = xs.reduce((a,x,i)=>a+(x-xm)*(ys[i]-ym),0)/sxx; // kg per day
+  const avgIntake = logged.reduce((a,d)=>a+d.calories,0)/logged.length;
+  const tdee = roundTo10(avgIntake - slope*KCAL_PER_KG);
+  return { ...base, ready:true, tdee, avgIntake:Math.round(avgIntake), slopePerWeek:Math.round(slope*7*100)/100, plausible: tdee >= 1000 && tdee <= 5000 };
+}
+function bestMaintenance(){
+  const m = measuredMaintenance();
+  if (m.ready && m.plausible) return { value:m.tdee, source:'measured' };
+  const f = formulaMaintenance();
+  if (f.ready) return { value:f.tdee, source:'formula' };
+  return null;
+}
+function maintenanceTargetRange(maint, adj){
+  const mid = maint + adj;
+  return { low: Math.max(800, roundTo10(mid - 100)), high: Math.max(900, roundTo10(mid + 100)) };
+}
+function renderMaintenanceCard(){
+  const mt = App.state.maint;
+  const f = formulaMaintenance(), m = measuredMaintenance(), best = bestMaintenance();
+  const fmt = n => n.toLocaleString();
+  const sign = n => (n > 0 ? '+' : (n < 0 ? '−' : '')) + Math.abs(n);
+  const headline = best ? `~${fmt(best.value)} kcal/day` : 'Not set up yet';
+  const sub = best
+    ? (best.source === 'measured' ? `Measured from your last ${m.spanDays} days` : 'Formula estimate — a measured number appears after a few weeks of logging')
+    : 'Add your profile in Settings, or log meals and weights for a few weeks';
+
+  const row = (title, value, detail) => `
+    <div style="background:var(--surface);border-radius:11px;padding:10px 12px;margin-top:8px;">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;">
+        <div style="font-size:12px;font-weight:700;color:var(--ink-2);">${title}</div>
+        <div class="num disp" style="font-size:14px;font-weight:800;">${value}</div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.45;margin-top:3px;">${detail}</div>
+    </div>`;
+
+  let formulaRow;
+  if (f.ready){
+    formulaRow = row('Formula estimate', `~${fmt(f.tdee)} kcal`, `Resting ${fmt(f.bmr)} kcal × ${f.level.label.toLowerCase()} activity (${f.level.mult}), at your latest logged weight of ${f.weightKg} kg.`);
+  } else {
+    formulaRow = row('Formula estimate', '—', `Needs your ${f.missing.join(', ')}. <button onclick="App.setScreen('settings')" style="background:none;border:none;padding:0;color:var(--brand);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;">Open Settings</button>`);
+  }
+  let measuredRow;
+  if (m.ready){
+    const trend = m.slopePerWeek === 0 ? 'holding steady' : `${sign(m.slopePerWeek)} kg/week`;
+    measuredRow = row('Measured from your data', `~${fmt(m.tdee)} kcal`,
+      `Eating about ${fmt(m.avgIntake)} kcal/day with weight ${trend} over ${m.spanDays} days (${m.weighIns} weigh-ins, ${m.loggedDays} logged days).` +
+      (m.plausible ? '' : ` <span style="color:var(--warning);font-weight:700;">This looks unrealistic — check that your meals and weights are logged accurately. It isn't used for target suggestions.</span>`));
+  } else {
+    measuredRow = row('Measured from your data', '—', `Needs at least ${m.need.weighIns} weigh-ins across ${m.need.span}+ days, with meals logged on most of them. So far: ${m.weighIns} weigh-in${m.weighIns===1?'':'s'}${m.spanDays ? ` over ${m.spanDays} days` : ''}, ${m.loggedDays} logged day${m.loggedDays===1?'':'s'}.`);
+  }
+
+  // When both estimates exist but disagree a lot, say which one to lean on.
+  const gapNote = (f.ready && m.ready && m.plausible && Math.abs(f.tdee - m.tdee)/m.tdee > 0.15)
+    ? `<div style="font-size:11px;color:var(--ink-2);line-height:1.45;margin-top:8px;">The two differ by about ${fmt(Math.abs(f.tdee - m.tdee))} kcal. Your own data is usually the more reliable one — the formula can&rsquo;t know your real activity or metabolism.</div>` : '';
+  let targetBlock = '';
+  if (best){
+    const cur = App.state.targets.calories;
+    const mid = (cur.low + cur.high)/2;
+    const gap = Math.round(mid - best.value);
+    const gapText = Math.abs(gap) < 50 ? 'right around maintenance' : `about ${fmt(Math.abs(gap))} kcal ${gap < 0 ? 'below' : 'above'} maintenance`;
+    const pace = Math.round(gap*7/KCAL_PER_KG*10)/10;
+    const paceText = Math.abs(pace) < 0.1 ? '' : ` — roughly ${sign(pace)} kg/week if you hit it`;
+    const r = maintenanceTargetRange(best.value, mt.adj);
+    const rPace = Math.round(mt.adj*7/KCAL_PER_KG*10)/10;
+    targetBlock = `
+      <div style="font-size:12px;color:var(--ink-2);line-height:1.45;margin-top:12px;">Your calorie target (${cur.low.toLocaleString()}–${cur.high.toLocaleString()}) sits ${gapText}${paceText}.</div>
+      <div style="font-size:11.5px;font-weight:700;color:var(--ink-2);margin-top:12px;margin-bottom:6px;">Set a new target relative to maintenance</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${MAINT_ADJUSTMENTS.map(([v,label]) => `<button class="chip ${mt.adj===v?'active':''}" onclick="App.setMaintAdj(${v})">${label}</button>`).join('')}
+      </div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:8px;">${r.low.toLocaleString()}–${r.high.toLocaleString()} kcal${mt.adj ? ` · about ${rPace > 0 ? '+' : '−'}${Math.abs(rPace)} kg/week` : ' · hold your weight'}${best.source === 'formula' ? ' · based on the formula estimate' : ''}</div>
+      ${mt.confirmTarget ? `
+        <div style="margin-top:10px;padding:11px 12px;background:var(--brand-tint);border-radius:11px;">
+          <div style="font-size:12.5px;font-weight:700;color:var(--brand-dark);margin-bottom:9px;">Replace ${cur.low.toLocaleString()}–${cur.high.toLocaleString()} with ${r.low.toLocaleString()}–${r.high.toLocaleString()} kcal?</div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="App.cancelMaintTarget()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);border:1px solid var(--border);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+            <button onclick="App.applyMaintTarget()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Yes, update</button>
+          </div>
+        </div>` : `
+        <button onclick="App.requestMaintTarget()" style="width:100%;margin-top:10px;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Use ${r.low.toLocaleString()}–${r.high.toLocaleString()} as my calorie target</button>`}
+      ${mt.status ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-top:10px;">${mt.status}</div>` : ''}`;
+  }
+
+  return `
+    <div class="card pad" style="margin-bottom:14px;">
+      <button onclick="App.toggleMaint()" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;background:none;border:none;padding:0;cursor:pointer;text-align:left;font-family:inherit;color:inherit;">
+        <div style="min-width:0;">
+          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Maintenance calories</div>
+          <div class="num disp" style="font-size:20px;font-weight:800;margin-top:2px;">${headline}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;">${sub}</div>
+        </div>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;transform:rotate(${mt.open ? '90' : '0'}deg);"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      ${mt.open ? `${formulaRow}${measuredRow}${gapNote}${targetBlock}
+      <div style="font-size:10px;color:var(--muted);line-height:1.4;margin-top:12px;">Estimates, not measurements of your metabolism — use them as a starting point and adjust to how your weight actually responds.</div>` : ''}
+    </div>`;
+}
+function renderProfileCard(){
+  const p = App.state.profile, mt = App.state.maint;
+  const w = latestWeightKg();
+  const level = ACTIVITY_LEVELS.find(a => a.id === p.activity) || ACTIVITY_LEVELS[1];
+  const inputStyle = 'width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;';
+  return `
+    <div class="card pad" style="margin-bottom:14px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px;">Your profile</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px;">Used for the maintenance-calorie estimate on Trends. Stored only on this device. Weight comes from what you log${w != null ? ` (latest: ${w} kg)` : ' — log one on Today first'}.</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Age</div>
+          <input id="profile-age" type="number" inputmode="numeric" min="10" max="110" value="${p.age ?? ''}" placeholder="years" style="${inputStyle}"/>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Height</div>
+          <input id="profile-height" type="number" inputmode="decimal" min="100" max="250" value="${p.heightCm ?? ''}" placeholder="cm" style="${inputStyle}"/>
+        </div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:6px;">Sex (used by the formula)</div>
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        ${[['male','Male'],['female','Female']].map(([id,label]) => `<button class="chip ${p.sex===id?'active':''}" onclick="App.setProfileSex('${id}')">${label}</button>`).join('')}
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:6px;">Activity level</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${ACTIVITY_LEVELS.map(a => `<button class="chip ${p.activity===a.id?'active':''}" onclick="App.setProfileActivity('${a.id}')">${a.label}</button>`).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin:6px 0 10px 0;">${level.hint}</div>
+      <button onclick="App.saveProfile()" style="padding:9px 16px;border-radius:10px;background:${mt.profileStatus?'var(--good)':'var(--brand-tint)'};color:${mt.profileStatus?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${mt.profileStatus || 'Save profile'}</button>
+    </div>`;
+}
+
 function renderTrends(){
   const st = App.state.trends;
   const cat = TREND_CATS.find(c=>c.id===st.activeCat) || TREND_CATS[0];
@@ -3673,6 +3896,7 @@ function renderTrends(){
         ${catChips}
       </div>
       <div class="scroll-area" style="padding:16px 18px 90px 18px;">
+        ${renderMaintenanceCard()}
         ${rangeTabs}
         <div class="card pad" style="text-align:center;color:var(--muted);font-size:13px;line-height:1.6;padding:36px 20px;">
           Not enough data yet for a ${cat.label.toLowerCase()} trend.<br/>Keep logging — this fills in once you have at least two days.
@@ -3740,6 +3964,7 @@ function renderTrends(){
       ${catChips}
     </div>
     <div class="scroll-area" style="padding:16px 18px 90px 18px;">
+      ${renderMaintenanceCard()}
       ${rangeTabs}
       <div class="card pad" style="position:relative;">
         <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px;">
@@ -4120,10 +4345,11 @@ function renderSettings(){
     <div class="scroll-area" style="padding:16px 18px 16px 18px;">
       <div class="card pad" style="margin-bottom:14px;">
         <div style="font-size:13px;font-weight:700;margin-bottom:4px;">USDA API key</div>
-        <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px;">Needed for live USDA FoodData Central search in Quick lookup (your saved foods still work without one). Get a free key at fdc.nal.usda.gov/api-key-signup.html — it's stored only on this device, never in the app's source code.</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px;">Needed for the USDA search in Memory (your saved foods still work without one). Get a free key at fdc.nal.usda.gov/api-key-signup.html — it's stored only on this device, never in the app's source code.</div>
         <input id="usda-key-input" type="text" value="${(App.state.usdaApiKey||'').replace(/"/g,'&quot;')}" placeholder="Paste your USDA API key" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;margin-bottom:8px;"/>
         <button onclick="App.saveUsdaKey()" style="padding:9px 16px;border-radius:10px;background:${App.state.usdaKeyStatus?'var(--good)':'var(--brand-tint)'};color:${App.state.usdaKeyStatus?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${App.state.usdaKeyStatus || 'Save key'}</button>
       </div>
+      ${renderProfileCard()}
       ${fields.map(([id,label]) => settingsCard(id,label)).join('')}
       <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin-top:4px;">Changing a target here updates status colors and bands on Today, Trends and Export right away — nothing about what you've actually logged changes.</div>
     </div>
