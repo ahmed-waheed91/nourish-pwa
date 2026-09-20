@@ -616,13 +616,23 @@ function defaultTargets(){
     fat: { kind:'range', low:50, high:70, unit:'g' },
     fiber: { kind:'floor', value:30, unit:'g' },
     sugar: { kind:'ceiling', value:50, unit:'g' },
-    sodium: { kind:'ceiling', value:2300, unit:'mg' },
+    sodium: { kind:'range', low:2000, high:2500, unit:'mg' },
     water: { kind:'range', low:2.5, high:3, unit:'L' },
     weight: { kind:'range', low:78, high:82, unit:'kg' },
   };
 }
-function targetInfo(id){
-  const t = App.state.targets[id];
+// Sodium used to be a single "stay under" ceiling; it's now a low-high range like the macros.
+// Old saved data / backups keep their old ceiling as the new upper bound, with a lower bound ~65% of it;
+// the untouched old default (2,300) moves to the new default range instead.
+function migrateSodiumTarget(targets){
+  const s = targets.sodium;
+  if (s && s.kind === 'range') return;
+  const old = (s && typeof s.value === 'number' && s.value > 0) ? s.value : 2300;
+  if (old === 2300){ targets.sodium = { kind:'range', low:2000, high:2500, unit:'mg' }; return; }
+  const high = old;
+  targets.sodium = { kind:'range', low:Math.round(high*0.65/100)*100, high, unit:'mg' };
+}
+function targetInfo(id){  const t = App.state.targets[id];
   if (t.kind === 'range') return { label:`${t.low.toLocaleString()}–${t.high.toLocaleString()} ${t.unit}`, low:t.low, high:t.high, unit:t.unit };
   if (t.kind === 'ceiling') return { label:`Under ${t.value.toLocaleString()} ${t.unit}`, high:t.value, unit:t.unit };
   return { label:`≥ ${t.value.toLocaleString()} ${t.unit}`, low:t.value, unit:t.unit };
@@ -1940,6 +1950,7 @@ const App = {
       if (!this.state.targets.calories || this.state.targets.calories.kind !== 'range'){
         this.state.targets.calories = { kind:'range', low:1500, high:1700, unit:'kcal' };
       }
+      migrateSodiumTarget(this.state.targets);
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
@@ -2245,6 +2256,7 @@ const App = {
       if (!this.state.targets.calories || this.state.targets.calories.kind !== 'range'){
         this.state.targets.calories = { kind:'range', low:1500, high:1700, unit:'kcal' };
       }
+      migrateSodiumTarget(this.state.targets);
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
