@@ -4,10 +4,12 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-18 (third checkpoint same day). The original four features (PDF export, live
-USDA lookup, real OCR, composite Saved Foods) plus eight large batches (2026-08-28, 2026-09-04,
+_Last updated 2026-09-20 (fourth checkpoint). The original four features (PDF export, live
+USDA lookup, real OCR, composite Saved Foods) plus nine large batches (2026-08-28, 2026-09-04,
 2026-09-11, 2026-09-12, 2026-09-14, 2026-09-18 functional batch, 2026-09-18 visual batch, 2026-09-18
-third batch) are all live and **user-confirmed working on a real device** — see "Four functional
+third batch, 2026-09-20 fourth batch) are all live; everything through the 2026-09-20 USDA-search move
+is **user-confirmed working on a real device** (the Maintenance-calories feature was pushed last and
+not yet confirmed on a phone) — see "Four functional
 features" / items 5-9 for the 2026-08-28
 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal, portion-by-percentage,
 portion-by-weight, fixed meal order), "Three features (2026-09-04)" for that batch (backdated
@@ -26,9 +28,13 @@ apps** — "Visual refresh: Cobalt & Ice palette and data-driven background moti
 that batch — **entirely Nourish-only, per the Original-vs-Limited-Edition rule; never ported to
 BilliFit** — and "Memory bulk actions and Weekly Review (2026-09-18, third checkpoint same day)" below
 for the newest batch — **both apps, functional**: Archive/Delete added to the Memory tab's Select bar
-(double-confirmed), and reason tags on off-track days feeding a real Weekly Review. No feature is in
-progress right now — check with the user for what's next. See "Immediate next steps" and "Standing
-watch item" near the end of this file before starting new work._
+(double-confirmed), and reason tags on off-track days feeding a real Weekly Review — and "USDA search
+moves to Memory, and Maintenance calories (2026-09-20)" below for the newest batch — **both apps,
+functional**: USDA lookup left the Log screen for a multi-result search in Memory, and Trends gained a
+Maintenance-calories card (formula + measured) backed by a new Settings profile. No feature is in
+progress right now — check with the user for what's next (they mentioned having more, unrelated
+improvements to bring; ask). See "Immediate next steps" and "Standing watch item" near the end of this
+file before starting new work._
 
 ## Cross-machine continuity (why this file is here, in git)
 
@@ -277,6 +283,12 @@ day — totals only."
   carbs ratio, Add-food selection bug, and USDA lookup reliability overhaul (2026-09-18)" below for
   the full rewrite (completeness scoring across all tiers, parallel fetching, relevance filtering,
   distinct rate-limit/bad-key states).
+- **⚠️ Superseded again 2026-09-20**: `fetchUsdaFood()`, the Log screen's "Quick lookup" card,
+  `runLookup`, `saveLookupToMemory`, `parseQuantity`, `computeFromPer100` and `findLocalFood` no longer
+  exist. Lookup now lives in **Memory → USDA tab** as a multi-result search (`searchUsdaFoods`); the
+  Log screen only keeps a shortcut button. See item 29 in "USDA search moves to Memory, and
+  Maintenance calories (2026-09-20)" below. The "local-first, then live" order described at the top
+  of this section no longer applies — saved foods are simply the list you log from.
 
 ## Real OCR for label photos — DONE, confirmed working
 
@@ -1479,6 +1491,106 @@ Weekly Review instead of History's old single "X/Y days in range" average card.
   before the commit.
 - Commits: `21de24c` (Nourish, `origin/main`), `f70af45` (BilliFit, `origin/master`).
 
+## USDA search moves to Memory, and Maintenance calories (2026-09-20) — both apps, functional
+
+Two features, both **functional → shipped identically to Nourish and BilliFit in the same pass** (the
+rule held this time; no scope correction was needed). Workflow per the user's one-feature-at-a-time
+preference: USDA first (built, tested, pushed on "check and if it is all working push it live"), then
+Maintenance (built, previewed locally with sample data, pushed on "push it live").
+
+### 29. USDA lookup moves from Log to Memory as a multi-result search
+
+User ask: Log should only *log*; lookup belongs in Memory; searching "chicken" must list every match
+to pick from instead of returning one item. Decisions the user confirmed: **branded products hidden
+behind a toggle, off by default** ("keep the default setting to not include branded products"), and
+a **shortcut button in Log** that jumps to Memory's lookup to soften the extra step.
+
+- **Removed from Log**: the Quick-lookup card, `runLookup`, `saveLookupToMemory`, `fetchUsdaFood`,
+  `parseQuantity`, `computeFromPer100`, `findLocalFood`, and the `addfood.lookup*` state. Log's USDA tab
+  still lists saved USDA foods (that's what you log from). The old card slot (`#addfood-quicklookup`,
+  id kept because `filterAddFoodRows` toggles its display) is now a "Need a food that isn't listed?"
+  card whose button calls `App.goToUsdaSearch()`.
+- **Memory → USDA tab** gets `renderUsdaSearchCard(st)` above the "Add a reference item" button (hidden
+  while an add/edit form is open): a text box + Search button, an "Include branded products" checkbox,
+  and the results. `searchUsdaFoods(query, apiKey, includeBranded)` queries the FDC tiers in parallel
+  (`USDA_SEARCH_PAGE_SIZE = 10` per tier; `Foundation`, `SR Legacy`, `Survey (FNDDS)`, plus `Branded`
+  only when the toggle is on). Search results already carry per-100g nutrients, so no second request.
+  Rows are grouped by tier (`USDA_TIER_LABELS`); within a tier they sort full-word matches first, then
+  records that actually report calories (some Foundation records are near-empty shells), then the API's
+  own order. Dedup by `fdcId`. Errors reuse the earlier distinct states (missing key / rate-limited /
+  bad key / no connection / not found), now shown in the Memory card.
+- **Save**: `App.saveUsdaResult(i)` pushes into `memory.usda` (`fdc:'FDC <id>'`); "Saved ✓" is derived
+  from that `fdc` string (`usdaResultSaved`), which also makes re-saving a no-op. Branded saves are
+  named `"DESC (BRAND)"` so same-named products stay distinguishable. `extractUsdaPer100` now also
+  returns `found`, and rows say "No data for fiber, sugar (saved as 0)" when a record omits values.
+- **Toggle**: `library.usdaIncludeBranded` is in-memory only, so it is **off at every app launch**
+  (deliberate, per the user). `toggleUsdaBranded()` re-runs the current search if one is typed.
+- **Shortcut/return path**: `goToUsdaSearch()` sets `library.activeTab='usda'`, `returnToLog=true`,
+  goes to Memory and focuses `#usda-search-input`; Memory then shows a "← Back to Log food" bar
+  (`backToLogFromMemory()` → Log's USDA tab). `setScreen()` clears `returnToLog` when leaving both
+  library and addfood. Android back from Memory still goes to Today (the fixed two-level rule) — the
+  bar is the one-tap way back to Log.
+- **Input rule kept**: the search box is read from the DOM only on Search/Enter, never `oninput`.
+- **Testing notes**: USDA's public `DEMO_KEY` has a small hourly limit and was exhausted (HTTP 429)
+  mid-session — Nourish was verified against live data first; BilliFit's results list/toggle/save was
+  then verified with `window.fetch` stubbed **in the browser test session only** (never in the file).
+  Known small gap: if one tier fails while others succeed (e.g. rate-limit), the results simply show
+  fewer groups with no warning.
+- Commits: `1a659a7` (Nourish, `origin/main`), `97ffc65` (BilliFit, `origin/master`).
+
+### 30. Maintenance calories (formula + measured) with a Settings profile
+
+User ask: "the ability to calculate Maintenance calories." Agreed design: a formula estimate that
+works from a profile, a measured estimate from the user's own logs, both on Trends, plus an optional
+"set my calorie target from this" (only ever on an explicit tap, behind a confirm step). Placement
+defaults the user accepted: card at the top of Trends, profile fields in Settings.
+
+- **State/backup**: `state.profile = { age, sex ('male'|'female'), heightCm, activity }` and
+  `state.maint = { open, adj, confirmTarget, status, profileStatus }`. Only `profile` is persisted:
+  added to `buildBackupPayload` and restored in **both** `loadLocal` and the file-import handler
+  (`this.state.profile = { ...this.state.profile, ...data.profile }`). Weight is not stored in the
+  profile — it comes from the latest logged `weightKg` (`latestWeightKg()` via `allRealDays()`).
+- **Formula** (`formulaMaintenance`): Mifflin-St Jeor (10w + 6.25h − 5a + 5 male / −161 female) ×
+  `ACTIVITY_LEVELS` (1.2 / 1.375 / 1.55 / 1.725), rounded to 10. Reports which inputs are missing.
+- **Measured** (`measuredMaintenance`): window = the 28 days ending at the latest *completed* day
+  (today excluded). Needs ≥4 weigh-ins, an inclusive weigh-in span ≥10 days, ≥10 "logged" days
+  (calories ≥500) and logged days ≥70% of the span; otherwise returns progress numbers for the
+  "so far: N weigh-ins over M days" message. Slope = least-squares kg/day through the weigh-ins;
+  `tdee = avg logged intake − slope × 7700`, rounded to 10; `plausible` = 1,000–5,000 (deliberately
+  wide — a synthetic 5 kg crash still passed). `bestMaintenance()` prefers measured (if plausible),
+  else formula, else null.
+- **Trends card** (`renderMaintenanceCard`, inserted at the top of both Trends templates — in
+  BilliFit the anchor sits after `catBg('trends')`, its cosmetic background): collapsible; expanded
+  shows formula row, measured row, a "the two differ by ~N kcal — your own data is usually the more
+  reliable one" note when they differ >15%, how the current calorie target sits vs maintenance (with
+  a rough kg/week via 7,700 kcal/kg), and adjustment chips −500 / −300 / Maintain / +250 that build a
+  range = (maintenance + adj) ± 100 (`maintenanceTargetRange`, floors 800/900). Applying goes through
+  `requestMaintTarget` → confirm ("Replace 1,500–1,700 with …?") → `applyMaintTarget`, which writes
+  `targets.calories`. The confirm step is registered in `hasOpenOverlay`/`closeOpenOverlay` for
+  `screen==='trends'` (Android back closes it) and cleared in `setScreen` when leaving Trends.
+- **Settings profile card** (`renderProfileCard`, above the target cards): age/height inputs are read
+  from the DOM only on Save or right before a sex/activity chip re-renders (`readProfileInputs`),
+  so typed values survive chip taps and no per-keystroke render happens.
+- **Also fixed**: the USDA-key card's stale "Quick lookup" wording now says "USDA search in Memory".
+- **Testing**: 21 synthetic completed days (~1,600 kcal, weight −0.25 kg/week) gave measured 1,880 —
+  matches 1,600 + 0.25/7×7,700; profile 30 y / male / 178 cm / moderate / 89.1 kg gave formula 2,880.
+  Also checked: too-little-data and half-unlogged states show "not ready", chip taps keep typed
+  values, back-button closes the confirm, backup→restore round-trips `profile`. Sample data lived
+  only in the browser test session and localStorage of the local dev origins (8793/8794) and was
+  cleared (`localStorage.removeItem`) before committing.
+- Commits: `a123bfc` (Nourish, `origin/main`), `6a02cca` (BilliFit, `origin/master`).
+- **Not yet confirmed on a real device** as of this checkpoint.
+
+### Tooling note (2026-09-20): no Python/Node on this machine
+
+Multi-hunk edits to `index.html` were done with **PowerShell patch scripts** (scratchpad) that read
+new code blocks from separate text files and apply `Cut`/`Sub` helpers which **throw unless the anchor
+matches exactly the expected number of times** (nothing is written on failure). One script is run per
+app; anchors must be simple because the forks differ cosmetically (a first Maintenance patch failed
+on BilliFit for exactly that reason, harmlessly). Don't re-run a patch script on a file it already
+patched. Local dev servers (`serve-pwa.ps1`, ports 8793/8794) die across context compactions and must
+be restarted via Bash `run_in_background`.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1496,8 +1608,8 @@ with no build step/bundler/minification — there's no established threshold for
 use judgment: a good trigger point is when total file size roughly doubles from the original ~206
 KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
 view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
-as of 2026-09-18 (end of day, after the Memory bulk-actions + Weekly Review batch): ~269 KB** (up from
-~258 KB after the visual refresh batch, ~254 KB earlier the same day, ~247 KB at the 2026-09-12
+as of 2026-09-20 (after USDA-search-in-Memory + Maintenance calories): ~285 KB** (292,015 bytes; up
+from ~269 KB after the 2026-09-18 Memory bulk-actions + Weekly Review batch, ~258 KB after the visual refresh batch, ~254 KB earlier the same day, ~247 KB at the 2026-09-12
 checkpoint, ~241 KB at 2026-09-11, ~232 KB at 2026-09-04, ~211 KB original baseline) — still well under
 the doubling trigger, not flagged, but noting the running total here so the next check has an accurate
 comparison point instead of comparing against the stale original baseline.
@@ -1523,7 +1635,12 @@ the Cobalt & Ice palette, the Slate "under range" color, the removed header avat
 data-tied background motifs), and items 27-28 (2026-09-18 third batch, see "Memory bulk actions and
 Weekly Review" above — shipped identically in both apps: Archive/Delete added to the Memory tab's
 Select bar with double confirmation, and reason tags on off-track days feeding a real Weekly Review
-in History's Week view). Nothing is queued. Ask what's next rather than assuming.
+in History's Week view), item 29 (2026-09-20: USDA lookup moved from Log to a multi-result search in
+Memory, branded products behind an off-by-default toggle, with a shortcut from Log — user confirmed
+working) and item 30 (2026-09-20: Maintenance calories — pushed, **not yet confirmed on a phone**;
+ask how it behaved with their real data once they have a couple of weeks of weigh-ins). Nothing is
+queued, but the user said they have **more, unrelated improvements** to bring — ask for them (one
+feature at a time, per their preference). Ask what's next rather than assuming.
 
 One open thread to keep in mind if it comes back up, not active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
