@@ -707,7 +707,7 @@ const App = {
     library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{}, bulkAction:null, usdaQuery:'', usdaIncludeBranded:false, usdaLoading:false, usdaResults:null, usdaError:null, returnToLog:false },
     history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null, tagOtherFor:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
-    exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
+    exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], recentOpen:false, memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
     memoryImport: null,
     desktop: { openMeal:'lunch' },
     settingsStatus: null,
@@ -756,7 +756,7 @@ const App = {
     }
     if (screen === 'trends') return !!this.state.maint.confirmTarget;
     if (screen === 'history') return !!this.state.history.confirmDeleteDate;
-    if (screen === 'exportScreen') return !!this.state.memoryImport;
+    if (screen === 'exportScreen') return !!(this.state.memoryImport || this.state.exportScreen.recentOpen);
     if (screen === 'addfood') return !!this.state.addfood.targetDate;
     return false;
   },
@@ -777,6 +777,7 @@ const App = {
     if (screen === 'trends' && this.state.maint.confirmTarget) return this.cancelMaintTarget();
     if (screen === 'history' && this.state.history.confirmDeleteDate) return this.cancelDeleteDay();
     if (screen === 'exportScreen' && this.state.memoryImport) return this.cancelMemoryImport();
+    if (screen === 'exportScreen' && this.state.exportScreen.recentOpen) return this.closeRecentExports();
     if (screen === 'addfood' && this.state.addfood.targetDate) return this.exitAddFood();
   },
   // Reconciles the browser history stack to match the app's current depth (0=Today,
@@ -1679,6 +1680,8 @@ const App = {
 
   setExportMode(m){ this.state.exportScreen.mode = m; this.state.exportScreen.offset = 0; this.render(); },
   stepExport(dir){ const e=this.state.exportScreen; e.offset = Math.max(0, e.offset + dir); this.render(); },
+  openRecentExports(){ this.state.exportScreen.recentOpen = true; this.render(); },
+  closeRecentExports(){ this.state.exportScreen.recentOpen = false; this.render(); },
 
   buildBackupPayload(){
     return {
@@ -1915,7 +1918,7 @@ const App = {
       whenISO: new Date().toISOString(),
       label: st.mode === 'day' ? `1-Day Report · ${exportLabel}` : `Weekly Summary · ${exportLabel}`,
     });
-    if (exports.length > 10) exports.length = 10;
+    if (exports.length > 5) exports.length = 5;
     st.dataStatus = 'PDF saved ✓ — check your Downloads folder.';
     this.render();
   },
@@ -1955,7 +1958,7 @@ const App = {
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
-      if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports;
+      if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports.slice(0, 5);
       if (!this.state.builtinFoodsSeeded){
         mergeCommonFoodsIntoUsda(this.state.memory.usda);
         this.state.builtinFoodsSeeded = true;
@@ -1998,7 +2001,7 @@ const App = {
     const json = JSON.stringify(payload, null, 2);
     const slug = (item.name||kind).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || kind;
     const fileName = `nourish-${slug}.json`;
-    const shareIntro = `${item.name} — shared from Nourish. To bring it into your own Nourish, paste this whole message into Memory & Library → Export → Import memory → "Import from pasted text".`;
+    const shareIntro = `${item.name} — shared from Nourish. To bring it into your own Nourish, paste this whole message into Memory & Library → Data → Import memory → "Import from pasted text".`;
     this.shareJsonAsText(item.name, `${shareIntro}\n\n${json}`, fileName, json);
   },
   toggleLibrarySelectMode(){
@@ -2033,7 +2036,7 @@ const App = {
     const json = JSON.stringify(payload, null, 2);
     const stamp = new Date().toISOString().slice(0,10);
     const fileName = `nourish-${count}-items-${stamp}.json`;
-    const shareIntro = `${count} item${count===1?'':'s'} — shared from Nourish. To bring ${count===1?'it':'them'} into your own Nourish, paste this whole message into Memory & Library → Export → Import memory → "Import from pasted text".`;
+    const shareIntro = `${count} item${count===1?'':'s'} — shared from Nourish. To bring ${count===1?'it':'them'} into your own Nourish, paste this whole message into Memory & Library → Data → Import memory → "Import from pasted text".`;
     this.shareJsonAsText(`${count} shared item${count===1?'':'s'}`, `${shareIntro}\n\n${json}`, fileName, json);
     st.selectMode = false;
     st.selected = {};
@@ -2261,7 +2264,7 @@ const App = {
       if (Array.isArray(data.meals)) this.state.today.meals = data.meals;
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
-      if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports;
+      if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports.slice(0, 5);
       this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (!this.state.builtinFoodsSeeded){
         mergeCommonFoodsIntoUsda(this.state.memory.usda);
@@ -2320,7 +2323,7 @@ function renderToolbar(){
   const s = App.state;
   const mobileTabs = [
     ['today','Today'], ['addfood','Log food'], ['library','Memory'],
-    ['history','History'], ['trends','Trends'], ['exportScreen','Export'], ['settings','Settings'],
+    ['history','History'], ['trends','Trends'], ['exportScreen','Data'], ['settings','Settings'],
   ];
   document.getElementById('toolbar').innerHTML = `
     <div class="seg">
@@ -2388,7 +2391,7 @@ function bottomNav(active){
     ['history','History', `<rect x="4" y="5" width="16" height="16" rx="2" stroke="currentColor" stroke-width="2"/><path d="M4 10h16M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`],
     ['trends','Trends', `<path d="M4 19V10M11 19V5M18 19v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`],
     ['library','Memory', `<path d="M5 4h11l3 3v13H5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 9h6M9 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`],
-    ['exportScreen','Export', `<path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`],
+    ['exportScreen','Data', `<path d="M8 20V5m0 0L4.5 8.5M8 5l3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 4v15m0 0l-3.5-3.5M16 19l3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`],
   ];
   return `<div class="bottom-nav">
     ${items.map(([id,label,svg]) => `
@@ -3567,7 +3570,7 @@ function renderHistory(){
         ${realDays.map((d,i) => {
           if (st.confirmDeleteDate === d.date){
             return `<div class="card pad-sm" style="border-color:var(--critical);">
-              <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Permanently delete ${formatShortDate(d.date)}? This removes it from History, Trends and Export — it can't be undone.</div>
+              <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Permanently delete ${formatShortDate(d.date)}? This removes it from History, Trends and exports — it can't be undone.</div>
               <div style="display:flex;gap:8px;">
                 <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
                 <button onclick="App.deleteDay('${d.date}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Delete</button>
@@ -4138,7 +4141,35 @@ function renderMemoryImportReview(){
     </div>
   `;
 }
-function renderExport(){
+function renderRecentExportsModal(exports){
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return `
+    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
+      <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:340px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <div style="font-size:14.5px;font-weight:800;">Recent exports</div>
+          <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:12px;">Your last 5 PDF reports. This is a record only &mdash; the files themselves are in your Downloads folder.</div>
+        ${exports && exports.length ? `
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            ${exports.map(e => `
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-radius:10px;background:var(--surface);">
+                <div style="min-width:0;">
+                  <div style="font-size:12.5px;font-weight:700;">${esc(e.label)}</div>
+                  <div style="font-size:10.5px;color:var(--muted);margin-top:1px;word-break:break-all;">${esc(e.filename)}</div>
+                </div>
+                <div style="font-size:10px;color:var(--muted);flex-shrink:0;">${new Date(e.whenISO).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</div>
+              </div>
+            `).join('')}
+          </div>
+        ` : `<div style="text-align:center;color:var(--muted);font-size:12px;padding:14px 0;">No reports exported yet.</div>`}
+      </div>
+    </div>
+  `;
+}function renderExport(){
   if (App.state.memoryImport) return renderMemoryImportReview();
   const st = App.state.exportScreen;
   const realDays = App.allRealDays();
@@ -4247,7 +4278,7 @@ function renderExport(){
 
   return `
     <div class="topbar">
-      <div class="disp" style="font-size:20px;font-weight:800;margin-bottom:12px;">Export</div>
+      <div class="disp" style="font-size:20px;font-weight:800;margin-bottom:12px;">Data</div>
       <div class="seg">
         <button class="seg-btn" style="flex:1;${st.mode==='day'?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setExportMode('day')">1-Day Report</button>
         <button class="seg-btn" style="flex:1;${st.mode==='week'?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setExportMode('week')">Weekly Summary</button>
@@ -4267,24 +4298,16 @@ function renderExport(){
         </button>
       </div>
       ${preview}
-      <button onclick="App.exportPdf()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:20px;">
+      <div style="display:flex;gap:8px;margin-bottom:20px;">
+      <button onclick="App.exportPdf()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
         Export PDF
       </button>
-      <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Recent exports</div>
-      ${st.recentExports && st.recentExports.length ? `
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:22px;">
-          ${st.recentExports.map(e => `
-            <div class="card pad-sm" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <div style="min-width:0;">
-                <div style="font-size:12.5px;font-weight:700;">${e.label}</div>
-                <div style="font-size:10.5px;color:var(--muted);margin-top:1px;">${e.filename}</div>
-              </div>
-              <div style="font-size:10px;color:var(--muted);flex-shrink:0;">${new Date(e.whenISO).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</div>
-            </div>
-          `).join('')}
-        </div>
-      ` : `<div style="text-align:center;color:var(--muted);font-size:12px;padding:10px 0 22px 0;">No reports exported yet.</div>`}
+      <button onclick="App.openRecentExports()" style="flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 14px;border-radius:13px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Recent${st.recentExports && st.recentExports.length ? ` (${st.recentExports.length})` : ''}
+      </button>
+      </div>
 
       <div style="height:1px;background:var(--border);margin-bottom:20px;"></div>
 
@@ -4367,6 +4390,7 @@ function renderExport(){
       ${st.memoryStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.memoryStatus}</div>` : ''}
     </div>
     ${bottomNav('exportScreen')}
+    ${st.recentOpen ? renderRecentExportsModal(st.recentExports) : ''}
   `;
 }
 
@@ -4416,7 +4440,7 @@ function renderSettings(){
         </button>
         <div class="disp" style="font-size:18px;font-weight:800;">Settings</div>
       </div>
-      <div style="font-size:12px;color:var(--ink-2);padding-left:34px;">Your daily targets — used across Today, Trends and Export</div>
+      <div style="font-size:12px;color:var(--ink-2);padding-left:34px;">Your daily targets — used across Today, Trends and exports</div>
     </div>
     <div class="scroll-area" style="padding:16px 18px 16px 18px;">
       <div class="card pad" style="margin-bottom:14px;">
@@ -4427,7 +4451,7 @@ function renderSettings(){
       </div>
       ${renderProfileCard()}
       ${fields.map(([id,label]) => settingsCard(id,label)).join('')}
-      <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin-top:4px;">Changing a target here updates status colors and bands on Today, Trends and Export right away — nothing about what you've actually logged changes.</div>
+      <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin-top:4px;">Changing a target here updates status colors and bands on Today, Trends and exports right away — nothing about what you've actually logged changes.</div>
     </div>
     <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;">
       ${App.state.settingsStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${App.state.settingsStatus}</div>` : ''}
@@ -4449,7 +4473,7 @@ function renderDesktop(){
   const waterL = formatLiters(dt.waterMl);
   const waterGood = statusFor('water', dt.waterMl/1000) === 'good';
 
-  const navDefs = ['Today','History','Trends','Library','Export'];
+  const navDefs = ['Today','History','Trends','Library','Data'];
   const macroCals = { protein: consumed.protein*4, carbs: consumed.carbs*4, fat: consumed.fat*9 };
   const macroTotal = Math.max(1, macroCals.protein + macroCals.carbs + macroCals.fat);
   const macroPct = {
