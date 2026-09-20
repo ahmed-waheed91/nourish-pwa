@@ -4,7 +4,10 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-20 (fourth checkpoint). The original four features (PDF export, live
+_Last updated 2026-09-20 (fifth checkpoint — see "Sodium range, Today/Export refinements, and the Data
+tab" near the end: sodium as a range, Export preview UNDER/OK/OVER + 3 new rows, Today macro-tile
+popups with net carbs, Notes & accuracy box removed, Export tab renamed "Data" with a capped
+Recent-exports popup; all both-apps functional). The original four features (PDF export, live
 USDA lookup, real OCR, composite Saved Foods) plus nine large batches (2026-08-28, 2026-09-04,
 2026-09-11, 2026-09-12, 2026-09-14, 2026-09-18 functional batch, 2026-09-18 visual batch, 2026-09-18
 third batch, 2026-09-20 fourth batch) are all live; everything through the 2026-09-20 USDA-search move
@@ -1591,6 +1594,82 @@ on BilliFit for exactly that reason, harmlessly). Don't re-run a patch script on
 patched. Local dev servers (`serve-pwa.ps1`, ports 8793/8794) die across context compactions and must
 be restarted via Bash `run_in_background`.
 
+## Sodium range, Today/Export refinements, and the Data tab (2026-09-20, fifth checkpoint) — both apps, functional
+
+Five small functional changes requested in one session, **each shipped identically to Nourish and
+BilliFit** (one commit per batch per app, each on the user's explicit "push it live"). Same tooling as
+below. Only #31 was explicitly confirmed on a phone ("Tested and working fine"); the rest were pushed
+and verified in the local preview only.
+
+### 31. Sodium target: ceiling → low-high range (default 2,000–2,500 mg)
+
+Sodium was `{kind:'ceiling', value:2300}`; it's now `{kind:'range', low:2000, high:2500, unit:'mg'}` like
+calories/protein/carbs/fat, so under-range shows amber "Under" (the user asked for that explicitly),
+over shows red, in-range green. All the status/detail/PDF/Trends-band/Settings code already handled
+ranges generically, so the change was the default plus a migration: new top-level
+`migrateSodiumTarget(targets)` (next to `defaultTargets`/`targetInfo`), called at **both** load sites
+(`loadLocal` and the file-import handler) right after the existing calories migration. Rules: already a
+range → untouched; the **untouched old default (2,300) → the new 2,000–2,500 default**; any other old
+ceiling → kept as the new `high`, `low = round(high×0.65 / 100) × 100`. Commits: `5d25e1d` (Nourish),
+`d942ded` (BilliFit).
+
+### 32. Export day preview: UNDER / OK / OVER, plus carbs, fat and sodium rows
+
+The per-day "Daily Nutrition Report" preview on the Export tab used a boolean (`OK` green vs `CHECK`
+amber). It now passes `statusFor()`'s three-way result through: **UNDER** (amber `pill-warn`), **OK**
+(green), **OVER** (red `pill-crit`) — the same vocabulary as the PDF (`pdfStatusLabel`). Rows went from
+4 (calories, protein, fiber, sugar) to 7: calories, protein, **carbs, fat**, fiber, sugar, **sodium**.
+Commits: `68ccae3` / `6328029`.
+
+### 33. Today: tapping a macro tile opens a per-meal / per-item breakdown popup
+
+The six Today stat tiles (protein, carbs, fat, fiber, sugar, sodium) used to expand inline with a
+one-line "X g under target". Tapping now opens `renderStatDetailModal(id, consumed)` — same centered-
+popup pattern as the macro-split explainer (`position:absolute` overlay, X / backdrop / Android back all
+close it). Content: pill + total + target + the old detail sentence, then **"Where it came from"**: each
+meal (in `sortedMealsForDisplay` order) with its amount, % share and a bar (protein/carbs/fat use their
+macro colors, others the brand color), that meal's items listed underneath **largest first**, and a
+muted "No X from: …" footer for meals contributing nothing. Item names are HTML-escaped. State reuses
+`today.expandedStat` as "which stat's popup is open" (`openStatDetail`/`closeStatDetail`, wired into
+`hasOpenOverlay`/`closeOpenOverlay` for `screen==='today'`); the old `toggleStat`, the inline block and
+`buildTodayStats`' `isOpen` were removed. **Carbs popup only:** a "Net carbs" block (carbs − fiber −
+sugar, working shown) plus a per-meal "Net carbs X g" line, via `netCarbs()` which floors at 0 (so with
+odd label data, per-meal nets can sum slightly above the day's net — accepted). Commits: `51dca93` /
+`95433ef`.
+
+### 34. Removed the "Notes & accuracy" accordion from Today
+
+It sat between Weight and Today's notes and only repeated the per-macro under/over sentences that the
+new popups (#33) now cover. Deleted the block, `toggleNotes()`, the `notesOpen` state field and its
+reset; Today's-notes card lost its `margin-top:14px` so spacing under Weight matches the other cards.
+Commits: `5ac1826` / `edd0a77`.
+
+### 35. Export tab renamed "Data"; recent exports capped at 5 and moved into a popup
+
+The tab holds PDF reports, full-data backup/restore, and Memory export/import, but its label and
+download-arrow icon only said "export". Renamed to **Data** with an up/down-arrows (transfer) icon —
+label in the bottom bar, desktop tab strip and desktop sidebar list, plus the screen's own header. The
+**internal screen id stays `exportScreen`** (nothing persisted depends on the label). A few text
+mentions were reworded ("→ Data → Import memory" in the memory-share message, "Trends and exports" in
+the delete-day and Settings hints). Recent exports: cap `10 → 5` in `exportPdf()`, and both load sites
+`.slice(0, 5)` any older saved list; the inline list is gone. A **"Recent (n)" button** (clock icon)
+sits beside Export PDF and opens `renderRecentExportsModal` (state `exportScreen.recentOpen`, in the
+overlay registry for the Android back button). The list is a **record only** — name + date; the app
+can't reopen a downloaded file, and the popup says so. Commits: `b460686` / `dade8dc`.
+
+### Tooling notes added this session
+
+- A bash heredoc containing quotes blew up once ("unexpected EOF"); write scratch scripts/blocks with
+  the **Write tool** instead of heredocs.
+- **Windows PowerShell 5.1 reads BOM-less `.ps1` files as ANSI**, so a literal `→` in an anchor
+  silently fails to match (harmlessly — the assert throws). Build such characters with
+  `[string][char]0x2192`; keep scripts ASCII.
+- After a local test, `localStorage.removeItem(LOCAL_STORAGE_KEY)` isn't enough if the page keeps
+  rendering — a later `saveLocal()` re-writes the in-memory state. Remove the key, then reload/navigate
+  away without interacting, before assuming the origin is clean.
+- The Browser pane can't take screenshots while the Claude window is hidden (they time out); verify
+  through the DOM instead (`innerText`, class names, `getBoundingClientRect`) and say so.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1608,7 +1687,8 @@ with no build step/bundler/minification — there's no established threshold for
 use judgment: a good trigger point is when total file size roughly doubles from the original ~206
 KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
 view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
-as of 2026-09-20 (after USDA-search-in-Memory + Maintenance calories): ~285 KB** (292,015 bytes; up
+as of 2026-09-20 (fifth checkpoint, after the sodium range / macro popup / Data tab batch): ~293 KB**
+(300,353 bytes; ~285 KB / 292,015 bytes after USDA-search-in-Memory + Maintenance calories; up
 from ~269 KB after the 2026-09-18 Memory bulk-actions + Weekly Review batch, ~258 KB after the visual refresh batch, ~254 KB earlier the same day, ~247 KB at the 2026-09-12
 checkpoint, ~241 KB at 2026-09-11, ~232 KB at 2026-09-04, ~211 KB original baseline) — still well under
 the doubling trigger, not flagged, but noting the running total here so the next check has an accurate
@@ -1638,7 +1718,13 @@ Select bar with double confirmation, and reason tags on off-track days feeding a
 in History's Week view), item 29 (2026-09-20: USDA lookup moved from Log to a multi-result search in
 Memory, branded products behind an off-by-default toggle, with a shortcut from Log — user confirmed
 working) and item 30 (2026-09-20: Maintenance calories — pushed, **not yet confirmed on a phone**;
-ask how it behaved with their real data once they have a couple of weeks of weigh-ins). Nothing is
+ask how it behaved with their real data once they have a couple of weeks of weigh-ins) and items 31-35
+(2026-09-20 fifth checkpoint, see "Sodium range, Today/Export refinements, and the Data tab" above:
+sodium as a range — user-confirmed working — the Export preview's UNDER/OK/OVER pills and extra rows,
+the Today macro-tile popup with per-meal/per-item breakdown and net carbs on Carbs, removal of the
+Notes & accuracy box, and the Export tab renamed Data with a capped Recent-exports popup — all pushed,
+verified in the local preview, not yet eyeballed on a phone; worth asking how the Data tab's
+"Recent" button row looked at phone width, since screenshots weren't possible). Nothing is
 queued, but the user said they have **more, unrelated improvements** to bring — ask for them (one
 feature at a time, per their preference). Ask what's next rather than assuming.
 
