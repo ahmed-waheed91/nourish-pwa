@@ -691,7 +691,7 @@ const App = {
   state: {
     view: 'mobile',
     screen: 'today',
-    today: { expandedStat:null, expandedMeal:null, waterMl:0, notesOpen:false, weightKg:null, confirmRemoveKey:null,
+    today: { expandedStat:null, expandedMeal:null, waterMl:0, weightKg:null, confirmRemoveKey:null,
       dailyNote:'', noteSaved:false, meals: [], macroInfoOpen:false, dailyTag:null },
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
@@ -818,7 +818,6 @@ const App = {
     this.render();
   },
   addWater(ml){ this.state.today.waterMl = Math.max(0, this.state.today.waterMl + ml); this.render(); },
-  toggleNotes(){ this.state.today.notesOpen = !this.state.today.notesOpen; this.render(); },
   saveDailyNote(){
     const v = document.getElementById('daily-note-input')?.value ?? '';
     this.state.today.dailyNote = v;
@@ -983,7 +982,7 @@ const App = {
       this.state.dayHistory.push({ date: old, ...consumed, waterMl: t.waterMl, weightKg: t.weightKg, meals: JSON.parse(JSON.stringify(t.meals)), note: t.dailyNote, tag: t.dailyTag });
     }
     t.meals = []; t.waterMl = 0; t.weightKg = null; t.dailyNote = ''; t.dailyTag = null;
-    t.expandedMeal = null; t.expandedStat = null; t.notesOpen = false; t.confirmRemoveKey = null; t.macroInfoOpen = false;
+    t.expandedMeal = null; t.expandedStat = null; t.confirmRemoveKey = null; t.macroInfoOpen = false;
     this.state.dayLog.currentDate = real;
     this.saveLocal();
   },
@@ -2610,19 +2609,7 @@ function renderToday(){
         </div>
       </div>
 
-      ${st.meals.length > 0 ? `
-      <div class="card" style="overflow:hidden;">
-        <div class="accordion-head pad" onclick="App.toggleNotes()">
-          <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Notes &amp; accuracy</div>
-          <div class="chev ${st.notesOpen?'open':''}"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-        </div>
-        ${st.notesOpen ? `<div style="padding:0 16px 14px 16px;font-size:12.5px;color:var(--ink-2);line-height:1.5;">
-          ${stats.filter(s => s.status !== 'good').map(s => `${s.label}: ${s.detail}`).join(' ') || 'Everything logged so far is within range.'}
-        </div>` : ''}
-      </div>
-      ` : ''}
-
-      <div class="card pad" style="margin-top:14px;">
+      <div class="card pad">
         <div style="font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Today's notes</div>
         <textarea id="daily-note-input" placeholder="Anything worth remembering about today — how you felt, what to adjust next time..." style="width:100%;min-height:70px;padding:10px 11px;border-radius:10px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;resize:vertical;">${(st.dailyNote||'').replace(/</g,'&lt;')}</textarea>
         <button onclick="App.saveDailyNote()" style="margin-top:8px;padding:9px 16px;border-radius:10px;background:${st.noteSaved?'var(--good)':'var(--brand-tint)'};color:${st.noteSaved?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${st.noteSaved?'Saved ✓':'Save note'}</button>
