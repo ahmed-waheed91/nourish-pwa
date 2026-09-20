@@ -468,50 +468,6 @@ function mergeCommonFoodsIntoUsda(usdaList){
   return usdaList;
 }
 
-function parseQuantity(raw){
-  const q = (raw||'').trim().toLowerCase();
-  if (!q) return null;
-  const m = q.match(/^(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|milliliter|milliliters)?\s+(.+)$/);
-  let grams=null, count=null, name;
-  if (m){
-    const num = parseFloat(m[1]);
-    if (m[2]) grams = num; else count = num;
-    name = m[3].trim();
-  } else {
-    name = q; count = 1;
-  }
-  return { grams, count, name, nameNorm: name.replace(/e?s$/,''), unitIsMl: !!(m && m[2] && m[2][0]==='m') };
-}
-function computeFromPer100(per100, name, parsed, pieceG){
-  const { grams, count, unitIsMl } = parsed;
-  let usedGrams, basis;
-  if (grams != null){ usedGrams = grams; basis = `${grams}${unitIsMl ? 'ml' : 'g'}`; }
-  else {
-    const pg = pieceG || 100;
-    usedGrams = count * pg;
-    basis = pieceG ? `${count} × ~${pg}g` : `${count} × 100g (no standard piece size)`;
-  }
-  const scale = usedGrams/100;
-  const round1 = n => Math.round(n*scale*10)/10;
-  return {
-    notFound:false, name, grams:usedGrams, basis, per100,
-    kcal:Math.round(per100.kcal*scale), p:round1(per100.p), c:round1(per100.c), f:round1(per100.f),
-    fib:round1(per100.fib), sugar:round1(per100.sugar), sodium:Math.round(per100.sodium*scale),
-  };
-}
-function findLocalFood(name, nameNorm){
-  const usda = App.state.memory.usda;
-  const saved = usda.find(u => u.name.toLowerCase() === name)
-    || usda.find(u => u.name.toLowerCase().split(',')[0] === nameNorm)
-    || usda.find(u => u.name.toLowerCase().includes(nameNorm) || nameNorm.includes(u.name.toLowerCase().split(',')[0]));
-  if (!saved) return null;
-  return {
-    name: saved.name,
-    per100: { kcal:saved.kcalPer100, p:saved.p, c:saved.c, f:saved.f, fib:saved.fib, sugar:saved.sugar, sodium:saved.sodium },
-    pieceG: saved.pieceG || null, alreadySaved:true,
-  };
-}
-
 /* ---------- Live USDA FoodData Central lookup ---------- */
 /* API key lives only in this device's localStorage (Settings screen) — never hardcoded/committed. */
 const USDA_NUTRIENT_IDS = { p:1003, c:1005, f:1004, fib:1079, sugar:2000, sodium:1093 };
@@ -548,56 +504,63 @@ function extractUsdaPer100(food){
   per100.kcal = kcalId != null ? kcalById[kcalId] : 0;
   if (kcalId != null) found.kcal = true;
   const completeness = ['p','c','f','fib','sugar','sodium','kcal'].filter(k => found[k]).length;
-  return { per100, completeness };
+  return { per100, completeness, found };
 }
-async function fetchUsdaFood(name, apiKey){
+const USDA_TIER_LABELS = { 'Foundation':'Foundation · lab-analyzed', 'SR Legacy':'SR Legacy · standard reference', 'Survey (FNDDS)':'Survey · prepared dishes', 'Branded':'Branded products' };
+const USDA_MISSING_LABELS = { kcal:'kcal', p:'protein', c:'carbs', f:'fat', fib:'fiber', sugar:'sugar', sodium:'sodium' };
+const USDA_SEARCH_PAGE_SIZE = 10;
+function usdaEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// Lists every match (up to USDA_SEARCH_PAGE_SIZE per data tier) instead of picking one. Search
+// results already carry per-100g nutrients, so no second request per food is needed. Branded
+// products are only queried when the caller opts in — generic tiers come first and are ordered
+// so full-word matches lead within each tier.
+async function searchUsdaFoods(query, apiKey, includeBranded){
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const queryWords = name.toLowerCase().split(/\s+/).filter(Boolean);
-    // Tiers are fetched in parallel (was sequential) — now that a low-quality match in an early
-    // tier can be skipped in favor of a more complete one, we may need to inspect all 4 anyway,
-    // so doing it concurrently keeps a lookup to one round-trip instead of up to four.
-    const results = await Promise.all(USDA_DATA_TYPE_TIERS.map(async (tier, tierIdx) => {
+    const queryWords = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const tiers = includeBranded ? USDA_DATA_TYPE_TIERS : USDA_DATA_TYPE_TIERS.filter(t => t !== 'Branded');
+    const responses = await Promise.all(tiers.map(async tier => {
       try {
-        const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(name)}&pageSize=3&dataType=${encodeURIComponent(tier)}`;
+        const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(query)}&pageSize=${USDA_SEARCH_PAGE_SIZE}&dataType=${encodeURIComponent(tier)}`;
         const res = await fetch(url, { signal: controller.signal });
-        if (res.status === 429) return { tierIdx, status:'rateLimited' };
-        if (res.status === 401 || res.status === 403) return { tierIdx, status:'badKey' };
-        if (!res.ok) return { tierIdx, status:'error' };
+        if (res.status === 429) return { tier, status:'rateLimited' };
+        if (res.status === 401 || res.status === 403) return { tier, status:'badKey' };
+        if (!res.ok) return { tier, status:'error' };
         const data = await res.json();
-        const foods = data.foods || [];
-        if (!foods.length) return { tierIdx, status:'empty' };
-        const food = foods.find(f => usdaFoodMatchesQuery(f, queryWords)) || foods[0];
-        return { tierIdx, status:'ok', food };
+        return { tier, status:'ok', foods: data.foods || [] };
       } catch (e){
-        return { tierIdx, status:'error' }; // includes this tier's fetch being aborted by the shared timeout
+        return { tier, status:'error' };
       }
     }));
 
-    const candidates = results.filter(r => r.status === 'ok').sort((a,b) => a.tierIdx - b.tierIdx);
-    if (!candidates.length){
-      if (results.every(r => r.status === 'error')) return { noConnection:true };
-      if (results.some(r => r.status === 'rateLimited')) return { rateLimited:true };
-      if (results.some(r => r.status === 'badKey')) return { badKey:true };
-      return { notFound:true };
-    }
-
-    // Pick whichever tier's match has the most complete nutrient data, not just the
-    // highest-priority tier — a Foundation match missing fiber loses out to SR Legacy's
-    // complete record; ties still favor the earlier (higher-quality) tier via the sorted order.
-    let best = null, bestScore = -1, bestPer100 = null;
-    candidates.forEach(c => {
-      const { per100, completeness } = extractUsdaPer100(c.food);
-      if (completeness > bestScore){ bestScore = completeness; best = c; bestPer100 = per100; }
+    const results = [];
+    const seen = new Set();
+    responses.filter(r => r.status === 'ok').forEach(r => {
+      // Full-word matches first, then records that actually report calories (some Foundation
+      // entries are nearly empty shells) — both before the API's own relevance order.
+      const score = f => (usdaFoodMatchesQuery(f, queryWords) ? 2 : 0) + (extractUsdaPer100(f).found.kcal ? 1 : 0);
+      const ordered = r.foods.slice().sort((a,b) => score(b) - score(a));
+      ordered.forEach(food => {
+        if (seen.has(food.fdcId)) return;
+        seen.add(food.fdcId);
+        const { per100, found } = extractUsdaPer100(food);
+        const missing = Object.keys(USDA_MISSING_LABELS).filter(k => !found[k]).map(k => USDA_MISSING_LABELS[k]);
+        results.push({ fdcId:food.fdcId, name:food.description || 'Unnamed food', tier:r.tier, brand:food.brandName || food.brandOwner || '', per100, missing });
+      });
     });
-    return { notFound:false, name:best.food.description, per100:bestPer100, fdcId:best.food.fdcId };
+    if (results.length) return { results };
+    if (responses.every(r => r.status === 'error')) return { noConnection:true };
+    if (responses.some(r => r.status === 'rateLimited')) return { rateLimited:true };
+    if (responses.some(r => r.status === 'badKey')) return { badKey:true };
+    return { notFound:true };
   } catch (e){
     return { noConnection:true };
   } finally {
     clearTimeout(timer);
   }
 }
+function usdaResultSaved(r){ return App.state.memory.usda.some(x => x.fdc === 'FDC ' + r.fdcId); }
 
 function dotColor(ok){ return ok ? 'var(--good)' : 'var(--warning)'; }
 function esc(s){ return String(s); }
@@ -724,14 +687,14 @@ const App = {
     dayHistory: [],
     storageAlert: null,
     targets: defaultTargets(),
-    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', targetDate:null, lookupQuery:'', lookupResult:null, lookupLoading:false, expandedSavedId:null },
+    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', targetDate:null, expandedSavedId:null },
     memory: {
       foods: SAVED_FOODS.map(x => ({...x})),
       ingredients: INGREDIENTS.map(x => ({...x})),
       usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
     builtinFoodsSeeded: true,
-    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{}, bulkAction:null },
+    library: { activeTab:'foods', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{}, bulkAction:null, usdaQuery:'', usdaIncludeBranded:false, usdaLoading:false, usdaResults:null, usdaError:null, returnToLog:false },
     history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null, tagOtherFor:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
@@ -744,6 +707,7 @@ const App = {
   setView(v){ this.state.view = v; this.render(); },
   setScreen(s){
     if (this.state.screen === s) return;
+    if (s !== 'library' && s !== 'addfood') this.state.library.returnToLog = false;
     if (s === 'today' && !this._navigatingFromPopstate && (this._depth||0) > 0){
       // Returning to Today directly (bottom nav, a back-arrow, etc.) rather than via the
       // hardware back button still needs to unwind through any pushed history entries first —
@@ -1188,61 +1152,52 @@ const App = {
     if (label) label.style.display = searching ? 'block' : 'none';
   },
 
-  async runLookup(){
-    const raw = document.getElementById('lookup-input')?.value || '';
-    const st = this.state.addfood;
-    st.lookupQuery = raw;
-    const parsed = parseQuantity(raw);
-    if (!parsed){ st.lookupResult = null; st.lookupLoading = false; this.render(); return; }
-
-    const local = findLocalFood(parsed.name, parsed.nameNorm);
-    if (local){
-      st.lookupResult = { ...computeFromPer100(local.per100, local.name, parsed, local.pieceG), source:'local', alreadySaved:local.alreadySaved };
-      st.lookupLoading = false;
-      this.render();
-      return;
-    }
-
-    if (!this.state.usdaApiKey){
-      st.lookupResult = { missingKey:true, query:raw };
-      st.lookupLoading = false;
-      this.render();
-      return;
-    }
-
-    st.lookupLoading = true;
-    st.lookupResult = null;
+  async runUsdaSearch(){
+    const st = this.state.library;
+    const q = (document.getElementById('usda-search-input')?.value || '').trim();
+    st.usdaQuery = q;
+    if (!q){ st.usdaResults = null; st.usdaError = null; st.usdaLoading = false; this.render(); return; }
+    if (!this.state.usdaApiKey){ st.usdaResults = null; st.usdaError = 'missingKey'; st.usdaLoading = false; this.render(); return; }
+    st.usdaLoading = true; st.usdaResults = null; st.usdaError = null;
     this.render();
-    const apiRes = await fetchUsdaFood(parsed.name, this.state.usdaApiKey);
-    if (st.lookupQuery !== raw) return; // query changed while waiting on the network
-    st.lookupLoading = false;
-    if (apiRes.rateLimited){
-      st.lookupResult = { rateLimited:true, query:raw };
-    } else if (apiRes.badKey){
-      st.lookupResult = { badKey:true, query:raw };
-    } else if (apiRes.noConnection){
-      st.lookupResult = { noConnection:true, query:raw };
-    } else if (apiRes.notFound){
-      st.lookupResult = { notFound:true, query:raw };
-    } else {
-      st.lookupResult = { ...computeFromPer100(apiRes.per100, apiRes.name, parsed, null), source:'api', fdcId:apiRes.fdcId };
-    }
+    const includeBranded = st.usdaIncludeBranded;
+    const res = await searchUsdaFoods(q, this.state.usdaApiKey, includeBranded);
+    if (st.usdaQuery !== q || st.usdaIncludeBranded !== includeBranded) return; // superseded while waiting on the network
+    st.usdaLoading = false;
+    if (res.results){ st.usdaResults = res.results; st.usdaError = null; }
+    else { st.usdaResults = null; st.usdaError = res.rateLimited ? 'rateLimited' : (res.badKey ? 'badKey' : (res.noConnection ? 'noConnection' : 'notFound')); }
     this.render();
   },
-  saveLookupToMemory(){
-    const r = this.state.addfood.lookupResult;
-    if (!r || r.notFound || r.noConnection || r.rateLimited || r.badKey || r.saved || r.alreadySaved) return;
-    const already = this.state.memory.usda.some(x => x.name.toLowerCase() === r.name.toLowerCase());
-    if (!already){
-      const per = r.per100;
-      this.state.memory.usda.push({
-        id:this.genId(r.name), name:r.name, unit:'g',
-        fdc: r.source==='api' ? `FDC ${r.fdcId}` : 'USDA · common food',
-        kcal:per.kcal, kcalPer100:per.kcal, p:per.p, c:per.c, f:per.f, fib:per.fib, sugar:per.sugar, sodium:per.sodium,
-      });
-    }
-    this.state.addfood.lookupResult = { ...r, saved:true };
+  toggleUsdaBranded(){
+    const st = this.state.library;
+    const typed = (document.getElementById('usda-search-input')?.value || '').trim();
+    st.usdaIncludeBranded = !st.usdaIncludeBranded;
+    if (typed) this.runUsdaSearch();
+    else { st.usdaQuery = typed; this.render(); }
+  },
+  saveUsdaResult(i){
+    const st = this.state.library;
+    const r = st.usdaResults && st.usdaResults[i];
+    if (!r || usdaResultSaved(r)) return;
+    const per = r.per100;
+    this.state.memory.usda.push({
+      id:this.genId(r.name), name: r.brand ? `${r.name} (${r.brand})` : r.name, unit:'g', fdc:`FDC ${r.fdcId}`,
+      kcal:per.kcal, kcalPer100:per.kcal, p:per.p, c:per.c, f:per.f, fib:per.fib, sugar:per.sugar, sodium:per.sodium,
+    });
     this.render();
+  },
+  // Log screen's shortcut: lookup lives in Memory now, so jump straight to its search box and
+  // remember where we came from so one tap returns to Log food.
+  goToUsdaSearch(){
+    const lib = this.state.library;
+    lib.activeTab = 'usda'; lib.form = null; lib.composer = null; lib.returnToLog = true;
+    this.setScreen('library');
+    setTimeout(() => document.getElementById('usda-search-input')?.focus(), 60);
+  },
+  backToLogFromMemory(){
+    this.state.library.returnToLog = false;
+    this.state.addfood.activeTab = 'usda';
+    this.setScreen('addfood');
   },
 
   setLibraryTab(id){ this.state.library.activeTab = id; this.state.library.form = null; this.state.library.composer = null; this.render(); },
@@ -2821,64 +2776,12 @@ function renderAddFood(){
     </div>
   </div>`;
 
-  let quickLookup = '';
-  {
-    const r = st.lookupResult;
-    let resultHtml = '';
-    if (st.lookupLoading){
-      resultHtml = `<div style="margin-top:10px;padding:10px;background:var(--brand-tint);color:var(--brand-dark);border-radius:10px;font-size:11.5px;font-weight:600;">Searching USDA FoodData Central…</div>`;
-    } else if (r && r.missingKey){
-      resultHtml = `<div style="margin-top:10px;padding:12px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">
-        &ldquo;${r.query}&rdquo; isn't in your saved foods, and no USDA API key is set up yet, so live search can't run.
-        <button onclick="App.setScreen('settings')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--warning);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Add a USDA API key in Settings</button>
-      </div>`;
-    } else if (r && r.rateLimited){
-      resultHtml = `<div style="margin-top:10px;padding:12px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">
-        USDA FoodData Central is rate-limiting this API key — too many searches too quickly. Wait a minute and try again.
-        ${App.state.usdaApiKey==='DEMO_KEY' ? '<button onclick="App.setScreen(\'settings\')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--warning);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Get your own free API key in Settings</button>' : ''}
-      </div>`;
-    } else if (r && r.badKey){
-      resultHtml = `<div style="margin-top:10px;padding:12px;background:var(--critical-tint);color:var(--critical);border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">
-        Your USDA API key was rejected — it may be mistyped or revoked.
-        <button onclick="App.setScreen('settings')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Check API key in Settings</button>
-      </div>`;
-    } else if (r && r.noConnection){
-      resultHtml = `<div style="margin-top:10px;padding:10px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:11.5px;font-weight:600;line-height:1.4;">Couldn't find &ldquo;${r.query}&rdquo; in your saved foods, and couldn't reach the internet to search USDA FoodData Central. Check your connection and try again.</div>`;
-    } else if (r && r.notFound){
-      resultHtml = `<div style="margin-top:10px;padding:10px;background:var(--warning-tint);color:var(--warning);border-radius:10px;font-size:11.5px;font-weight:600;line-height:1.4;">Couldn't find &ldquo;${r.query}&rdquo; in your saved foods or in USDA FoodData Central. Try a different spelling or a more common name.</div>`;
-    } else if (r){
-      resultHtml = `
-        <div style="margin-top:10px;padding:12px;background:var(--brand-tint);border-radius:12px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <div style="font-size:13px;font-weight:800;color:var(--brand-dark);">${r.name} · ${r.basis}</div>
-            <div class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);">${r.kcal} kcal</div>
-          </div>
-          <div style="font-size:10px;color:var(--muted);margin-bottom:8px;">${r.source==='api' ? 'Live from USDA FoodData Central' : 'From your saved foods'}</div>
-          <div style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:6px;margin-bottom:10px;">
-            ${[['Prot',r.p+'g'],['Carb',r.c+'g'],['Fat',r.f+'g'],['Fib',r.fib+'g'],['Sug',r.sugar+'g'],['Sod',r.sodium+'mg']].map(([l,v]) => `
-              <div style="background:#fff;border-radius:8px;padding:6px 4px;text-align:center;">
-                <div class="num" style="font-size:12px;font-weight:700;">${v}</div>
-                <div style="font-size:9px;color:var(--muted);">${l}</div>
-              </div>`).join('')}
-          </div>
-          ${r.saved
-            ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);">Saved to memory ✓ — find it in the USDA list below</div>`
-            : (r.alreadySaved
-              ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);">Already in your USDA list below</div>`
-              : `<button onclick="App.saveLookupToMemory()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save to memory as USDA reference</button>`)}
-        </div>`;
-    }
-    quickLookup = `
+  const quickLookup = `
       <div id="addfood-quicklookup" class="card pad" style="margin-bottom:12px;display:${st.activeTab==='usda'?'block':'none'};">
-        <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Quick lookup — type an amount and a food</div>
-        <div style="display:flex;gap:8px;">
-          <input id="lookup-input" type="text" value="${(st.lookupQuery||'').replace(/"/g,'&quot;')}" placeholder="e.g. 1 apple, 100g grapes" onkeydown="if(event.key==='Enter')App.runLookup()" style="flex:1;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;font-family:inherit;"/>
-          <button onclick="App.runLookup()" style="padding:9px 16px;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Look up</button>
-        </div>
-        ${resultHtml}
-        <div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.4;">Checks your saved foods first, then searches USDA FoodData Central live if it's not found locally. Live search needs an internet connection.</div>
+        <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Need a food that isn't listed?</div>
+        <div style="font-size:11.5px;color:var(--muted);line-height:1.4;margin-bottom:10px;">USDA search lives in Memory. Save the food you want there, then come back here to log it.</div>
+        <button onclick="App.goToUsdaSearch()" style="width:100%;padding:10px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Search USDA in Memory &rarr;</button>
       </div>`;
-  }
 
   const backdateEntry = st.targetDate ? (App.state.dayHistory.find(h => h.date === st.targetDate) || {waterMl:0, weightKg:null}) : null;
   const backdateBanner = st.targetDate ? `
@@ -3285,6 +3188,60 @@ function renderIngredientLibraryRow(ing, st){
     <div style="font-size:11.5px;color:var(--muted);margin-top:6px;">${detailLine(ing)}</div>
   </div>`;
 }
+function renderUsdaSearchRow(r, i){
+  const saved = usdaResultSaved(r);
+  const p = r.per100;
+  const rd = n => Math.round((n||0)*10)/10;
+  return `
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--border);">
+      <div style="min-width:0;flex:1;">
+        <div style="font-size:12.5px;font-weight:700;line-height:1.3;">${usdaEsc(r.name)}</div>
+        ${r.brand ? `<div style="font-size:10.5px;color:var(--muted);">${usdaEsc(r.brand)}</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-top:3px;">${rd(p.kcal)} kcal &middot; P ${rd(p.p)}g &middot; C ${rd(p.c)}g &middot; F ${rd(p.f)}g <span style="opacity:.8;">per 100g</span></div>
+        ${r.missing.length ? `<div style="font-size:10.5px;color:var(--warning);font-weight:600;margin-top:2px;">No data for ${r.missing.join(', ')} (saved as 0)</div>` : ''}
+      </div>
+      <button ${saved ? 'disabled' : ''} onclick="App.saveUsdaResult(${i})" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${saved ? 'var(--surface)' : 'var(--brand)'};color:${saved ? 'var(--brand-dark)' : '#fff'};border:none;font-size:12px;font-weight:700;cursor:${saved ? 'default' : 'pointer'};font-family:inherit;">${saved ? 'Saved ✓' : 'Save'}</button>
+    </div>`;
+}
+function renderUsdaSearchCard(st){
+  const notice = (bg, fg, msg, btn) => `<div style="margin-top:10px;padding:12px;background:var(--${bg}-tint);color:var(--${fg});border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">${msg}${btn ? `<button onclick="App.setScreen('settings')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--${fg});color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${btn}</button>` : ''}</div>`;
+  const q = usdaEsc(st.usdaQuery);
+  let body = '';
+  if (st.usdaLoading){
+    body = `<div style="margin-top:10px;padding:10px;background:var(--brand-tint);color:var(--brand-dark);border-radius:10px;font-size:11.5px;font-weight:600;">Searching USDA FoodData Central…</div>`;
+  } else if (st.usdaError === 'missingKey'){
+    body = notice('warning','warning','No USDA API key is set up yet, so live search can&rsquo;t run.','Add a USDA API key in Settings');
+  } else if (st.usdaError === 'rateLimited'){
+    body = notice('warning','warning','USDA FoodData Central is rate-limiting this API key — too many searches too quickly. Wait a minute and try again.', App.state.usdaApiKey==='DEMO_KEY' ? 'Get your own free API key in Settings' : '');
+  } else if (st.usdaError === 'badKey'){
+    body = notice('critical','critical','Your USDA API key was rejected — it may be mistyped or revoked.','Check API key in Settings');
+  } else if (st.usdaError === 'noConnection'){
+    body = notice('warning','warning','Couldn&rsquo;t reach USDA FoodData Central. Check your connection and try again.','');
+  } else if (st.usdaError === 'notFound'){
+    body = notice('warning','warning',`No USDA results for &ldquo;${q}&rdquo;. Try a different spelling or a more common name${st.usdaIncludeBranded ? '' : ', or include branded products'}.`,'');
+  } else if (st.usdaResults){
+    const groupsHtml = USDA_DATA_TYPE_TIERS.map(tier => {
+      const rows = st.usdaResults.map((r,i) => ({r,i})).filter(x => x.r.tier === tier);
+      if (!rows.length) return '';
+      return `<div style="margin-top:12px;font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">${USDA_TIER_LABELS[tier]} &middot; ${rows.length}</div>${rows.map(({r,i}) => renderUsdaSearchRow(r,i)).join('')}`;
+    }).join('');
+    body = `${groupsHtml}<div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.4;">Showing up to ${USDA_SEARCH_PAGE_SIZE} per source &mdash; refine the search to narrow it down. Values are per 100g; weight is chosen when you log.</div>`;
+  }
+  return `
+    <div class="card pad" style="margin-bottom:12px;">
+      <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Search USDA FoodData Central</div>
+      <div style="display:flex;gap:8px;">
+        <input id="usda-search-input" type="text" value="${q}" placeholder="e.g. chicken, apple, basmati rice" onkeydown="if(event.key==='Enter')App.runUsdaSearch()" style="flex:1;min-width:0;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;font-family:inherit;"/>
+        <button onclick="App.runUsdaSearch()" style="padding:9px 16px;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Search</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--ink-2);cursor:pointer;">
+        <input id="usda-branded-toggle" type="checkbox" ${st.usdaIncludeBranded ? 'checked' : ''} onchange="App.toggleUsdaBranded()" style="width:16px;height:16px;accent-color:var(--brand);"/>
+        Include branded products
+      </label>
+      ${body}
+      <div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.4;">Live search needs an internet connection. Save the foods you want, then log them from the Log food screen.</div>
+    </div>`;
+}
 function renderUsdaLibraryRow(u, st){
   if (st.confirmDeleteKey === 'usda:'+u.id) return `<div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}">${memoryConfirmCard('usda', u)}</div>`;
   if (st.confirmArchiveKey === 'usda:'+u.id) return `<div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}">${memoryConfirmArchiveCard('usda', u)}</div>`;
@@ -3325,6 +3282,7 @@ function renderLibrary(){
     extras = `${formHere('ingredients')}${st.form && st.form.kind==='ingredients' ? '' : addMemoryButton('ingredients','Add an ingredient')}`;
   } else if (st.activeTab === 'usda'){
     extras = `
+      ${st.form ? '' : renderUsdaSearchCard(st)}
       <div style="background:var(--usda-tint);border-radius:11px;padding:10px 12px;margin-bottom:10px;font-size:11.5px;color:var(--brand-dark);line-height:1.4;">
         Used for unlabeled/generic foods — apply these exact figures consistently.
       </div>
@@ -3381,6 +3339,7 @@ function renderLibrary(){
       </div>
     </div>
     <div class="scroll-area" style="padding:14px 18px 90px 18px;">
+      ${st.returnToLog ? `<button onclick="App.backToLogFromMemory()" style="display:block;width:100%;margin-bottom:10px;padding:10px 0;border-radius:11px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">&larr; Back to Log food</button>` : ''}
       ${st.shareStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.shareStatus}</div>` : ''}
       <div id="lib-extras">${extras}</div>
       ${groups}
