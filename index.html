@@ -749,7 +749,7 @@ const App = {
   // to Today. hasOpenOverlay/closeOpenOverlay list every such sub-panel; add new ones here.
   hasOpenOverlay(){
     const screen = this.state.screen;
-    if (screen === 'today') return !!this.state.today.macroInfoOpen;
+    if (screen === 'today') return !!(this.state.today.macroInfoOpen || this.state.today.expandedStat);
     if (screen === 'library'){
       const st = this.state.library;
       return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode || st.bulkAction);
@@ -763,6 +763,7 @@ const App = {
   closeOpenOverlay(){
     const screen = this.state.screen;
     if (screen === 'today' && this.state.today.macroInfoOpen) return this.closeMacroInfo();
+    if (screen === 'today' && this.state.today.expandedStat) return this.closeStatDetail();
     if (screen === 'library'){
       const st = this.state.library;
       if (st.form) return this.closeForm();
@@ -796,7 +797,8 @@ const App = {
     this._depth = desired;
   },
 
-  toggleStat(id){ const t=this.state.today; t.expandedStat = t.expandedStat===id ? null : id; this.render(); },
+  openStatDetail(id){ this.state.today.expandedStat = id; this.render(); },
+  closeStatDetail(){ this.state.today.expandedStat = null; this.render(); },
   openMacroInfo(){ this.state.today.macroInfoOpen = true; this.render(); },
   closeMacroInfo(){ this.state.today.macroInfoOpen = false; this.render(); },
   toggleMeal(id){ const t=this.state.today; t.expandedMeal = t.expandedMeal===id ? null : id; this.render(); },
@@ -2401,7 +2403,7 @@ function bottomNav(active){
 
 /* ---------- Today ---------- */
 const TODAY_LABELS = { protein:'Protein', carbs:'Carbs', fat:'Fat', fiber:'Fiber', sugar:'Sugar', sodium:'Sodium' };
-function buildTodayStats(consumed, expandedStat){
+function buildTodayStats(consumed){
   return Object.keys(TODAY_LABELS).map(id => {
     const key = id === 'protein' ? 'protein' : (id === 'carbs' ? 'carbs' : (id === 'fat' ? 'fat' : (id === 'fiber' ? 'fiber' : (id === 'sugar' ? 'sugar' : 'sodium'))));
     const value = consumed[key];
@@ -2410,7 +2412,6 @@ function buildTodayStats(consumed, expandedStat){
     return {
       id, label:TODAY_LABELS[id], value:value.toLocaleString(), unit:info.unit, target:info.label,
       status, statusLabel:statusLabelFor(id, value), detail:detailFor(id, value),
-      isOpen: expandedStat === id,
     };
   });
 }
@@ -2442,7 +2443,7 @@ function renderToday(){
     : (calStatus==='warning'
       ? `${Math.round(calTarget.low-calConsumed).toLocaleString()} under`
       : `${Math.round(calTarget.high-calConsumed).toLocaleString()} left`);
-  const stats = buildTodayStats(consumed, st.expandedStat);
+  const stats = buildTodayStats(consumed);
 
   const weightTarget = targetInfo('weight');
   const hasWeight = typeof st.weightKg === 'number';
@@ -2511,16 +2512,14 @@ function renderToday(){
 
       <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:10px;margin-bottom:16px;">
         ${stats.map(sItem => {
-          const open = sItem.isOpen;
           return `
-          <div class="card pad-sm" style="cursor:pointer;" onclick="App.toggleStat('${sItem.id}')">
+          <div class="card pad-sm" style="cursor:pointer;" onclick="App.openStatDetail('${sItem.id}')">
             <div style="display:flex;align-items:center;justify-content:space-between;">
               <div style="font-size:12px;color:var(--ink-2);font-weight:600;">${sItem.label}</div>
               <div class="pill pill-${sItem.status==='good'?'good':(sItem.status==='warning'?'warn':'crit')}">${sItem.statusLabel}</div>
             </div>
             <div class="num disp" style="font-size:20px;font-weight:800;margin-top:4px;">${sItem.value}<span style="font-size:12px;font-weight:600;color:var(--ink-2);"> ${sItem.unit}</span></div>
             <div style="font-size:11px;color:var(--muted);margin-top:2px;">${sItem.target}</div>
-            ${open ? `<div style="font-size:11.5px;color:var(--ink-2);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);line-height:1.4;">${sItem.detail}</div>` : ''}
           </div>`;
         }).join('')}
       </div>
@@ -2638,6 +2637,81 @@ function renderToday(){
     ${bottomNav('today')}
 
     ${st.macroInfoOpen ? renderMacroInfoModal(consumed, macroCals, macro) : ''}
+    ${st.expandedStat ? renderStatDetailModal(st.expandedStat, consumed) : ''}
+  `;
+}
+// Tapping a Today stat tile opens this popup: the day's total against target, then where it came from —
+// each meal's amount and share, with that meal's logged items listed underneath (largest first).
+// Net carbs = carbs minus fiber minus sugar (floored at 0 so odd label data can't go negative).
+function netCarbs(carbs, fiber, sugar){ return Math.max(0, carbs - fiber - sugar); }
+const STAT_ITEM_FIELD = { protein:'p', carbs:'c', fat:'f', fiber:'fib', sugar:'sugar', sodium:'sodium' };
+const STAT_BAR_COLOR = { protein:'var(--protein)', carbs:'var(--carbs)', fat:'var(--fat)' };
+function renderStatDetailModal(id, consumed){
+  const field = STAT_ITEM_FIELD[id];
+  const label = TODAY_LABELS[id];
+  const info = targetInfo(id);
+  const value = consumed[id];
+  const status = statusFor(id, value);
+  const pillCls = status==='good' ? 'good' : (status==='warning' ? 'warn' : 'crit');
+  const fmt = n => (id === 'sodium' ? Math.round(n) : Math.round(n*10)/10).toLocaleString();
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const amt = it => it[field] || 0;
+  const barColor = STAT_BAR_COLOR[id] || 'var(--brand)';
+  const meals = sortedMealsForDisplay(App.state.today.meals).map(meal => ({
+    name: meal.name,
+    total: meal.items.reduce((a,it) => a + amt(it), 0),
+    items: meal.items.filter(it => amt(it) > 0).sort((a,b) => amt(b) - amt(a)),
+    net: netCarbs(meal.items.reduce((a,it) => a + (it.c||0), 0), meal.items.reduce((a,it) => a + (it.fib||0), 0), meal.items.reduce((a,it) => a + (it.sugar||0), 0)),
+  }));
+  const contributing = meals.filter(m => m.total > 0);
+  const empty = meals.filter(m => m.total <= 0).map(m => m.name);
+  const sum = contributing.reduce((a,m) => a + m.total, 0) || 1;
+  const netBlock = id === 'carbs' ? `
+    <div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--surface);">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;">
+        <div style="font-size:12px;font-weight:700;">Net carbs</div>
+        <div class="num" style="font-size:14px;font-weight:800;">${fmt(netCarbs(consumed.carbs, consumed.fiber, consumed.sugar))} g</div>
+      </div>
+      <div class="num" style="font-size:11px;color:var(--ink-2);margin-top:3px;">${fmt(consumed.carbs)} carbs &minus; ${fmt(consumed.fiber)} fiber &minus; ${fmt(consumed.sugar)} sugar</div>
+    </div>` : '';
+  return `
+    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
+      <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:340px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="font-size:14.5px;font-weight:800;">${label} today</div>
+            <div class="pill pill-${pillCls}">${statusLabelFor(id, value)}</div>
+          </div>
+          <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="num disp" style="font-size:22px;font-weight:800;">${fmt(value)}<span style="font-size:12px;font-weight:600;color:var(--ink-2);"> ${info.unit}</span></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">${info.label}</div>
+        <div style="font-size:12px;color:var(--ink-2);margin-top:6px;line-height:1.4;">${detailFor(id, value)}</div>
+        ${netBlock}
+        <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--border);">Where it came from</div>
+        ${contributing.length === 0 ? `<div style="font-size:12px;color:var(--muted);line-height:1.4;">${App.state.today.meals.length === 0 ? 'Nothing logged today yet.' : 'None of today&rsquo;s logged items has any ' + label.toLowerCase() + '.'}</div>` : contributing.map(m => `
+          <div style="margin-bottom:12px;">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;">
+              <div style="font-size:13px;font-weight:700;">${esc(m.name)}</div>
+              <div class="num" style="font-size:12.5px;font-weight:700;white-space:nowrap;">${fmt(m.total)} ${info.unit} <span style="color:var(--muted);font-weight:600;">· ${Math.round(m.total/sum*100)}%</span></div>
+            </div>
+            <div style="height:6px;border-radius:4px;background:var(--border);margin-top:5px;overflow:hidden;">
+              <div style="height:100%;width:${Math.round(m.total/sum*100)}%;border-radius:4px;background:${barColor};"></div>
+            </div>
+            ${id === 'carbs' ? `<div class="num" style="font-size:11px;color:var(--ink-2);margin-top:4px;">Net carbs <strong>${fmt(m.net)} g</strong></div>` : ''}
+            <div style="margin-top:4px;">
+              ${m.items.map(it => `
+                <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;color:var(--ink-2);">
+                  <div style="min-width:0;">${esc(it.name)}</div>
+                  <div class="num" style="white-space:nowrap;">${fmt(amt(it))} ${info.unit}</div>
+                </div>`).join('')}
+            </div>
+          </div>`).join('')}
+        ${contributing.length > 0 && empty.length > 0 ? `<div style="font-size:11px;color:var(--muted);line-height:1.4;">No ${label.toLowerCase()} from: ${empty.map(esc).join(', ')}.</div>` : ''}
+      </div>
+    </div>
   `;
 }
 function renderMacroInfoModal(consumed, macroCals, macro){
