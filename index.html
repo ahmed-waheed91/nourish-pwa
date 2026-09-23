@@ -3806,6 +3806,8 @@ const KCAL_PER_KG = 7700;
 const WEIGHT_SMOOTHING_ALPHA = 0.1; // trend-weight smoothing factor for a same-day-to-day weigh-in
 const INTAKE_HALF_LIFE_DAYS = 10;   // a day this many days older counts half as much toward the intake average
 const INTAKE_OUTLIER_Z = 2;         // logged days this many std-devs from your typical intake are excluded
+const WINDOW_MIN_DAYS = 14, WINDOW_MAX_DAYS = 56, WINDOW_STEP_DAYS = 7; // lookback window tried, shortest first
+const TREND_FIT_R2_TARGET = 0.5;    // below this, the raw weigh-ins look too scattered — widen the window
 const MAINT_ADJUSTMENTS = [[-500,'−500'],[-300,'−300'],[0,'Maintain'],[250,'+250']];
 const roundTo10 = n => Math.round(n/10)*10;
 function latestWeightKg(){
@@ -3844,53 +3846,112 @@ function trendWeightSeries(weighIns, dayNum){
     return trend;
   });
 }
-// Maintenance = a recency-weighted average of logged intake minus the energy implied by the
-// (smoothed) weight trend. Only completed days are used, a day only counts as "logged" if it has
-// a plausible amount of food, and a day whose intake is way outside your typical range (a blowout
-// or a barely-eaten sick day) is excluded from the average so it doesn't skew it.
-function measuredMaintenance(){
-  const NEED_WEIGH_INS = 4, NEED_SPAN = 10, NEED_LOGGED = 10, MIN_LOGGED_KCAL = 500;
-  const past = App.state.dayHistory.slice().sort((a,b) => a.date < b.date ? -1 : 1);
-  const empty = { ready:false, weighIns:0, spanDays:0, loggedDays:0, need:{ weighIns:NEED_WEIGH_INS, span:NEED_SPAN, logged:NEED_LOGGED } };
-  if (!past.length) return empty;
-  const cutoff = dateFromISO(past[past.length-1].date);
-  cutoff.setDate(cutoff.getDate() - 27);
-  const dayNum = d => Math.round((dateFromISO(d.date) - cutoff)/86400000);
-  const win = past.filter(d => dayNum(d) >= 0);
+// One attempt at the whole calculation using a lookback window of a given length, ending at the
+// most recent day of history. Returns { eligible:false, ... } if there isn't enough data in that
+// window yet. `dayNum` and `trendByDate` come from the caller so every window reads from the same
+// single full-history smoothing pass instead of re-smoothing from scratch each time.
+function attemptMaintenanceWindow(past, trendByDate, dayNum, windowDays, gates){
+  const { NEED_WEIGH_INS, NEED_SPAN, NEED_LOGGED, MIN_LOGGED_KCAL } = gates;
+  const win = past.filter(d => dayNum(d) >= -(windowDays - 1));
   const weigh = win.filter(d => typeof d.weightKg === 'number');
-  if (weigh.length < 2) return { ...empty, weighIns:weigh.length };
+  if (weigh.length < 2) return { eligible:false, weighIns:weigh.length, spanDays:0, loggedDays:0 };
   const first = dayNum(weigh[0]), last = dayNum(weigh[weigh.length-1]);
   const spanDays = last - first + 1;
   const logged = win.filter(d => { const n = dayNum(d); return n >= first && n <= last && d.calories >= MIN_LOGGED_KCAL; });
-  const base = { ...empty, weighIns:weigh.length, spanDays, loggedDays:logged.length };
-  if (weigh.length < NEED_WEIGH_INS || spanDays < NEED_SPAN || logged.length < NEED_LOGGED || logged.length < spanDays*0.7) return base;
+  const base = { weighIns:weigh.length, spanDays, loggedDays:logged.length };
+  if (weigh.length < NEED_WEIGH_INS || spanDays < NEED_SPAN || logged.length < NEED_LOGGED || logged.length < spanDays*0.7){
+    return { eligible:false, ...base };
+  }
 
-  // Smooth across the full history (not just this window) so a bad weigh-in right at the window's
-  // edge is cushioned by everything logged before it, instead of starting a fresh, unsmoothed trend.
-  const allWeigh = past.filter(d => typeof d.weightKg === 'number');
-  const fullTrend = trendWeightSeries(allWeigh, dayNum);
-  const trendByDate = new Map(allWeigh.map((d,i) => [d.date, fullTrend[i]]));
-  const xs = weigh.map(dayNum), ys = weigh.map(d => trendByDate.get(d.date));
-  const xm = xs.reduce((a,v)=>a+v,0)/xs.length, ym = ys.reduce((a,v)=>a+v,0)/ys.length;
+  const xs = weigh.map(dayNum);
+  const ysTrend = weigh.map(d => trendByDate.get(d.date));
+  const ysRaw = weigh.map(d => d.weightKg);
+  const n = xs.length;
+  const xm = xs.reduce((a,v)=>a+v,0)/n;
   const sxx = xs.reduce((a,x)=>a+(x-xm)*(x-xm),0);
-  if (!sxx) return base;
-  const slope = xs.reduce((a,x,i)=>a+(x-xm)*(ys[i]-ym),0)/sxx; // kg per day
+  if (!sxx) return { eligible:false, ...base };
+  const fitLine = ys => {
+    const ym = ys.reduce((a,v)=>a+v,0)/n;
+    const slope = xs.reduce((a,x,i)=>a+(x-xm)*(ys[i]-ym),0)/sxx;
+    return { slope, intercept: ym - slope*xm, ym };
+  };
+  // The slope actually used comes from the smoothed trend; a second fit against the *raw*
+  // weigh-ins measures how scattered your real readings are (r2 = 1 is a perfect line, 0 is pure
+  // noise) — that decides whether this window's data is clean enough or a longer one is needed.
+  const slope = fitLine(ysTrend).slope; // kg/day
+  const rawFit = fitLine(ysRaw);
+  const ssTot = ysRaw.reduce((a,y)=>a+(y-rawFit.ym)*(y-rawFit.ym),0);
+  const ssRes = ysRaw.reduce((a,y,i)=>{ const err = y-(rawFit.slope*xs[i]+rawFit.intercept); return a+err*err; },0);
+  const r2 = ssTot > 0 ? Math.max(0, 1 - ssRes/ssTot) : 1;
 
+  // Outlier-trimmed, recency-weighted intake average.
   const kcals = logged.map(d => d.calories);
   const kcalMean = kcals.reduce((a,v)=>a+v,0)/kcals.length;
   const kcalStd = Math.sqrt(kcals.reduce((a,v)=>a+(v-kcalMean)*(v-kcalMean),0)/kcals.length);
   const trimmed = kcalStd > 0 ? logged.filter(d => Math.abs(d.calories - kcalMean) <= INTAKE_OUTLIER_Z*kcalStd) : logged;
   const intakeDays = trimmed.length >= Math.max(5, Math.ceil(logged.length*0.5)) ? trimmed : logged;
-
   let wSum = 0, wKcalSum = 0;
   intakeDays.forEach(d => {
     const w = Math.pow(0.5, (last - dayNum(d))/INTAKE_HALF_LIFE_DAYS);
     wSum += w; wKcalSum += w*d.calories;
   });
   const avgIntake = wKcalSum/wSum;
+  const intakeStd = Math.sqrt(intakeDays.reduce((a,d)=>a+(d.calories-avgIntake)*(d.calories-avgIntake),0)/intakeDays.length);
 
   const tdee = roundTo10(avgIntake - slope*KCAL_PER_KG);
-  return { ...base, ready:true, tdee, avgIntake:Math.round(avgIntake), slopePerWeek:Math.round(slope*7*100)/100, plausible: tdee >= 1000 && tdee <= 5000 };
+
+  // How much to trust this number: the raw-fit's leftover scatter turns into a standard error on
+  // the slope, converted to kcal/day the same way the slope itself is; combined with the intake
+  // average's own standard error into a plain +/- range around tdee (floored and capped so it's
+  // never a useless sliver or an unreasonably wide band).
+  const slopeSE = Math.sqrt(ssRes/(n-2)) / Math.sqrt(sxx);
+  const slopeMarginKcal = slopeSE * KCAL_PER_KG;
+  const intakeMarginKcal = intakeStd / Math.sqrt(intakeDays.length);
+  const margin = Math.min(400, Math.max(50, roundTo10(Math.sqrt(slopeMarginKcal*slopeMarginKcal + intakeMarginKcal*intakeMarginKcal))));
+
+  return {
+    eligible:true, ...base, windowDays, r2,
+    tdee, avgIntake:Math.round(avgIntake), slopePerWeek:Math.round(slope*7*100)/100,
+    plausible: tdee >= 1000 && tdee <= 5000,
+    rangeLow: Math.max(800, tdee - margin), rangeHigh: tdee + margin,
+  };
+}
+// Maintenance = a recency-weighted average of logged intake minus the energy implied by the
+// (smoothed) weight trend. Only completed days are used, a day only counts as "logged" if it has
+// a plausible amount of food, and a day whose intake is way outside your typical range (a blowout
+// or a barely-eaten sick day) is excluded from the average so it doesn't skew it. The lookback
+// window itself adapts: the shortest window that both has enough data and whose raw weigh-ins
+// track a reasonably clean line is used (most reactive); noisier data automatically pulls in a
+// longer window instead, up to a cap, to average the noise out.
+function measuredMaintenance(){
+  const gates = { NEED_WEIGH_INS:4, NEED_SPAN:10, NEED_LOGGED:10, MIN_LOGGED_KCAL:500 };
+  const empty = { ready:false, weighIns:0, spanDays:0, loggedDays:0, need:{ weighIns:gates.NEED_WEIGH_INS, span:gates.NEED_SPAN, logged:gates.NEED_LOGGED } };
+  const past = App.state.dayHistory.slice().sort((a,b) => a.date < b.date ? -1 : 1);
+  if (!past.length) return empty;
+
+  const latestDate = dateFromISO(past[past.length-1].date);
+  const dayNum = d => Math.round((dateFromISO(d.date) - latestDate)/86400000); // 0 = most recent day, negative = earlier
+  const allWeigh = past.filter(d => typeof d.weightKg === 'number');
+  if (allWeigh.length < 2) return { ...empty, weighIns:allWeigh.length };
+
+  // Smoothed trend computed once across the *entire* history — every window below just reads a
+  // slice of it, so widening or narrowing the window never re-seeds the smoothing from scratch.
+  const fullTrend = trendWeightSeries(allWeigh, dayNum);
+  const trendByDate = new Map(allWeigh.map((d,i) => [d.date, fullTrend[i]]));
+
+  let best = null, foundEligible = false;
+  for (let windowDays = WINDOW_MIN_DAYS; windowDays <= WINDOW_MAX_DAYS; windowDays += WINDOW_STEP_DAYS){
+    const attempt = attemptMaintenanceWindow(past, trendByDate, dayNum, windowDays, gates);
+    if (attempt.eligible){
+      best = attempt; foundEligible = true;
+      if (attempt.r2 >= TREND_FIT_R2_TARGET) break;
+    } else if (!foundEligible){
+      best = attempt;
+    }
+  }
+  if (!best.eligible) return { ...empty, weighIns:best.weighIns, spanDays:best.spanDays, loggedDays:best.loggedDays };
+  const { eligible, ...rest } = best;
+  return { ...empty, ready:true, ...rest };
 }
 function bestMaintenance(){
   const m = measuredMaintenance();
@@ -3908,7 +3969,9 @@ function renderMaintenanceCard(){
   const f = formulaMaintenance(), m = measuredMaintenance(), best = bestMaintenance();
   const fmt = n => n.toLocaleString();
   const sign = n => (n > 0 ? '+' : (n < 0 ? '−' : '')) + Math.abs(n);
-  const headline = best ? `~${fmt(best.value)} kcal/day` : 'Not set up yet';
+  const headline = best
+    ? (best.source === 'measured' ? `${fmt(m.rangeLow)}–${fmt(m.rangeHigh)} kcal/day` : `~${fmt(best.value)} kcal/day`)
+    : 'Not set up yet';
   const sub = best
     ? (best.source === 'measured' ? `Measured from your last ${m.spanDays} days` : 'Formula estimate — a measured number appears after a few weeks of logging')
     : 'Add your profile in Settings, or log meals and weights for a few weeks';
@@ -3931,8 +3994,8 @@ function renderMaintenanceCard(){
   let measuredRow;
   if (m.ready){
     const trend = m.slopePerWeek === 0 ? 'holding steady' : `${sign(m.slopePerWeek)} kg/week`;
-    measuredRow = row('Measured from your data', `~${fmt(m.tdee)} kcal`,
-      `Eating about ${fmt(m.avgIntake)} kcal/day with weight ${trend} over ${m.spanDays} days (${m.weighIns} weigh-ins, ${m.loggedDays} logged days).` +
+    measuredRow = row('Measured from your data', `${fmt(m.rangeLow)}–${fmt(m.rangeHigh)} kcal`,
+      `Eating about ${fmt(m.avgIntake)} kcal/day with weight ${trend} over ${m.spanDays} days (${m.weighIns} weigh-ins, ${m.loggedDays} logged days). Range reflects how consistent your logging and weigh-ins have been.` +
       (m.plausible ? '' : ` <span style="color:var(--warning);font-weight:700;">This looks unrealistic — check that your meals and weights are logged accurately. It isn't used for target suggestions.</span>`));
   } else {
     measuredRow = row('Measured from your data', '—', `Needs at least ${m.need.weighIns} weigh-ins across ${m.need.span}+ days, with meals logged on most of them. So far: ${m.weighIns} weigh-in${m.weighIns===1?'':'s'}${m.spanDays ? ` over ${m.spanDays} days` : ''}, ${m.loggedDays} logged day${m.loggedDays===1?'':'s'}.`);
