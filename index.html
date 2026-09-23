@@ -697,7 +697,7 @@ const App = {
     dayHistory: [],
     storageAlert: null,
     targets: defaultTargets(),
-    addfood: { activeTab:'saved', selected:{}, targetMeal:'Snack', targetDate:null, expandedSavedId:null },
+    addfood: { activeTab:'saved', selected:{}, targetMeal:null, targetDate:null, expandedSavedId:null },
     memory: {
       foods: SAVED_FOODS.map(x => ({...x})),
       ingredients: INGREDIENTS.map(x => ({...x})),
@@ -912,6 +912,12 @@ const App = {
     const bottomBtn = document.getElementById('addfood-bottom-btn');
     if (!bottomBtn) return false;
     const addCount = Object.values(st.selected).filter(Boolean).length;
+    if (!st.targetMeal){
+      bottomBtn.textContent = 'Select a meal above to continue';
+      bottomBtn.disabled = true;
+      bottomBtn.style.opacity = '0.5';
+      return true;
+    }
     bottomBtn.textContent = st.activeTab === 'quick'
       ? `Log to ${st.targetMeal} · not saved to memory`
       : `Add to ${st.targetMeal} · ${addCount>0 ? addCount+' item'+(addCount>1?'s':'') : 'select items'}`;
@@ -967,7 +973,10 @@ const App = {
     });
     this.syncAddFoodBottomButton();
     document.querySelectorAll('[id^="addbtn-foods-"], [id^="addbtn-ingredients-"], [id^="addbtn-usda-"]').forEach(btn => {
-      if (!btn.textContent.includes('Added')) btn.textContent = '+ Add to ' + st.targetMeal;
+      if (btn.textContent.includes('Added')) return;
+      btn.textContent = st.targetMeal ? '+ Add to ' + st.targetMeal : '+ Select a meal';
+      btn.disabled = !st.targetMeal;
+      btn.style.opacity = st.targetMeal ? '1' : '0.5';
     });
     return true;
   },
@@ -1028,12 +1037,14 @@ const App = {
   },
   openAddFood(){
     this.state.addfood.targetDate = null;
+    this.state.addfood.targetMeal = null;
     this.setScreen('addfood');
   },
   startBackdateLog(date){
     this.state.addfood.targetDate = date;
     this.state.addfood.selected = {};
     this.state.addfood.activeTab = 'saved';
+    this.state.addfood.targetMeal = null;
     this.setScreen('addfood');
   },
   exitAddFood(){
@@ -1061,6 +1072,7 @@ const App = {
   },
   confirmAddSelectedFoods(){
     const st = this.state.addfood;
+    if (!st.targetMeal) return;
     const ids = Object.keys(st.selected).filter(id => st.selected[id]);
     if (!ids.length) return;
     const meal = this.getOrCreateMeal(st.targetMeal);
@@ -1089,6 +1101,7 @@ const App = {
     const val = id => (document.getElementById(id)?.value ?? '').trim();
     const num = id => parseFloat(document.getElementById(id)?.value) || 0;
     const st = this.state.addfood;
+    if (!st.targetMeal) return;
     const meal = this.getOrCreateMeal(st.targetMeal);
     meal.items.push({
       name: val('quickadd-name') || 'Quick add',
@@ -1101,6 +1114,7 @@ const App = {
     if (!st.targetDate) this.setScreen('today');
   },
   addScaledItemToMeal(kind, id, inputEl){
+    if (!this.state.addfood.targetMeal) return;
     const list = kind === 'ingredients' ? this.state.memory.ingredients : this.state.memory.usda;
     const item = list.find(x => x.id === id);
     if (!item) return;
@@ -1499,6 +1513,7 @@ const App = {
     this.scaleComposedRecipe(foodId, pct);
   },
   addComposedFoodToMeal(foodId){
+    if (!this.state.addfood.targetMeal) return;
     const food = this.state.memory.foods.find(x => x.id === foodId);
     if (!food || !Array.isArray(food.components)) return;
     const meal = this.getOrCreateMeal(this.state.addfood.targetMeal);
@@ -2796,7 +2811,7 @@ function renderSavedFoodRow(f, st){
           }).join('')}
           <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px;">
             <div style="font-size:12.5px;font-weight:700;">Total: <span id="cf-total-${f.id}">${f.kcal}</span> kcal</div>
-            <button id="addbtn-foods-${f.id}" onclick="App.addComposedFoodToMeal('${f.id}')" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===f.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+            <button id="addbtn-foods-${f.id}" onclick="App.addComposedFoodToMeal('${f.id}')" ${(!st.targetMeal && st.flashId!==f.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal && st.flashId!==f.id)?'0.5':'1'};">${st.flashId===f.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
           </div>
         </div>
       ` : ''}
@@ -2851,7 +2866,7 @@ function renderIngredientAddRow(ing, st){
     <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
       <input id="w-ingredients-${ing.id}" type="number" value="100" oninput="App.scaleRow('${ing.id}', ${ing.kcalPer100}, this)"/>
       <div style="font-size:12.5px;color:var(--muted);flex:1;">${ing.unit} used</div>
-      <button id="addbtn-ingredients-${ing.id}" onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===ing.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+      <button id="addbtn-ingredients-${ing.id}" onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" ${(!st.targetMeal && st.flashId!==ing.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal && st.flashId!==ing.id)?'0.5':'1'};">${st.flashId===ing.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
     </div>
   </div>`;
 }
@@ -2870,7 +2885,7 @@ function renderUsdaAddRow(u, st){
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
       <input id="w-usda-${u.id}" type="number" value="100" oninput="App.scaleRow('${u.id}', ${u.kcalPer100}, this)"/>
       <div style="font-size:12.5px;color:var(--muted);flex:1;">g used</div>
-      <button id="addbtn-usda-${u.id}" onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${st.flashId===u.id?'Added ✓':'+ Add to '+st.targetMeal}</button>
+      <button id="addbtn-usda-${u.id}" onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" ${(!st.targetMeal && st.flashId!==u.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal && st.flashId!==u.id)?'0.5':'1'};">${st.flashId===u.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
     </div>
   </div>`;
 }
@@ -2954,12 +2969,12 @@ function renderAddFood(){
         ${mealDefs.map(m => `<button class="chip ${st.targetMeal===m?'active':''}" data-meal="${m}" onclick="App.setTargetMeal('${m}')">${m}</button>`).join('')}
       </div>
       ${st.activeTab==='quick' ? `
-      <button id="addfood-bottom-btn" onclick="App.quickAddLog()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
-        Log to ${st.targetMeal} · not saved to memory
+      <button id="addfood-bottom-btn" onclick="App.quickAddLog()" ${!st.targetMeal?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${!st.targetMeal?'0.5':'1'};">
+        ${st.targetMeal ? `Log to ${st.targetMeal} · not saved to memory` : 'Select a meal above to continue'}
       </button>
       ` : `
-      <button id="addfood-bottom-btn" onclick="App.confirmAddSelectedFoods()" ${addCount===0?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${addCount===0?'0.5':'1'};">
-        Add to ${st.targetMeal} · ${addCount>0 ? addCount+' item'+(addCount>1?'s':'') : 'select items'}
+      <button id="addfood-bottom-btn" onclick="App.confirmAddSelectedFoods()" ${(!st.targetMeal || addCount===0)?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal || addCount===0)?'0.5':'1'};">
+        ${st.targetMeal ? `Add to ${st.targetMeal} · ${addCount>0 ? addCount+' item'+(addCount>1?'s':'') : 'select items'}` : 'Select a meal above to continue'}
       </button>
       `}
     </div>
