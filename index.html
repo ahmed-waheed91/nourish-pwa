@@ -713,7 +713,7 @@ const App = {
     settingsStatus: null,
     usdaApiKey: '', usdaKeyStatus: null,
     profile: { age:null, sex:null, heightCm:null, activity:'light' },
-    maint: { open:false, adj:-300, confirmTarget:false, status:null, profileStatus:null, correctionOffset:0 },
+    maint: { open:false, adj:-300, confirmTarget:false, status:null, profileStatus:null, correctionOffset:0, tipsOpen:false },
   },
 
   setView(v){ this.state.view = v; this.render(); },
@@ -754,7 +754,7 @@ const App = {
       const st = this.state.library;
       return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode || st.bulkAction);
     }
-    if (screen === 'trends') return !!this.state.maint.confirmTarget;
+    if (screen === 'trends') return !!(this.state.maint.confirmTarget || this.state.maint.tipsOpen);
     if (screen === 'history') return !!this.state.history.confirmDeleteDate;
     if (screen === 'exportScreen') return !!(this.state.memoryImport || this.state.exportScreen.recentOpen);
     if (screen === 'addfood') return !!this.state.addfood.targetDate;
@@ -774,6 +774,7 @@ const App = {
       if (st.bulkAction) return this.cancelBulkAction();
       if (st.selectMode) return this.cancelLibrarySelect();
     }
+    if (screen === 'trends' && this.state.maint.tipsOpen) return this.closeMaintenanceTips();
     if (screen === 'trends' && this.state.maint.confirmTarget) return this.cancelMaintTarget();
     if (screen === 'history' && this.state.history.confirmDeleteDate) return this.cancelDeleteDay();
     if (screen === 'exportScreen' && this.state.memoryImport) return this.cancelMemoryImport();
@@ -1681,6 +1682,8 @@ const App = {
     setTimeout(() => { this.state.maint.profileStatus = null; this.render(); }, 2200);
   },
   toggleMaint(){ const mt = this.state.maint; mt.open = !mt.open; mt.confirmTarget = false; this.render(); },
+  openMaintenanceTips(){ this.state.maint.tipsOpen = true; this.render(); },
+  closeMaintenanceTips(){ this.state.maint.tipsOpen = false; this.render(); },
   setMaintAdj(v){ const mt = this.state.maint; mt.adj = v; mt.confirmTarget = false; this.render(); },
   requestMaintTarget(){ this.state.maint.confirmTarget = true; this.render(); },
   cancelMaintTarget(){ this.state.maint.confirmTarget = false; this.render(); },
@@ -4068,17 +4071,53 @@ function renderMaintenanceCard(){
 
   return `
     <div class="card pad" style="margin-bottom:14px;">
-      <button onclick="App.toggleMaint()" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;background:none;border:none;padding:0;cursor:pointer;text-align:left;font-family:inherit;color:inherit;">
+      <div onclick="App.toggleMaint()" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;cursor:pointer;">
         <div style="min-width:0;">
-          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Maintenance calories</div>
+          <div style="display:flex;align-items:center;gap:5px;">
+            <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Maintenance calories</div>
+            <button onclick="event.stopPropagation(); App.openMaintenanceTips()" title="Tips for a more accurate estimate" style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;flex-shrink:0;border-radius:50%;border:1.5px solid var(--muted);background:none;color:var(--muted);padding:0;cursor:pointer;">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M12 11v6M12 7.5v.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+            </button>
+          </div>
           <div class="num disp" style="font-size:20px;font-weight:800;margin-top:2px;">${headline}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;">${sub}</div>
         </div>
         <svg class="chev" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;transform:rotate(${mt.open ? '90' : '0'}deg);"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
+      </div>
       ${mt.open ? `${formulaRow}${measuredRow}${gapNote}${targetBlock}
       <div style="font-size:10px;color:var(--muted);line-height:1.4;margin-top:12px;">Estimates, not measurements of your metabolism — use them as a starting point and adjust to how your weight actually responds.</div>` : ''}
     </div>`;
+}
+function renderMaintenanceTipsModal(){
+  const tips = [
+    ['Weigh in at the same time each day', 'Ideally first thing in the morning, before eating or drinking — this is the single biggest source of noise in the number.'],
+    ['Weigh in every day, not just sometimes', 'The app already smooths out day-to-day water-weight swings, but it needs regular readings to do that well.'],
+    ['Log meals as consistently as you weigh in', 'Include weekends and off days where you can. A missed day just gets skipped rather than dragging the average down, but more consistent data gives a tighter, faster estimate.'],
+    ['Give it a few weeks, especially at the start', 'Both the weight trend and the intake average need enough real data to tell a genuine trend apart from noise.'],
+    ['Keep your Settings profile up to date', 'Age, height and activity level feed the formula estimate — what the app falls back on whenever there isn\'t enough fresh data for a measured number.'],
+    ['A wide range or a number that keeps moving is normal early on', 'It means your data is still catching up, not that anything is wrong — it tightens as more consistent days come in.'],
+  ];
+  return `
+    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
+      <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:340px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <div style="font-size:14.5px;font-weight:800;">Getting a more accurate number</div>
+          <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:12px;">Both estimates on this card are only as good as the data behind them. A few habits make a real difference:</div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${tips.map(([title, detail]) => `
+            <div style="padding:10px 11px;border-radius:10px;background:var(--surface);">
+              <div style="font-size:12.5px;font-weight:700;margin-bottom:3px;">${title}</div>
+              <div style="font-size:11px;color:var(--muted);line-height:1.4;">${detail}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
 }
 function renderProfileCard(){
   const p = App.state.profile, mt = App.state.maint;
@@ -4151,6 +4190,7 @@ function renderTrends(){
         </div>
       </div>
       ${bottomNav('trends')}
+      ${App.state.maint.tipsOpen ? renderMaintenanceTipsModal() : ''}
     `;
   }
 
@@ -4238,6 +4278,7 @@ function renderTrends(){
       </div>
     </div>
     ${bottomNav('trends')}
+    ${App.state.maint.tipsOpen ? renderMaintenanceTipsModal() : ''}
   `;
 }
 
