@@ -4,15 +4,17 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-20 (fifth checkpoint — see "Sodium range, Today/Export refinements, and the Data
-tab" near the end: sodium as a range, Export preview UNDER/OK/OVER + 3 new rows, Today macro-tile
-popups with net carbs, Notes & accuracy box removed, Export tab renamed "Data" with a capped
-Recent-exports popup; all both-apps functional). The original four features (PDF export, live
-USDA lookup, real OCR, composite Saved Foods) plus nine large batches (2026-08-28, 2026-09-04,
+_Last updated 2026-09-23 (sixth checkpoint — see "Meal-logging fixes and a maintenance-calorie
+accuracy overhaul" near the end: Log food no longer defaults to Snack, Trends category-chip scroll
+position preserved, "set as usual" amounts for Saved Foods/Ingredients/USDA, and a four-part rework
+of the measured-maintenance math (trend-weight smoothing across full history, recency-weighted +
+outlier-trimmed intake average, an honest range instead of one number, an adaptive lookback window,
+and a self-calibrating formula fallback) plus an accuracy-tips popup; all both-apps functional, not
+yet confirmed on a real phone). The original four features (PDF export, live
+USDA lookup, real OCR, composite Saved Foods) plus ten large batches (2026-08-28, 2026-09-04,
 2026-09-11, 2026-09-12, 2026-09-14, 2026-09-18 functional batch, 2026-09-18 visual batch, 2026-09-18
-third batch, 2026-09-20 fourth batch) are all live; everything through the 2026-09-20 USDA-search move
-is **user-confirmed working on a real device** (the Maintenance-calories feature was pushed last and
-not yet confirmed on a phone) — see "Four functional
+third batch, 2026-09-20 fourth/fifth batches, 2026-09-23 sixth checkpoint) are all live; everything
+through the 2026-09-20 fifth checkpoint is **user-confirmed working on a real device** — see "Four functional
 features" / items 5-9 for the 2026-08-28
 batch (memory sharing, cross-tab search, delete-a-day, Notes-tab removal, portion-by-percentage,
 portion-by-weight, fixed meal order), "Three features (2026-09-04)" for that batch (backdated
@@ -1670,6 +1672,128 @@ can't reopen a downloaded file, and the popup says so. Commits: `b460686` / `dad
 - The Browser pane can't take screenshots while the Claude window is hidden (they time out); verify
   through the DOM instead (`innerText`, class names, `getBoundingClientRect`) and say so.
 
+## Meal-logging fixes and a maintenance-calorie accuracy overhaul (2026-09-23, sixth checkpoint) — both apps, functional
+
+Eight more functional changes, all shipped identically to both apps in the same pass, driven by a
+long back-and-forth on how the "Measured from your data" maintenance-calorie estimate actually
+works and how to make it more trustworthy. Commit pairs are (Nourish `origin/main` / BilliFit
+`origin/master`).
+
+### 36. Log food no longer defaults to "Snack"
+
+`addfood.targetMeal` used to default to `'Snack'` and stay that way until the user tapped a
+different chip — easy to log to the wrong meal without noticing. Now defaults to `null`: `openAddFood()`
+and `startBackdateLog()` both reset it to `null`, and **every** add action is gated on a meal being
+picked first — the bottom "Add/Log to X" button, and the three per-row instant-add buttons (Saved
+Foods' composed-recipe add, Ingredients, USDA) all show "Select a meal" and stay `disabled` until
+`targetMeal` is set, with matching guards inside `confirmAddSelectedFoods`, `quickAddLog`,
+`addScaledItemToMeal` and `addComposedFoodToMeal` (defensive — the disabled buttons already prevent
+the click). `addfood` state is transient UI state, not persisted, so no migration was needed.
+Commits: `fb3cf9a` / `4afe3fa`.
+
+### 37. Trends category-chip scroll position preserved within the tab
+
+Scrolling the horizontal Calories/Protein/…/Weight chip row to the end and tapping a chip used to
+snap the scroll back to the start, because `renderStage()`'s existing scroll-preservation mechanism
+only tracked `scrollTop` on `.scroll-area`/`.d-center`/`.d-aside`, not the chips' `scrollLeft`. Gave
+the row `id="trends-cat-chips"`, added it to that same selector list, and extended the mechanism to
+capture/restore `{top, left}` instead of just `top`. Position now survives a same-screen re-render
+(picking a different category) but resets to 0 when you leave Trends and come back, since a fresh
+screen render creates a brand-new (unscrolled) element — exactly the behavior asked for. Commits:
+`67f72cd` / `6a26ce5`.
+
+### 38. "Set as usual" amount when logging Saved Foods, Ingredients and USDA items
+
+User logs the same foods at the same non-default amount daily (e.g. an ingredient saved per-100g
+but always eaten at 30g) and was retyping the weight/percentage every time. Added an optional
+per-item default: Saved Foods get `food.defaultPct` (used as the pre-selected portion instead of a
+hardcoded 100% — both the unselected row's kcal preview and `toggleSelected`'s initial value now
+read `food.defaultPct || 100`), Ingredients/USDA items get `item.defaultAmount` (pre-fills the
+weight input and its kcal header instead of a hardcoded 100). A small checkbox ("Set as my usual
+amount…") sits next to each item's portion/weight controls; checking it before adding saves
+whatever amount was actually used as the new default (`confirmAddSelectedFoods` reads
+`usual-foods-{id}`, `addScaledItemToMeal` reads `usual-{kind}-{id}`, both via
+`document.getElementById(...).checked` before the row gets wiped by `render()`). Left unchecked,
+nothing changes — fully opt-in, no migration needed since these are new optional fields defaulting
+to `undefined`/falsy. Commits: `0f002f7` / `04d583e`.
+
+### 39–42. Maintenance-calorie accuracy overhaul
+
+A four-part rework of `measuredMaintenance()`, prompted by "how can we make this as accurate as
+possible" and built one piece at a time, confirming understanding in plain language before each
+build (see the session transcript for the full explanations — worth re-reading before touching this
+code again, since the *why* behind each constant matters for future tuning):
+
+- **#39 (weight-trend smoothing, recency-weighted intake, outlier exclusion) — `c0f7031` / `ca26176`.**
+  Added `trendWeightSeries()`: exponential smoothing (`WEIGHT_SMOOTHING_ALPHA = 0.1`) over the
+  raw weigh-ins, gap-aware (`a = 1 - (1-ALPHA)^gapDays`, so a weigh-in after a longer gap is
+  trusted more) so one noisy reading (water/sodium) can't swing the regression slope the way it
+  could before. The regression that produces `slopePerWeek` now fits this smoothed series instead
+  of raw `weightKg`. Intake average became recency-weighted (`INTAKE_HALF_LIFE_DAYS = 10`: a day
+  that old counts half as much) instead of a flat mean, and outlier days (`INTAKE_OUTLIER_Z = 2`
+  standard deviations from the period's mean, only trimmed if enough days remain —
+  `Math.max(5, ceil(logged.length*0.5))` — so a small sample never over-trims) are excluded before
+  averaging.
+- **#40 (continuous full-history smoothing) — `bd7de79` / `4491a83`.** Found and fixed a gap in
+  #39: `trendWeightSeries()` was only ever given the current lookback window's weigh-ins, so the
+  *first* weigh-in of every window was always an unsmoothed anchor — effectively resetting the
+  smoothing every time the window rolled forward, defeating the point. Now it runs once over the
+  user's *entire* weigh-in history (`allWeigh`, all of `dayHistory` with a `weightKg`), and each
+  window just looks up its slice of that continuous trend via a `Map<date, trendValue>`
+  (`trendByDate`). Costs nothing extra — a data point's influence has already decayed to ~5% by day
+  28 (`0.9^28`), so including old history is free, and a genuine multi-month gap in logging
+  self-heals the same way (a huge `gap` pushes `a` toward 1, i.e. full trust in the new reading).
+- **#41 (honest range + adaptive window) — `cb227d0` / `843afdc`.** Replaced the single `~2,340
+  kcal` headline with a range (`rangeLow`–`rangeHigh`) sized from the regression's own uncertainty:
+  a second least-squares fit against the *raw* (unsmoothed) weigh-ins gives an r² (how scattered
+  they are) and a slope standard error, converted to kcal/day the same way the slope itself is
+  (`× KCAL_PER_KG`); combined in quadrature with the intake average's own standard error
+  (`intakeStd / sqrt(n)`) into one `margin`, floored at 50 and capped at 400 kcal. The lookback
+  window itself became adaptive instead of a fixed 28 days: `attemptMaintenanceWindow()` is tried
+  at `WINDOW_MIN_DAYS=14` first and widened in `WINDOW_STEP_DAYS=7` steps up to
+  `WINDOW_MAX_DAYS=56`, stopping as soon as a window is both eligible (same ≥4 weigh-ins/≥10
+  day span/≥10 logged days/≥70% coverage gates as before) *and* its raw-fit r² clears
+  `TREND_FIT_R2_TARGET=0.5`; if none ever clears that bar, the widest eligible attempt is used
+  as a fallback rather than returning nothing. Clean, consistent data reacts fast (short window);
+  noisy data automatically pulls in more days to average out.
+- **#42 (self-calibrating formula estimate) — `ade394c` / `d20eb62`.** The formula estimate
+  (Mifflin-St Jeor × activity) used to be a fixed, generic fallback whenever there wasn't enough
+  fresh data for a measured number. Added `updateMaintenanceCalibration()`: whenever both a
+  measured and a formula estimate are available, it nudges a persisted `maint.correctionOffset`
+  toward that day's gap (`measured.tdee − formula.tdee`) using the same slow-smoothing idea as the
+  weight trend (`CALIBRATION_ALPHA = 0.15`, capped at ±`CALIBRATION_MAX_OFFSET = 500`), so one
+  noisy day can't swing it but a real sustained gap gradually gets absorbed. Called once per real
+  calendar day from the existing `checkDayRollover()` (not on every render). `bestMaintenance()`
+  now returns `{source:'formula-calibrated'}` (only when `|offset| >= 10`, to avoid a
+  near-zero correction being labeled "calibrated") instead of plain `formula` when falling back,
+  and the card's Formula-estimate detail row notes the correction when one is active. Persisted:
+  `maintCorrectionOffset` added to `buildBackupPayload()` and restored in both `loadLocal()` and
+  the file-import handler.
+- **Body-fat % (two-compartment fat/lean model) investigated, not built.** Considered as a
+  hardware-based alternative/successor to a simple 7,700 kcal/kg tweak, using a BIA scale (user has
+  a Huawei Body Scale 3 Pro). Walked through the math on a real month of the user's data (`G:\My
+  Drive\Personal\Claude\Calorie Tracking App\Monthly Measurements.csv` — Date, Weight, Body Fat %,
+  Skeletal Muscle Mass, Calorie Intake) and found the fat-mass trend was noisy and pointed the
+  *wrong* direction (rising while total weight fell) — the classic BIA-fooled-by-dehydration-during-
+  a-deficit pattern, not real muscle loss, and the resulting two-compartment estimate would have sat
+  at/below actual intake despite ongoing real weight loss (a contradiction). **Not implemented** —
+  parked pending more weeks of data. Full method and baseline findings are in memory
+  (`project_bodyfat_feasibility_tracking.md`, not in this repo) since it's an ongoing cross-session
+  thread the user is feeding data into periodically, not a one-off decision.
+
+### 43. Info button + accuracy-tips popup on the maintenance-calorie card
+
+A small "i" icon sits next to the "MAINTENANCE CALORIES" label (own `<button onclick="event.
+stopPropagation(); App.openMaintenanceTips()">`, independent of the card's own expand/collapse
+toggle — the toggle's outer element changed from a `<button>` to a `<div onclick=...>` so the icon
+button can nest inside it without invalid nested-`<button>` HTML). Opens `renderMaintenanceTipsModal()`,
+the same centered-popup pattern as the other modals (Recent exports, macro/stat detail): six tips
+(weigh in at the same time daily, weigh in every day not just sometimes, log as consistently as you
+weigh in, give it a few weeks especially at the start, keep the Settings profile current, a wide/
+moving range is normal early on). State: `maint.tipsOpen`, in the overlay registry for
+`screen==='trends'` (`hasOpenOverlay`/`closeOpenOverlay`, so Android back and the X/backdrop all
+close it the same way as every other popup). Commits: `d1c9277` / `b56ac8d`.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1687,50 +1811,37 @@ with no build step/bundler/minification — there's no established threshold for
 use judgment: a good trigger point is when total file size roughly doubles from the original ~206
 KB baseline, or when any one addition alone is large relative to the whole file (unlike the desktop
 view's harmless ~7%). Mention it unprompted if that happens, don't wait to be asked. **Current size
-as of 2026-09-20 (fifth checkpoint, after the sodium range / macro popup / Data tab batch): ~293 KB**
-(300,353 bytes; ~285 KB / 292,015 bytes after USDA-search-in-Memory + Maintenance calories; up
-from ~269 KB after the 2026-09-18 Memory bulk-actions + Weekly Review batch, ~258 KB after the visual refresh batch, ~254 KB earlier the same day, ~247 KB at the 2026-09-12
-checkpoint, ~241 KB at 2026-09-11, ~232 KB at 2026-09-04, ~211 KB original baseline) — still well under
-the doubling trigger, not flagged, but noting the running total here so the next check has an accurate
-comparison point instead of comparing against the stale original baseline.
+as of 2026-09-23 (sixth checkpoint, after the meal-default fix, Trends scroll fix, "set as usual"
+amounts, and the four-part maintenance-calorie accuracy overhaul): ~308 KB (315,327 bytes)** — up
+from ~293 KB (300,353 bytes) at the 2026-09-20 fifth checkpoint, ~285 KB / 292,015 bytes after
+USDA-search-in-Memory + Maintenance calories, ~269 KB after the 2026-09-18 Memory bulk-actions +
+Weekly Review batch, ~258 KB after the visual refresh batch, ~254 KB earlier the same day, ~247 KB
+at the 2026-09-12 checkpoint, ~241 KB at 2026-09-11, ~232 KB at 2026-09-04, ~211 KB original
+baseline. The maintenance-calorie work (items 39-42) accounts for most of this checkpoint's jump
+(new regression/calibration math plus the tips modal). Still well under the doubling trigger, not
+flagged, but noting the running total here so the next check has an accurate comparison point.
 
 ## Immediate next steps (pick up here)
 
-No feature is in progress. As of 2026-09-18: **everything shipped to date is confirmed working by
-the user on a real device** — items 1-9 (2026-08-28 batch), items 10-12 (2026-09-04 batch, see
-"Three features" above: backdated logging, memory-item sharing with multi-select and a "paste to
-import" recipient path, and the redesigned Android back button), items 13-14 (2026-09-11 batch, see
-"Session fixes and a new Archive feature" above: the Add Food search-reset fix, the GitHub-Pages
-HTTP-cache staleness fix, and the Archive section with its confirm-card and row-menu revisions),
-items 15-19 (2026-09-12 batch, see "Session features and fixes" above: the Macro-split explainer
-popup, a second round of the search-reset bug found in the Memory tab's row-actions menu, the Quick
-add one-time-logging feature plus a meal-target-switch bug found while building it, Calories moving
-from a ceiling to a low-high range, and the Calories card being colored by status), the 2026-09-14
-app-icon replacement (see "App icon replaced with custom artwork" above — Nourish-only, cosmetic,
-source file kept at `icons/Nourish Logo.png`), items 20-22 (2026-09-18 functional batch, see
-"Fiber:carbs ratio, Add-food selection bug, and USDA lookup reliability overhaul" above — shipped
-identically in both apps), items 23-26 (2026-09-18 visual batch, see "Visual refresh: Cobalt &
-Ice palette and data-driven background motifs" above — **Nourish-only**, not ported to BilliFit:
-the Cobalt & Ice palette, the Slate "under range" color, the removed header avatar, and the three
-data-tied background motifs), and items 27-28 (2026-09-18 third batch, see "Memory bulk actions and
-Weekly Review" above — shipped identically in both apps: Archive/Delete added to the Memory tab's
-Select bar with double confirmation, and reason tags on off-track days feeding a real Weekly Review
-in History's Week view), item 29 (2026-09-20: USDA lookup moved from Log to a multi-result search in
-Memory, branded products behind an off-by-default toggle, with a shortcut from Log — user confirmed
-working) and item 30 (2026-09-20: Maintenance calories — pushed, **not yet confirmed on a phone**;
-ask how it behaved with their real data once they have a couple of weeks of weigh-ins) and items 31-35
-(2026-09-20 fifth checkpoint, see "Sodium range, Today/Export refinements, and the Data tab" above:
-sodium as a range — user-confirmed working — the Export preview's UNDER/OK/OVER pills and extra rows,
-the Today macro-tile popup with per-meal/per-item breakdown and net carbs on Carbs, removal of the
-Notes & accuracy box, and the Export tab renamed Data with a capped Recent-exports popup — all pushed,
-verified in the local preview, not yet eyeballed on a phone; worth asking how the Data tab's
-"Recent" button row looked at phone width, since screenshots weren't possible). Nothing is
-queued, but the user said they have **more, unrelated improvements** to bring — ask for them (one
-feature at a time, per their preference). Ask what's next rather than assuming.
+No feature is in progress. Everything through the fifth checkpoint (items 1-35, 2026-08-28 through
+2026-09-20) is confirmed working by the user on a real device — see earlier revisions of this file
+for that full batch-by-batch history if needed, or the section headers above. **Items 36-43
+(2026-09-23, sixth checkpoint — meal-logging default fix, Trends scroll fix, "set as usual"
+amounts, and the four-part maintenance-calorie accuracy overhaul) are pushed and verified in the
+local dev preview, but not yet exercised on a real phone** — worth asking how they've held up,
+especially whether the "Measured from your data" range and the adaptive window length feel right
+once more real weigh-ins accumulate. Nothing else is queued — ask what's next rather than assuming.
 
-One open thread to keep in mind if it comes back up, not active right now:
+Two open threads to keep in mind if they come back up, not active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
   asked to leave it alone for now — don't touch OCR code unless asked).
+- **Body-fat % feasibility tracking** (started 2026-09-23, see item 39-42's "Body-fat %" note
+  above): the user is logging weight/body-fat%/skeletal-muscle-mass/calories weekly-to-biweekly in
+  `G:\My Drive\Personal\Claude\Calorie Tracking App\Monthly Measurements.csv` for an ongoing
+  re-analysis of whether a two-compartment fat/lean maintenance model is ever worth adding. This is
+  tracked in memory (`project_bodyfat_feasibility_tracking.md`), not in this repo — when the user
+  says they've updated the file, re-read it and redo the analysis described there rather than
+  starting from scratch.
 
 The Limited Edition App's icon redesign thread is now fully closed out, not just paused: the
 uncommitted 2026-08-28 icon-regeneration files flagged above in earlier checkpoints were **discarded
