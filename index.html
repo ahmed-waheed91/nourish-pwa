@@ -2365,10 +2365,10 @@ function renderStage(){
   const samePlace = __lastStageKey === stageKey;
   const forceTop = __scrollTopNext;
   __scrollTopNext = false;
-  const scrollSelectors = ['.scroll-area', '.d-center', '.d-aside'];
+  const scrollSelectors = ['.scroll-area', '.d-center', '.d-aside', '#trends-cat-chips'];
   const prevScroll = (samePlace && !forceTop) ? scrollSelectors.map(sel => {
     const el = stage.querySelector(sel);
-    return el ? el.scrollTop : null;
+    return el ? { top: el.scrollTop, left: el.scrollLeft } : null;
   }) : null;
 
   if (s.view === 'desktop'){
@@ -2389,12 +2389,12 @@ function renderStage(){
     scrollSelectors.forEach((sel, i) => {
       if (prevScroll[i] == null) return;
       const el = stage.querySelector(sel);
-      if (el) el.scrollTop = prevScroll[i];
+      if (el){ el.scrollTop = prevScroll[i].top; el.scrollLeft = prevScroll[i].left; }
     });
   } else if (forceTop){
     scrollSelectors.forEach(sel => {
       const el = stage.querySelector(sel);
-      if (el) el.scrollTop = 0;
+      if (el){ el.scrollTop = 0; el.scrollLeft = 0; }
     });
   }
   __lastStageKey = stageKey;
@@ -3973,7 +3973,7 @@ function renderTrends(){
   const windowed = realDays.slice(0, n);
   const series = windowed.map(d => ({ date:d.date, isToday:d.isToday, v: valueForDay(d) })).filter(p => p.v !== null).reverse();
 
-  const catChips = `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;">
+  const catChips = `<div id="trends-cat-chips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;">
     ${TREND_CATS.map(c => `<button class="chip ${st.activeCat===c.id?'active':''}" onclick="App.setTrendCat('${c.id}')">${c.label}</button>`).join('')}
   </div>`;
   const rangeTabs = `<div class="seg" style="margin-bottom:14px;box-shadow:none;border:1px solid var(--border);">
