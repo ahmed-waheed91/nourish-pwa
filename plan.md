@@ -4,13 +4,18 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-23 (sixth checkpoint — see "Meal-logging fixes and a maintenance-calorie
-accuracy overhaul" near the end: Log food no longer defaults to Snack, Trends category-chip scroll
+_Last updated 2026-09-23 (seventh checkpoint — see "Sugar limit: whole-fruit/vegetable exemption"
+near the end: a per-item checkbox excludes whole fruit/veg sugar from the daily sugar ceiling check
+everywhere it's evaluated, while every displayed gram figure stays the true honest total; plus a
+same-day follow-up fix so the Sugar tile's own tap-in breakdown modal explains the exclusion instead
+of contradicting the tile. Both apps functional, **confirmed working on a real phone**). Prior
+checkpoint: sixth (2026-09-23) — see "Meal-logging fixes and a maintenance-calorie
+accuracy overhaul" for that batch: Log food no longer defaults to Snack, Trends category-chip scroll
 position preserved, "set as usual" amounts for Saved Foods/Ingredients/USDA, and a four-part rework
 of the measured-maintenance math (trend-weight smoothing across full history, recency-weighted +
 outlier-trimmed intake average, an honest range instead of one number, an adaptive lookback window,
 and a self-calibrating formula fallback) plus an accuracy-tips popup; all both-apps functional, not
-yet confirmed on a real phone). The original four features (PDF export, live
+yet confirmed on a real phone as of that checkpoint. The original four features (PDF export, live
 USDA lookup, real OCR, composite Saved Foods) plus ten large batches (2026-08-28, 2026-09-04,
 2026-09-11, 2026-09-12, 2026-09-14, 2026-09-18 functional batch, 2026-09-18 visual batch, 2026-09-18
 third batch, 2026-09-20 fourth/fifth batches, 2026-09-23 sixth checkpoint) are all live; everything
@@ -1794,6 +1799,57 @@ moving range is normal early on). State: `maint.tipsOpen`, in the overlay regist
 `screen==='trends'` (`hasOpenOverlay`/`closeOpenOverlay`, so Android back and the X/backdrop all
 close it the same way as every other popup). Commits: `d1c9277` / `b56ac8d`.
 
+## Sugar limit: whole-fruit/vegetable exemption (2026-09-23, seventh checkpoint) — both apps, functional
+
+Prompted by the user asking whether the flat 50g sugar ceiling made sense given it couldn't
+distinguish added sugar from sugar intrinsic to whole fruit/veg (it can't — nutrition guidelines
+target *added/free* sugar specifically; whole fruit is generally exempt because fiber and cell
+structure slow absorption, though juice/dried fruit/honey/syrup are natural but still count as free
+sugar). Landed on a user-controlled opt-in tag rather than trying to parse USDA's inconsistent
+"Added Sugars" field. Two commits, same day:
+
+### 44. Whole-fruit/vegetable checkbox and the counted-sugar split
+
+A "Whole fruit/vegetable — sugar not counted toward daily limit" checkbox (with a note: "Doesn't
+apply to juice, dried fruit, smoothies, or sweetened versions") added to the single shared edit form
+used by Saved Foods, Ingredients, and USDA library items (`saveForm`/`openAddForm`/`editMemoryItem`,
+field `item.wholeProduce`). `computeConsumedTotals()` now returns a second total, `sugarCounted`
+(same as `sugar` but skips any item with `wholeProduce`), alongside the existing `sugar`. The design
+principle kept throughout: **the true, honest gram total (`sugar`) is what's ever displayed** — Today
+tile, History day grid, Trends numbers, PDF/Data export, desktop dashboard — **only the good/bad
+ceiling evaluation switches to `sugarCounted`** (`statusFor('sugar', ...)` call sites in
+`buildTodayStats`, the History dot, `valueForDay` in the Trends chart — which also plots/colors the
+*counted* value so the drawn "Under 50g" band doesn't visually contradict itself, the Data-tab day
+preview, the desktop dashboard stat row, and the real jsPDF `summaryDefs`). Net carbs and
+calories/carbs are untouched — confirmed by inspection, they never read `sugarCounted`.
+
+Built-in whole-produce items (Apple, Banana, Grapes, Orange, Strawberries, Watermelon, Tomato,
+Potato, Broccoli, Spinach, Cucumber, Carrot — in `COMMON_FOODS` and the `USDA_FOODS` seed) ship
+pre-checked; `mergeCommonFoodsIntoUsda()` also backfills the flag onto matching items a user already
+had saved from before this field existed (`existing.wholeProduce === undefined && food.wholeProduce`).
+`wholeProduce` is copied onto the logged meal-item snapshot in `confirmAddSelectedFoods`,
+`addScaledItemToMeal`, and `addComposedFoodToMeal` (composite Saved Food components inherit it from
+their linked ingredient/USDA item via `resolveComponentPer100`, which keeps `comp.wholeProduce` fresh
+the same way it already refreshes `name`/`unit`). No backup/loadLocal changes needed — `wholeProduce`
+and `sugarCounted` live inside objects (`state.memory.*`, `state.dayHistory[]`) that are already
+dumped/restored whole. Verified live: 400g Apple (41.6g sugar) + 20g Honey (12.4g sugar) = 54g raw,
+tile correctly reads "54g · In range" since only the 12.4g Honey portion counts. Commits: `9b19ef3` /
+`4805211`.
+
+### 45. Sugar breakdown modal — fixed a contradiction, added the explanation
+
+Missed one call site in #44: tapping the Sugar tile opens `renderStatDetailModal()`, which had its
+own independent `statusFor(id, value)` still evaluating the *raw* total — so the tile could say "In
+range" while the modal it opens into said "Over," which is exactly what the user ran into and asked
+about. Fixed to use the same `sugarCounted`-based value for the modal's pill and detail text. Also
+added, directly under the sugar number: a "Counted toward your limit" block showing the counted
+total, the subtraction line ("54g total − 41.6g from whole fruit/veg (not counted)", only shown when
+something was actually excluded), and a "Xg left before your 50g limit" / "Xg over your 50g limit"
+line — the exact remaining-headroom number the user asked to see. Each whole-fruit/veg item in the
+modal's per-meal "Where it came from" list also gets a small inline "Whole fruit/veg — not counted"
+tag so it's clear item-by-item which sugar didn't count. **User confirmed this working on a real
+phone.** Commits: `4899d41` / `7edae27`.
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1818,19 +1874,24 @@ USDA-search-in-Memory + Maintenance calories, ~269 KB after the 2026-09-18 Memor
 Weekly Review batch, ~258 KB after the visual refresh batch, ~254 KB earlier the same day, ~247 KB
 at the 2026-09-12 checkpoint, ~241 KB at 2026-09-11, ~232 KB at 2026-09-04, ~211 KB original
 baseline. The maintenance-calorie work (items 39-42) accounts for most of this checkpoint's jump
-(new regression/calibration math plus the tips modal). Still well under the doubling trigger, not
-flagged, but noting the running total here so the next check has an accurate comparison point.
+(new regression/calibration math plus the tips modal). **Current size as of 2026-09-23 (seventh
+checkpoint, after the whole-fruit/vegetable sugar exemption, items 44-45): ~312 KB (319,063
+bytes)** — a small ~3.7 KB bump for the checkbox/form field, the `sugarCounted` split, and the
+breakdown-modal explanation. Still well under the doubling trigger, not flagged, but noting the
+running total here so the next check has an accurate comparison point.
 
 ## Immediate next steps (pick up here)
 
 No feature is in progress. Everything through the fifth checkpoint (items 1-35, 2026-08-28 through
 2026-09-20) is confirmed working by the user on a real device — see earlier revisions of this file
-for that full batch-by-batch history if needed, or the section headers above. **Items 36-43
-(2026-09-23, sixth checkpoint — meal-logging default fix, Trends scroll fix, "set as usual"
-amounts, and the four-part maintenance-calorie accuracy overhaul) are pushed and verified in the
-local dev preview, but not yet exercised on a real phone** — worth asking how they've held up,
-especially whether the "Measured from your data" range and the adaptive window length feel right
-once more real weigh-ins accumulate. Nothing else is queued — ask what's next rather than assuming.
+for that full batch-by-batch history if needed, or the section headers above. **Items 44-45
+(2026-09-23, seventh checkpoint — the whole-fruit/vegetable sugar exemption and its breakdown-modal
+fix) are confirmed working by the user on a real phone.** **Items 36-43 (2026-09-23, sixth
+checkpoint — meal-logging default fix, Trends scroll fix, "set as usual" amounts, and the four-part
+maintenance-calorie accuracy overhaul) were pushed and verified in the local dev preview only — not
+yet explicitly confirmed on a real phone** — worth asking how they've held up, especially whether
+the "Measured from your data" range and the adaptive window length feel right once more real
+weigh-ins accumulate. Nothing else is queued — ask what's next rather than assuming.
 
 Two open threads to keep in mind if they come back up, not active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
