@@ -3827,7 +3827,11 @@ function formulaMaintenance(){
 }
 // A smoothed "trend weight" line through the raw weigh-ins, so a single noisy reading (water,
 // sodium, a big meal the night before) can't swing the whole slope. A weigh-in after a longer gap
-// since the last one is trusted more, since more time has passed for a real change to show.
+// since the last one is trusted more, since more time has passed for a real change to show. Run
+// this over a user's *entire* weigh-in history, not just a lookback window — otherwise the first
+// point of every window becomes an unsmoothed anchor and the trend effectively resets each time
+// the window rolls forward. Old, decayed-away weigh-ins cost nothing extra to include (by day 28
+// a data point's influence is already down to ~5%, so nothing artificial needs to cut it off).
 function trendWeightSeries(weighIns, dayNum){
   let trend = null, prevDay = null;
   return weighIns.map(d => {
@@ -3861,7 +3865,12 @@ function measuredMaintenance(){
   const base = { ...empty, weighIns:weigh.length, spanDays, loggedDays:logged.length };
   if (weigh.length < NEED_WEIGH_INS || spanDays < NEED_SPAN || logged.length < NEED_LOGGED || logged.length < spanDays*0.7) return base;
 
-  const xs = weigh.map(dayNum), ys = trendWeightSeries(weigh, dayNum);
+  // Smooth across the full history (not just this window) so a bad weigh-in right at the window's
+  // edge is cushioned by everything logged before it, instead of starting a fresh, unsmoothed trend.
+  const allWeigh = past.filter(d => typeof d.weightKg === 'number');
+  const fullTrend = trendWeightSeries(allWeigh, dayNum);
+  const trendByDate = new Map(allWeigh.map((d,i) => [d.date, fullTrend[i]]));
+  const xs = weigh.map(dayNum), ys = weigh.map(d => trendByDate.get(d.date));
   const xm = xs.reduce((a,v)=>a+v,0)/xs.length, ym = ys.reduce((a,v)=>a+v,0)/ys.length;
   const sxx = xs.reduce((a,x)=>a+(x-xm)*(x-xm),0);
   if (!sxx) return base;
