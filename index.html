@@ -3803,6 +3803,9 @@ const ACTIVITY_LEVELS = [
   { id:'active', label:'Very active', hint:'Hard exercise 6–7 days a week', mult:1.725 },
 ];
 const KCAL_PER_KG = 7700;
+const WEIGHT_SMOOTHING_ALPHA = 0.1; // trend-weight smoothing factor for a same-day-to-day weigh-in
+const INTAKE_HALF_LIFE_DAYS = 10;   // a day this many days older counts half as much toward the intake average
+const INTAKE_OUTLIER_Z = 2;         // logged days this many std-devs from your typical intake are excluded
 const MAINT_ADJUSTMENTS = [[-500,'−500'],[-300,'−300'],[0,'Maintain'],[250,'+250']];
 const roundTo10 = n => Math.round(n/10)*10;
 function latestWeightKg(){
@@ -3822,10 +3825,25 @@ function formulaMaintenance(){
   const level = ACTIVITY_LEVELS.find(a => a.id === p.activity) || ACTIVITY_LEVELS[1];
   return { ready:true, bmr:Math.round(bmr), tdee:roundTo10(bmr*level.mult), weightKg:w, level };
 }
-// Maintenance = average logged intake minus the energy implied by the weight trend
-// (least-squares slope through the weigh-ins). Only completed days are used, and a day only
-// counts as "logged" if it has a plausible amount of food, so skipped days don't drag the
-// average down.
+// A smoothed "trend weight" line through the raw weigh-ins, so a single noisy reading (water,
+// sodium, a big meal the night before) can't swing the whole slope. A weigh-in after a longer gap
+// since the last one is trusted more, since more time has passed for a real change to show.
+function trendWeightSeries(weighIns, dayNum){
+  let trend = null, prevDay = null;
+  return weighIns.map(d => {
+    const n = dayNum(d);
+    if (trend === null){ trend = d.weightKg; prevDay = n; return trend; }
+    const gap = Math.max(1, n - prevDay);
+    const a = 1 - Math.pow(1 - WEIGHT_SMOOTHING_ALPHA, gap);
+    trend = trend + a * (d.weightKg - trend);
+    prevDay = n;
+    return trend;
+  });
+}
+// Maintenance = a recency-weighted average of logged intake minus the energy implied by the
+// (smoothed) weight trend. Only completed days are used, a day only counts as "logged" if it has
+// a plausible amount of food, and a day whose intake is way outside your typical range (a blowout
+// or a barely-eaten sick day) is excluded from the average so it doesn't skew it.
 function measuredMaintenance(){
   const NEED_WEIGH_INS = 4, NEED_SPAN = 10, NEED_LOGGED = 10, MIN_LOGGED_KCAL = 500;
   const past = App.state.dayHistory.slice().sort((a,b) => a.date < b.date ? -1 : 1);
@@ -3842,12 +3860,26 @@ function measuredMaintenance(){
   const logged = win.filter(d => { const n = dayNum(d); return n >= first && n <= last && d.calories >= MIN_LOGGED_KCAL; });
   const base = { ...empty, weighIns:weigh.length, spanDays, loggedDays:logged.length };
   if (weigh.length < NEED_WEIGH_INS || spanDays < NEED_SPAN || logged.length < NEED_LOGGED || logged.length < spanDays*0.7) return base;
-  const xs = weigh.map(dayNum), ys = weigh.map(d => d.weightKg);
+
+  const xs = weigh.map(dayNum), ys = trendWeightSeries(weigh, dayNum);
   const xm = xs.reduce((a,v)=>a+v,0)/xs.length, ym = ys.reduce((a,v)=>a+v,0)/ys.length;
   const sxx = xs.reduce((a,x)=>a+(x-xm)*(x-xm),0);
   if (!sxx) return base;
   const slope = xs.reduce((a,x,i)=>a+(x-xm)*(ys[i]-ym),0)/sxx; // kg per day
-  const avgIntake = logged.reduce((a,d)=>a+d.calories,0)/logged.length;
+
+  const kcals = logged.map(d => d.calories);
+  const kcalMean = kcals.reduce((a,v)=>a+v,0)/kcals.length;
+  const kcalStd = Math.sqrt(kcals.reduce((a,v)=>a+(v-kcalMean)*(v-kcalMean),0)/kcals.length);
+  const trimmed = kcalStd > 0 ? logged.filter(d => Math.abs(d.calories - kcalMean) <= INTAKE_OUTLIER_Z*kcalStd) : logged;
+  const intakeDays = trimmed.length >= Math.max(5, Math.ceil(logged.length*0.5)) ? trimmed : logged;
+
+  let wSum = 0, wKcalSum = 0;
+  intakeDays.forEach(d => {
+    const w = Math.pow(0.5, (last - dayNum(d))/INTAKE_HALF_LIFE_DAYS);
+    wSum += w; wKcalSum += w*d.calories;
+  });
+  const avgIntake = wKcalSum/wSum;
+
   const tdee = roundTo10(avgIntake - slope*KCAL_PER_KG);
   return { ...base, ready:true, tdee, avgIntake:Math.round(avgIntake), slopePerWeek:Math.round(slope*7*100)/100, plausible: tdee >= 1000 && tdee <= 5000 };
 }
