@@ -713,7 +713,7 @@ const App = {
     settingsStatus: null,
     usdaApiKey: '', usdaKeyStatus: null,
     profile: { age:null, sex:null, heightCm:null, activity:'light' },
-    maint: { open:false, adj:-300, confirmTarget:false, status:null, profileStatus:null },
+    maint: { open:false, adj:-300, confirmTarget:false, status:null, profileStatus:null, correctionOffset:0 },
   },
 
   setView(v){ this.state.view = v; this.render(); },
@@ -998,6 +998,7 @@ const App = {
     t.meals = []; t.waterMl = 0; t.weightKg = null; t.dailyNote = ''; t.dailyTag = null;
     t.expandedMeal = null; t.expandedStat = null; t.confirmRemoveKey = null; t.macroInfoOpen = false;
     this.state.dayLog.currentDate = real;
+    updateMaintenanceCalibration();
     this.saveLocal();
   },
   allRealDays(){
@@ -1720,6 +1721,7 @@ const App = {
       dayLog: this.state.dayLog,
       history: this.state.dayHistory,
       recentExports: this.state.exportScreen.recentExports,
+      maintCorrectionOffset: this.state.maint.correctionOffset || 0,
     };
   },
   exportData(){
@@ -1980,6 +1982,7 @@ const App = {
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
       if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports.slice(0, 5);
+      if (typeof data.maintCorrectionOffset === 'number') this.state.maint.correctionOffset = data.maintCorrectionOffset;
       if (!this.state.builtinFoodsSeeded){
         mergeCommonFoodsIntoUsda(this.state.memory.usda);
         this.state.builtinFoodsSeeded = true;
@@ -2286,6 +2289,7 @@ const App = {
       if (Array.isArray(data.history)) this.state.dayHistory = data.history;
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
       if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports.slice(0, 5);
+      if (typeof data.maintCorrectionOffset === 'number') this.state.maint.correctionOffset = data.maintCorrectionOffset;
       this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (!this.state.builtinFoodsSeeded){
         mergeCommonFoodsIntoUsda(this.state.memory.usda);
@@ -3808,6 +3812,8 @@ const INTAKE_HALF_LIFE_DAYS = 10;   // a day this many days older counts half as
 const INTAKE_OUTLIER_Z = 2;         // logged days this many std-devs from your typical intake are excluded
 const WINDOW_MIN_DAYS = 14, WINDOW_MAX_DAYS = 56, WINDOW_STEP_DAYS = 7; // lookback window tried, shortest first
 const TREND_FIT_R2_TARGET = 0.5;    // below this, the raw weigh-ins look too scattered — widen the window
+const CALIBRATION_ALPHA = 0.15;     // how fast the personal formula correction adapts to a new day's formula-vs-measured gap
+const CALIBRATION_MAX_OFFSET = 500; // cap so a wildly wrong profile input can't blow up the correction
 const MAINT_ADJUSTMENTS = [[-500,'−500'],[-300,'−300'],[0,'Maintain'],[250,'+250']];
 const roundTo10 = n => Math.round(n/10)*10;
 function latestWeightKg(){
@@ -3953,11 +3959,32 @@ function measuredMaintenance(){
   const { eligible, ...rest } = best;
   return { ...empty, ready:true, ...rest };
 }
+// A slow-moving correction applied on top of the formula estimate, learned from the gap between
+// it and your own measured number whenever a fresh one is available. One real calendar day (see
+// checkDayRollover) moves the correction only part-way toward that day's gap — same smoothing
+// idea as the weight trend — so a single noisy measured reading can't swing it, but a real,
+// sustained difference between "textbook formula" and "how your body actually behaves" gradually
+// gets absorbed. This is what the formula estimate falls back to when there isn't enough fresh
+// data for a measured number of its own.
+function updateMaintenanceCalibration(){
+  const m = measuredMaintenance();
+  const f = formulaMaintenance();
+  if (!(m.ready && m.plausible && f.ready)) return;
+  const mt = App.state.maint;
+  const prev = mt.correctionOffset || 0;
+  const gap = m.tdee - f.tdee;
+  const next = prev + CALIBRATION_ALPHA * (gap - prev);
+  mt.correctionOffset = Math.max(-CALIBRATION_MAX_OFFSET, Math.min(CALIBRATION_MAX_OFFSET, next));
+}
 function bestMaintenance(){
   const m = measuredMaintenance();
   if (m.ready && m.plausible) return { value:m.tdee, source:'measured' };
   const f = formulaMaintenance();
-  if (f.ready) return { value:f.tdee, source:'formula' };
+  if (f.ready){
+    const offset = Math.round(App.state.maint.correctionOffset || 0);
+    if (Math.abs(offset) >= 10) return { value:roundTo10(f.tdee + offset), source:'formula-calibrated', offset };
+    return { value:f.tdee, source:'formula' };
+  }
   return null;
 }
 function maintenanceTargetRange(maint, adj){
@@ -3973,7 +4000,9 @@ function renderMaintenanceCard(){
     ? (best.source === 'measured' ? `${fmt(m.rangeLow)}–${fmt(m.rangeHigh)} kcal/day` : `~${fmt(best.value)} kcal/day`)
     : 'Not set up yet';
   const sub = best
-    ? (best.source === 'measured' ? `Measured from your last ${m.spanDays} days` : 'Formula estimate — a measured number appears after a few weeks of logging')
+    ? (best.source === 'measured' ? `Measured from your last ${m.spanDays} days`
+      : best.source === 'formula-calibrated' ? 'Formula estimate, calibrated from your own logged data'
+      : 'Formula estimate — a measured number appears after a few weeks of logging')
     : 'Add your profile in Settings, or log meals and weights for a few weeks';
 
   const row = (title, value, detail) => `
@@ -3987,7 +4016,11 @@ function renderMaintenanceCard(){
 
   let formulaRow;
   if (f.ready){
-    formulaRow = row('Formula estimate', `~${fmt(f.tdee)} kcal`, `Resting ${fmt(f.bmr)} kcal × ${f.level.label.toLowerCase()} activity (${f.level.mult}), at your latest logged weight of ${f.weightKg} kg.`);
+    const calOffset = Math.round(mt.correctionOffset || 0);
+    const calNote = Math.abs(calOffset) >= 10
+      ? ` Your own logged data has been trending about ${Math.abs(calOffset)} kcal ${calOffset > 0 ? 'higher' : 'lower'} than this formula — that's already factored into the main estimate above when a fresh measured number isn't available.`
+      : '';
+    formulaRow = row('Formula estimate', `~${fmt(f.tdee)} kcal`, `Resting ${fmt(f.bmr)} kcal × ${f.level.label.toLowerCase()} activity (${f.level.mult}), at your latest logged weight of ${f.weightKg} kg.${calNote}`);
   } else {
     formulaRow = row('Formula estimate', '—', `Needs your ${f.missing.join(', ')}. <button onclick="App.setScreen('settings')" style="background:none;border:none;padding:0;color:var(--brand);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;">Open Settings</button>`);
   }
