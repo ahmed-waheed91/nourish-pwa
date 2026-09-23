@@ -900,7 +900,11 @@ const App = {
   },
   toggleSelected(id){
     const s = this.state.addfood.selected;
-    if (s[id]) delete s[id]; else s[id] = 100;
+    if (s[id]) delete s[id];
+    else {
+      const food = this.state.memory.foods.find(f => f.id === id);
+      s[id] = (food && food.defaultPct) || 100;
+    }
     if (!this.patchAddFoodRow(id)) this.render();
     else this.syncAddFoodBottomButton();
   },
@@ -1083,6 +1087,7 @@ const App = {
       const scale = pct/100;
       const round1 = n => Math.round((n||0)*scale*10)/10;
       const pctLabel = Math.round(pct*10)/10;
+      if (document.getElementById('usual-foods-'+id)?.checked) food.defaultPct = pct;
       meal.items.push({
         name: pct===100 ? food.name : `${food.name} (${pctLabel}%)`,
         kcal: Math.round(food.kcal*scale), p:round1(food.p), c:round1(food.c), f:round1(food.f),
@@ -1120,6 +1125,7 @@ const App = {
     if (!item) return;
     const w = parseFloat(inputEl.value) || 0;
     if (!w) return;
+    if (document.getElementById('usual-'+kind+'-'+id)?.checked) item.defaultAmount = w;
     const scale = w/100;
     const round1 = n => Math.round(n*scale*10)/10;
     const meal = this.getOrCreateMeal(this.state.addfood.targetMeal);
@@ -2818,7 +2824,7 @@ function renderSavedFoodRow(f, st){
     </div>`;
   }
   const sel = !!st.selected[f.id];
-  const pct = sel ? st.selected[f.id] : 100;
+  const pct = sel ? st.selected[f.id] : (f.defaultPct || 100);
   return `
   <div id="food-row-${f.id}" data-name="${f.name.toLowerCase()}" class="pad-sm" style="background:var(--card);border:1.5px solid ${sel?'var(--brand)':'var(--border)'};border-radius:13px;">
     <div onclick="App.toggleSelected('${f.id}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
@@ -2848,12 +2854,17 @@ function renderSavedFoodRow(f, st){
             <div style="font-size:10.5px;color:var(--muted);">g of ${f.totalWeightG}g</div>
           </div>
         ` : ''}
+        <label style="width:100%;display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--muted);cursor:pointer;">
+          <input type="checkbox" id="usual-foods-${f.id}" style="width:14px;height:14px;accent-color:var(--brand);"/>
+          Set as my usual amount for this food
+        </label>
       </div>
     ` : ''}
   </div>`;
 }
 
 function renderIngredientAddRow(ing, st){
+  const initW = ing.defaultAmount || 100;
   return `
   <div data-name="${ing.name.toLowerCase()}" class="card pad-sm">
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -2861,17 +2872,22 @@ function renderIngredientAddRow(ing, st){
         <div style="font-size:13.5px;font-weight:700;">${srcTag('Ingredient','pill-neutral')}${ing.name}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:1px;">${ing.kcalPer100} kcal / 100${ing.unit}</div>
       </div>
-      <div id="kcal-${ing.id}" class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);flex-shrink:0;padding-left:8px;">${ing.kcalPer100} kcal</div>
+      <div id="kcal-${ing.id}" class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);flex-shrink:0;padding-left:8px;">${Math.round(ing.kcalPer100*initW/100)} kcal</div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-      <input id="w-ingredients-${ing.id}" type="number" value="100" oninput="App.scaleRow('${ing.id}', ${ing.kcalPer100}, this)"/>
+      <input id="w-ingredients-${ing.id}" type="number" value="${initW}" oninput="App.scaleRow('${ing.id}', ${ing.kcalPer100}, this)"/>
       <div style="font-size:12.5px;color:var(--muted);flex:1;">${ing.unit} used</div>
       <button id="addbtn-ingredients-${ing.id}" onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" ${(!st.targetMeal && st.flashId!==ing.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal && st.flashId!==ing.id)?'0.5':'1'};">${st.flashId===ing.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
     </div>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="usual-ingredients-${ing.id}" style="width:14px;height:14px;accent-color:var(--brand);"/>
+      Set as my usual amount
+    </label>
   </div>`;
 }
 
 function renderUsdaAddRow(u, st){
+  const initW = u.defaultAmount || 100;
   return `
   <div data-name="${u.name.toLowerCase()}" class="card pad-sm">
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -2879,14 +2895,18 @@ function renderUsdaAddRow(u, st){
         <div style="font-size:13.5px;font-weight:700;">${srcTag('USDA','pill-usda')}${u.name}</div>
         <div style="margin-top:4px;"><span class="pill pill-usda">Verified · ${u.fdc}</span></div>
       </div>
-      <div id="kcal-${u.id}" class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);flex-shrink:0;padding-left:8px;">${u.kcalPer100} kcal</div>
+      <div id="kcal-${u.id}" class="num disp" style="font-size:15px;font-weight:800;color:var(--brand-dark);flex-shrink:0;padding-left:8px;">${Math.round(u.kcalPer100*initW/100)} kcal</div>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-top:8px;">${detailLine(u)}</div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-      <input id="w-usda-${u.id}" type="number" value="100" oninput="App.scaleRow('${u.id}', ${u.kcalPer100}, this)"/>
+      <input id="w-usda-${u.id}" type="number" value="${initW}" oninput="App.scaleRow('${u.id}', ${u.kcalPer100}, this)"/>
       <div style="font-size:12.5px;color:var(--muted);flex:1;">g used</div>
       <button id="addbtn-usda-${u.id}" onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" ${(!st.targetMeal && st.flashId!==u.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal && st.flashId!==u.id)?'0.5':'1'};">${st.flashId===u.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
     </div>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="usual-usda-${u.id}" style="width:14px;height:14px;accent-color:var(--brand);"/>
+      Set as my usual amount
+    </label>
   </div>`;
 }
 
