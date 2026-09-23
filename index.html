@@ -297,13 +297,13 @@ function mealFiberCarbs(meal){
   return { carbs, fiber, ratio, tier, label };
 }
 function computeConsumedTotals(meals){
-  const t = { calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sodium:0 };
+  const t = { calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sugarCounted:0, sodium:0 };
   meals.forEach(meal => meal.items.forEach(it => {
     t.calories += it.kcal; t.protein += it.p; t.carbs += it.c; t.fat += it.f; t.fiber += it.fib;
-    t.sugar += it.sugar||0; t.sodium += it.sodium||0;
+    t.sugar += it.sugar||0; if (!it.wholeProduce) t.sugarCounted += it.sugar||0; t.sodium += it.sodium||0;
   }));
   const round1 = n => Math.round(n*10)/10;
-  return { calories:Math.round(t.calories), protein:round1(t.protein), carbs:round1(t.carbs), fat:round1(t.fat), fiber:round1(t.fiber), sugar:round1(t.sugar), sodium:Math.round(t.sodium) };
+  return { calories:Math.round(t.calories), protein:round1(t.protein), carbs:round1(t.carbs), fat:round1(t.fat), fiber:round1(t.fiber), sugar:round1(t.sugar), sugarCounted:round1(t.sugarCounted), sodium:Math.round(t.sodium) };
 }
 
 /* ---------- Composite Saved Foods (multi-component, per-100g scalable "meals") ---------- */
@@ -318,8 +318,8 @@ function resolveComponentPer100(comp){
     const live = list.find(x => x.id === comp.refId);
     if (live){
       const fresh = { kcal:live.kcalPer100, p:live.p, c:live.c, f:live.f, fib:live.fib, sugar:live.sugar, sodium:live.sodium };
-      // keep the frozen fallback (name, unit, values) fresh for as long as the link resolves
-      comp.per100 = fresh; comp.name = live.name; comp.unit = live.unit || comp.unit;
+      // keep the frozen fallback (name, unit, values, whole-produce flag) fresh for as long as the link resolves
+      comp.per100 = fresh; comp.name = live.name; comp.unit = live.unit || comp.unit; comp.wholeProduce = !!live.wholeProduce;
       return fresh;
     }
   }
@@ -382,8 +382,8 @@ const INGREDIENTS = [
 
 const USDA_FOODS = [
   { id:'chicken', name:'Chicken breast, cooked, skinless', fdc:'FDC 171534', kcalPer100:165, kcal:165, unit:'g', p:31, c:0, f:3.6, fib:0, sugar:0, sodium:0 },
-  { id:'cucumber', name:'Cucumber, raw, with peel', fdc:'SR Legacy', kcalPer100:15, kcal:15, unit:'g', p:0.65, c:3.6, f:0.15, fib:0.5, sugar:1.7, sodium:2 },
-  { id:'carrot', name:'Carrot, raw', fdc:'FDC 170393', kcalPer100:41, kcal:41, unit:'g', p:0.93, c:9.58, f:0.24, fib:2.8, sugar:4.7, sodium:69 },
+  { id:'cucumber', name:'Cucumber, raw, with peel', fdc:'SR Legacy', kcalPer100:15, kcal:15, unit:'g', p:0.65, c:3.6, f:0.15, fib:0.5, sugar:1.7, sodium:2, wholeProduce:true },
+  { id:'carrot', name:'Carrot, raw', fdc:'FDC 170393', kcalPer100:41, kcal:41, unit:'g', p:0.93, c:9.58, f:0.24, fib:2.8, sugar:4.7, sodium:69, wholeProduce:true },
   { id:'mutton', name:'Mutton, cooked, roasted', fdc:'USDA-sourced', kcalPer100:234, kcal:234, unit:'g', p:33.43, c:0.08, f:11.09, fib:0, sugar:0, sodium:135 },
 ];
 
@@ -436,33 +436,39 @@ function makeId(name){
 /* ---------- Built-in quick-reference foods (real USDA per-100g values) ---------- */
 /* Seeded into memory.usda once (see mergeCommonFoodsIntoUsda) so they show up as real, editable/deletable entries. */
 const COMMON_FOODS = [
-  { name:'Apple', per100:{kcal:52,p:0.26,c:13.81,f:0.17,fib:2.4,sugar:10.39,sodium:1}, pieceG:182 },
-  { name:'Banana', per100:{kcal:89,p:1.09,c:22.84,f:0.33,fib:2.6,sugar:12.23,sodium:1}, pieceG:118 },
-  { name:'Grapes', per100:{kcal:69,p:0.72,c:18.1,f:0.16,fib:0.9,sugar:15.48,sodium:2}, pieceG:5 },
-  { name:'Orange', per100:{kcal:47,p:0.94,c:11.75,f:0.12,fib:2.4,sugar:9.35,sodium:0}, pieceG:131 },
-  { name:'Strawberries', per100:{kcal:32,p:0.67,c:7.68,f:0.3,fib:2,sugar:4.89,sodium:1}, pieceG:12 },
-  { name:'Watermelon', per100:{kcal:30,p:0.61,c:7.55,f:0.15,fib:0.4,sugar:6.2,sodium:1}, pieceG:null },
-  { name:'Tomato', per100:{kcal:18,p:0.88,c:3.89,f:0.2,fib:1.2,sugar:2.63,sodium:5}, pieceG:123 },
-  { name:'Potato', per100:{kcal:77,p:2.05,c:17.49,f:0.09,fib:2.2,sugar:0.82,sodium:6}, pieceG:213 },
-  { name:'Broccoli', per100:{kcal:34,p:2.82,c:6.64,f:0.37,fib:2.6,sugar:1.7,sodium:33}, pieceG:null },
-  { name:'Spinach', per100:{kcal:23,p:2.86,c:3.63,f:0.39,fib:2.2,sugar:0.42,sodium:79}, pieceG:null },
+  { name:'Apple', per100:{kcal:52,p:0.26,c:13.81,f:0.17,fib:2.4,sugar:10.39,sodium:1}, pieceG:182, wholeProduce:true },
+  { name:'Banana', per100:{kcal:89,p:1.09,c:22.84,f:0.33,fib:2.6,sugar:12.23,sodium:1}, pieceG:118, wholeProduce:true },
+  { name:'Grapes', per100:{kcal:69,p:0.72,c:18.1,f:0.16,fib:0.9,sugar:15.48,sodium:2}, pieceG:5, wholeProduce:true },
+  { name:'Orange', per100:{kcal:47,p:0.94,c:11.75,f:0.12,fib:2.4,sugar:9.35,sodium:0}, pieceG:131, wholeProduce:true },
+  { name:'Strawberries', per100:{kcal:32,p:0.67,c:7.68,f:0.3,fib:2,sugar:4.89,sodium:1}, pieceG:12, wholeProduce:true },
+  { name:'Watermelon', per100:{kcal:30,p:0.61,c:7.55,f:0.15,fib:0.4,sugar:6.2,sodium:1}, pieceG:null, wholeProduce:true },
+  { name:'Tomato', per100:{kcal:18,p:0.88,c:3.89,f:0.2,fib:1.2,sugar:2.63,sodium:5}, pieceG:123, wholeProduce:true },
+  { name:'Potato', per100:{kcal:77,p:2.05,c:17.49,f:0.09,fib:2.2,sugar:0.82,sodium:6}, pieceG:213, wholeProduce:true },
+  { name:'Broccoli', per100:{kcal:34,p:2.82,c:6.64,f:0.37,fib:2.6,sugar:1.7,sodium:33}, pieceG:null, wholeProduce:true },
+  { name:'Spinach', per100:{kcal:23,p:2.86,c:3.63,f:0.39,fib:2.2,sugar:0.42,sodium:79}, pieceG:null, wholeProduce:true },
   { name:'Egg', per100:{kcal:143,p:12.56,c:0.72,f:9.51,fib:0,sugar:0.37,sodium:142}, pieceG:50 },
   { name:'Rice, cooked', per100:{kcal:130,p:2.69,c:28.17,f:0.28,fib:0.4,sugar:0.05,sodium:1}, pieceG:null },
   { name:'Almonds', per100:{kcal:579,p:21.15,c:21.55,f:49.93,fib:12.5,sugar:4.35,sodium:1}, pieceG:1.2 },
-  { name:'Cucumber', per100:{kcal:15,p:0.65,c:3.6,f:0.15,fib:0.5,sugar:1.7,sodium:2}, pieceG:301 },
-  { name:'Carrot', per100:{kcal:41,p:0.93,c:9.58,f:0.24,fib:2.8,sugar:4.7,sodium:69}, pieceG:61 },
+  { name:'Cucumber', per100:{kcal:15,p:0.65,c:3.6,f:0.15,fib:0.5,sugar:1.7,sodium:2}, pieceG:301, wholeProduce:true },
+  { name:'Carrot', per100:{kcal:41,p:0.93,c:9.58,f:0.24,fib:2.8,sugar:4.7,sodium:69}, pieceG:61, wholeProduce:true },
   { name:'Chicken breast, cooked', per100:{kcal:165,p:31,c:0,f:3.6,fib:0,sugar:0,sodium:74}, pieceG:172 },
   { name:'Mutton, cooked', per100:{kcal:234,p:33.43,c:0.08,f:11.09,fib:0,sugar:0,sodium:135}, pieceG:null },
 ];
 function mergeCommonFoodsIntoUsda(usdaList){
   const baseName = n => n.toLowerCase().split(',')[0].trim();
   COMMON_FOODS.forEach(food => {
-    const exists = usdaList.some(u => baseName(u.name) === baseName(food.name));
-    if (exists) return;
+    const existing = usdaList.find(u => baseName(u.name) === baseName(food.name));
+    if (existing){
+      // Backfills the whole-produce flag onto entries that were already saved (merged in a
+      // previous session, or seeded via USDA_FOODS) before that field existed.
+      if (existing.wholeProduce === undefined && food.wholeProduce) existing.wholeProduce = true;
+      return;
+    }
     const per = food.per100;
     usdaList.push({
       id: makeId(food.name), name: food.name, fdc:'USDA · common food', unit:'g', pieceG: food.pieceG || null,
       kcal: per.kcal, kcalPer100: per.kcal, p: per.p, c: per.c, f: per.f, fib: per.fib, sugar: per.sugar, sodium: per.sodium,
+      wholeProduce: !!food.wholeProduce,
     });
   });
   return usdaList;
@@ -1006,7 +1012,7 @@ const App = {
     const consumed = computeConsumedTotals(this.state.today.meals);
     const todayEntry = {
       date: this.state.dayLog.currentDate, calories:consumed.calories, protein:consumed.protein,
-      carbs:consumed.carbs, fat:consumed.fat, fiber:consumed.fiber, sugar:consumed.sugar, sodium:consumed.sodium,
+      carbs:consumed.carbs, fat:consumed.fat, fiber:consumed.fiber, sugar:consumed.sugar, sugarCounted:consumed.sugarCounted, sodium:consumed.sodium,
       waterMl: this.state.today.waterMl, weightKg: this.state.today.weightKg, isToday: true,
       meals: this.state.today.meals, note: this.state.today.dailyNote, tag: this.state.today.dailyTag,
     };
@@ -1029,7 +1035,7 @@ const App = {
   getOrCreateHistoryDay(date){
     let entry = this.state.dayHistory.find(h => h.date === date);
     if (!entry){
-      entry = { date, calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sodium:0, waterMl:0, weightKg:null, meals:[], note:'', tag:null };
+      entry = { date, calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sugarCounted:0, sodium:0, waterMl:0, weightKg:null, meals:[], note:'', tag:null };
       const idx = this.state.dayHistory.findIndex(h => h.date > date);
       if (idx === -1) this.state.dayHistory.push(entry); else this.state.dayHistory.splice(idx, 0, entry);
     }
@@ -1094,6 +1100,7 @@ const App = {
         name: pct===100 ? food.name : `${food.name} (${pctLabel}%)`,
         kcal: Math.round(food.kcal*scale), p:round1(food.p), c:round1(food.c), f:round1(food.f),
         fib:round1(food.fib), sugar:round1(food.sugar||0), sodium:Math.round((food.sodium||0)*scale),
+        wholeProduce: !!food.wholeProduce,
       });
     });
     if (st.targetDate) this.recomputeHistoryDay(st.targetDate);
@@ -1135,6 +1142,7 @@ const App = {
       name: `${item.name}, ${w}${item.unit||'g'}`,
       kcal: Math.round(item.kcal*scale), p: round1(item.p), c: round1(item.c), f: round1(item.f),
       fib: round1(item.fib), sugar: round1(item.sugar), sodium: Math.round((item.sodium||0)*scale),
+      wholeProduce: !!item.wholeProduce,
     });
     if (this.state.addfood.targetDate) this.recomputeHistoryDay(this.state.addfood.targetDate);
     this.state.addfood.flashId = id;
@@ -1247,7 +1255,7 @@ const App = {
   },
   openAddForm(kind){
     this.state.library.activeTab = kind;
-    this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', scanned:false, photo:null, ocrRunning:false, ocrFailed:false };
+    this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', wholeProduce:false, scanned:false, photo:null, ocrRunning:false, ocrFailed:false };
     this.state.library.composer = null;
     __scrollTopNext = true;
     this.render();
@@ -1260,6 +1268,7 @@ const App = {
       kind, editId:id, name:item.name, desc:item.recipe||'', unit:item.unit||'g',
       source: item.source || item.fdc || '', totalWeightG: item.totalWeightG || null,
       kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium,
+      wholeProduce: !!item.wholeProduce,
       scanned:false, photo:item.photo||null, ocrRunning:false, ocrFailed:false,
     };
     __scrollTopNext = true;
@@ -1301,7 +1310,7 @@ const App = {
     const val = id => (document.getElementById(id)?.value ?? '').trim();
     const num = id => parseFloat(document.getElementById(id)?.value) || 0;
     const name = val('mf-name') || 'Untitled item';
-    const data = { name, kcal:num('mf-kcal'), p:num('mf-p'), c:num('mf-c'), f:num('mf-f'), fib:num('mf-fib'), sugar:num('mf-sugar'), sodium:num('mf-sodium'), photo:f.photo||null };
+    const data = { name, kcal:num('mf-kcal'), p:num('mf-p'), c:num('mf-c'), f:num('mf-f'), fib:num('mf-fib'), sugar:num('mf-sugar'), sodium:num('mf-sodium'), wholeProduce: !!document.getElementById('mf-whole-produce')?.checked, photo:f.photo||null };
 
     if (f.kind === 'foods'){
       data.recipe = val('mf-desc') || 'No description added.';
@@ -1373,7 +1382,7 @@ const App = {
     if (!item) return;
     this.syncComposerDom();
     const per100 = { kcal:item.kcalPer100, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium };
-    c.components.push({ id: makeId(item.name), refKind, refId, name:item.name, unit:item.unit||'g', weight:100, per100 });
+    c.components.push({ id: makeId(item.name), refKind, refId, name:item.name, unit:item.unit||'g', weight:100, per100, wholeProduce: !!item.wholeProduce });
     this.render();
   },
   composerAddManualComponent(){
@@ -1534,6 +1543,7 @@ const App = {
         name: `${comp.name}, ${w}${comp.unit||'g'}`,
         kcal: Math.round((per100.kcal||0)*scale), p:round1(per100.p||0), c:round1(per100.c||0), f:round1(per100.f||0),
         fib:round1(per100.fib||0), sugar:round1(per100.sugar||0), sodium:Math.round((per100.sodium||0)*scale),
+        wholeProduce: !!comp.wholeProduce,
       });
     });
     if (this.state.addfood.targetDate) this.recomputeHistoryDay(this.state.addfood.targetDate);
@@ -1791,7 +1801,8 @@ const App = {
         ['Carbs', 'carbs', entry.carbs, `${entry.carbs} g`],
         ['Fat', 'fat', entry.fat, `${entry.fat} g`],
         ['Fiber', 'fiber', entry.fiber, `${entry.fiber} g`],
-        ['Sugar', 'sugar', entry.sugar, `${entry.sugar} g`],
+        // Sugar's target check excludes whole-fruit/veg sugar; the printed gram figure stays true.
+        ['Sugar', 'sugar', entry.sugarCounted ?? entry.sugar, `${entry.sugar} g`],
         ['Sodium', 'sodium', entry.sodium, `${entry.sodium} mg`],
         ['Water', 'water', entry.waterMl/1000, `${formatLiters(entry.waterMl)} L`],
       ];
@@ -2437,11 +2448,14 @@ function buildTodayStats(consumed){
   return Object.keys(TODAY_LABELS).map(id => {
     const key = id === 'protein' ? 'protein' : (id === 'carbs' ? 'carbs' : (id === 'fat' ? 'fat' : (id === 'fiber' ? 'fiber' : (id === 'sugar' ? 'sugar' : 'sodium'))));
     const value = consumed[key];
+    // Sugar's own good/bad evaluation excludes whole-fruit/veg sugar (see computeConsumedTotals);
+    // the displayed gram figure stays the true, honest total either way.
+    const statusValue = id === 'sugar' ? (consumed.sugarCounted ?? value) : value;
     const info = targetInfo(id);
-    const status = statusFor(id, value);
+    const status = statusFor(id, statusValue);
     return {
       id, label:TODAY_LABELS[id], value:value.toLocaleString(), unit:info.unit, target:info.label,
-      status, statusLabel:statusLabelFor(id, value), detail:detailFor(id, value),
+      status, statusLabel:statusLabelFor(id, statusValue), detail:detailFor(id, statusValue),
     };
   });
 }
@@ -3083,6 +3097,10 @@ function renderMemoryForm(f){
           </div>
         `).join('')}
       </div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:4px;">
+        <input type="checkbox" id="mf-whole-produce" ${f.wholeProduce ? 'checked' : ''}/> Whole fruit/vegetable — sugar not counted toward daily limit
+      </label>
+      <div style="font-size:10.5px;color:var(--muted);margin-bottom:14px;line-height:1.4;">Doesn't apply to juice, dried fruit, smoothies, or sweetened versions — only the intact whole food.</div>
       <div style="display:flex;gap:8px;">
         <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:inherit;">Cancel</button>
         <button onclick="App.saveForm()" style="flex:2;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;font-size:13px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">${f.editId ? 'Save changes' : 'Add to memory'}</button>
@@ -3630,7 +3648,7 @@ function renderHistory(){
                   <div class="dot" style="background:${dotColor(statusFor('calories', d.calories)==='good')};"></div>
                   <div class="dot" style="background:${dotColor(statusFor('protein', d.protein)==='good')};"></div>
                   <div class="dot" style="background:${dotColor(statusFor('fiber', d.fiber)==='good')};"></div>
-                  <div class="dot" style="background:${dotColor(statusFor('sugar', d.sugar)==='good')};"></div>
+                  <div class="dot" style="background:${dotColor(statusFor('sugar', d.sugarCounted ?? d.sugar)==='good')};"></div>
                 </div>
               </div>
               <div class="num disp" style="font-size:15px;font-weight:800;">${Math.round(d.calories)} <span style="font-size:11px;font-weight:600;color:var(--muted);">kcal</span></div>
@@ -4164,6 +4182,7 @@ function renderTrends(){
   const valueForDay = (d) => {
     if (cat.id === 'weight') return typeof d.weightKg === 'number' ? d.weightKg : null;
     if (cat.id === 'water') return Math.round((d.waterMl/1000)*100)/100;
+    if (cat.id === 'sugar') return d.sugarCounted ?? d.sugar;
     return d[cat.id];
   };
   const windowed = realDays.slice(0, n);
@@ -4423,7 +4442,7 @@ function renderRecentExportsModal(exports){
         ['Carbs', entry.carbs+' g', statusFor('carbs', entry.carbs)],
         ['Fat', entry.fat+' g', statusFor('fat', entry.fat)],
         ['Fiber', entry.fiber+' g', statusFor('fiber', entry.fiber)],
-        ['Sugar', entry.sugar+' g', statusFor('sugar', entry.sugar)],
+        ['Sugar', entry.sugar+' g', statusFor('sugar', entry.sugarCounted ?? entry.sugar)],
         ['Sodium', Math.round(entry.sodium||0)+' mg', statusFor('sodium', entry.sodium||0)],
       ];
       const macroCals = { protein: entry.protein*4, carbs: entry.carbs*4, fat: entry.fat*9 };
@@ -4759,7 +4778,7 @@ function renderDesktop(){
             ['Sodium', consumed.sodium, 'sodium'],
           ].map(([label,rawValue,id]) => {
             const info = targetInfo(id);
-            const s = statusFor(id, rawValue);
+            const s = statusFor(id, id === 'sugar' ? (consumed.sugarCounted ?? rawValue) : rawValue);
             const color = s==='good' ? 'var(--good)' : (s==='warning' ? 'var(--warning)' : 'var(--critical)');
             return [label, rawValue.toLocaleString(), info.unit, info.label, color];
           }).map(([label,value,unit,target,color]) => `
