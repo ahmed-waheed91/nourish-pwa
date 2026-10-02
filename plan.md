@@ -8,8 +8,10 @@ _Last updated 2026-10-02 (eighth checkpoint — see "Dish rows, profile persiste
 the end: composed Saved Foods now log as ONE expandable dish row instead of separate ingredient rows;
 the Settings profile (age/height/sex/activity) autosaves, can no longer be blanked by an invalid
 field, and has a separate backup copy; Memory/Log-food search matches words in any order; and a
-"Search in: All | This tab only" toggle. All both-apps functional, pushed, **not yet confirmed on a
-real phone**). Earlier checkpoint, seventh (2026-09-23; see "Sugar limit: whole-fruit/vegetable exemption"
+"Search in: All | This tab only" toggle. All both-apps functional, pushed, **confirmed working on a
+real phone** — plus same-day follow-ups in the same section: an arrow-in-place fix (item 50,
+phone-confirmed) and a backup reminder + stale-copy guard (items 51-52, pushed, **not yet phone-tested**)).
+Earlier checkpoint, seventh (2026-09-23; see "Sugar limit: whole-fruit/vegetable exemption"
 near the end: a per-item checkbox excludes whole fruit/veg sugar from the daily sugar ceiling check
 everywhere it's evaluated, while every displayed gram figure stays the true honest total; plus a
 same-day follow-up fix so the Sugar tile's own tap-in breakdown modal explains the exclusion instead
@@ -1858,7 +1860,9 @@ phone.** Commits: `4899d41` / `7edae27`.
 ## Dish rows, profile persistence, and search (2026-10-02, eighth checkpoint) — both apps, functional
 
 Three user requests in one session, each answered with a plan first and built only after "yes go
-ahead with those defaults". All pushed to both apps; **not yet confirmed on a real phone**. Patched
+ahead with those defaults". All pushed to both apps; **items 46-50 confirmed working on a real
+phone (user, 2026-10-02; this also closed out the sixth-checkpoint items 36-43, which the user
+confirmed as phone-tested at the same time)**. Patched
 with PowerShell scripts that assert exact match counts (BOM-prefixed because the scripts embed
 non-ASCII), applied identically to both `index.html` files.
 
@@ -1937,6 +1941,48 @@ across tab switches **in tab mode only** (in All mode the box still clears, as b
 Quick-add tabs have no toggle. Verified live in both apps (group visibility per mode, query kept
 across tab switch, reset on re-entry, no console errors).
 
+### 50. Memory: the Saved Food arrow opens details in place
+
+User bug report: after searching in Memory, tapping the small arrow on a Saved Food row reset the
+whole page — search text cleared, list back to its original order (the item jumped away with its
+details open). Cause: `toggleLibraryOpen()` did a full `render()`, unlike the three-dots menu
+(`toggleRowMenu`), which already used `patchLibraryRow()` to swap just that row and re-apply the
+search filter. Fix: `toggleLibraryOpen` now patches the row in place (and the previously open row,
+since only one stays open), falling back to `render()` only if a row isn't in the DOM. Also fixed a
+slip from #49: a row patched in place while searching "This tab only" no longer force-shows its
+source tag. Only Saved Foods rows have an arrow (Ingredients/USDA rows don't expand); the Log-food
+picker's arrow already patched in place. Verified with three matching rows: search text, order, and
+non-matching-row hiding all stayed put across open/switch/close. **Phone-confirmed.** Commits:
+`a8d95db` / `675107f`.
+
+### 51. Backup reminder (Today banner + Data tab status)
+
+Motivated by the unexplained profile resets: all data lives in one phone's browser storage, so a
+recent backup is the real safety net. New `state.lastBackupAt` / `backupSnoozeUntil` (both persisted
+in the save payload; `lastBackupAt` also restored from an imported backup file) and a global
+`backupStatus()` (days since last backup; overdue at ≥7 days, or "never" with ≥3 logged days).
+- Data tab "Export all data" card shows "Last backup: N days ago" / "No backup yet", amber with
+  "— time for a new one" when overdue.
+- Today shows a banner when overdue: **Back up now** (`backupNow()` → the normal `exportData()`,
+  then a 4.5s green "Backup saved ✓" confirmation on Today) or **Later** (`snoozeBackupNudge()`, 2 days).
+- `exportData()` stamps `lastBackupAt` *before* building the file (so the file records itself) and
+  reverts it if the direct save throws (the copy-the-text fallback doesn't count as a backup).
+
+### 52. Stale-copy guard (resume refresh)
+
+One unproven suspect for the profile resets: two copies of the app sharing storage (installed app +
+a browser tab) where a backgrounded copy with old in-memory data re-renders and saves over newer
+data. Every save now also writes a tiny version stamp (`SAVE_STAMP_KEY`, `stampSave()`, kept in
+`App._stamp`; set in `loadLocal`, `saveLocal`, `freeSpaceAndRetry`). `refreshIfStale()` — called first
+thing from `recheckDayOnResume()` (visibilitychange/pageshow/focus) — compares the stored stamp to
+ours and, if another copy saved since, runs `loadLocal()` + `render()` to adopt the newer data instead
+of overwriting it. Deliberately **resume-only**: adopting at save time was rejected because it could
+discard an explicit import or edit. Residual risk: two windows edited at the same moment — the later
+save still wins. Verified live (second-writer simulation adopted the changed profile + target;
+no-mismatch case left in-memory state alone). Note: the in-app test pane reports `hidden` visibility,
+so tests dispatch a `focus` event, which runs the same handler. Commits: `f5a3d85` / `7545d31`
+(shared with #51). **Pushed, not yet phone-tested.**
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1968,23 +2014,25 @@ breakdown-modal explanation. Still well under the doubling trigger, not flagged,
 running total here so the next check has an accurate comparison point. **Current size as of
 2026-10-02 (eighth checkpoint, items 46-49: dish rows, profile persistence, any-order search,
 search-scope toggle): ~321 KB (328,952 bytes)** — a ~9.9 KB bump; still far below the ~2x trigger.
+**After items 50-52 (arrow fix, backup reminder, stale-copy guard), same day: ~326 KB (333,592
+bytes)** — ~4.6 KB more; still well under the ~2x trigger, not flagged.
 
 ## Immediate next steps (pick up here)
 
-No feature is in progress. **Items 46-49 (2026-10-02, eighth checkpoint — dish rows with expandable
-ingredients, profile persistence hardening, any-order search, the All / This-tab-only search toggle)
-are pushed and verified in the local dev preview only — not yet confirmed on a real phone.** Ask how
-they held up; for the profile fix specifically ask whether the profile still resets and *when* (the
-root cause was never proven — see item 47). Everything through the fifth checkpoint (items 1-35,
-2026-08-28 through 2026-09-20) is confirmed working by the user on a real device — see earlier revisions of this file
-for that full batch-by-batch history if needed, or the section headers above. **Items 44-45
-(2026-09-23, seventh checkpoint — the whole-fruit/vegetable sugar exemption and its breakdown-modal
-fix) are confirmed working by the user on a real phone.** **Items 36-43 (2026-09-23, sixth
-checkpoint — meal-logging default fix, Trends scroll fix, "set as usual" amounts, and the four-part
-maintenance-calorie accuracy overhaul) were pushed and verified in the local dev preview only — not
-yet explicitly confirmed on a real phone** — worth asking how they've held up, especially whether
-the "Measured from your data" range and the adaptive window length feel right once more real
-weigh-ins accumulate. Nothing else is queued — ask what's next rather than assuming.
+No feature is in progress. **Everything through item 50 is confirmed working by the user on a real
+phone** (items 1-35 earlier; 36-45 and 46-50 confirmed 2026-10-02). **Only items 51-52 (backup
+reminder + stale-copy guard, commits `f5a3d85` / `7545d31`) are pushed but not yet phone-tested** —
+ask whether the Today banner / Data-tab "Last backup" line behave, and, for the profile problem,
+whether it has reset again and *when* (the root cause was never proven — see items 47 and 52).
+
+**Agreed roadmap, discussed 2026-10-02:** #1 (backup safety — done, items 51-52). The user said to
+**skip** "repeat logging" (copy yesterday's meal / recent-frequent list). Still to be *discussed*
+(not approved to build) when the user brings them back: **(a) barcode scanning via Open Food Facts to
+replace the weak label-OCR** (Chrome/Android BarcodeDetector; keep manual entry as the fallback for
+foods missing from that database) and **(b) a small in-app self-test page + moving the repeated
+sugar/status logic toward one shared function** (the breakdown-modal bug in item 45 was this class of
+problem). Declined for now: typo-tolerant search, splitting the single `index.html`, any body-fat
+model until more data. Nothing else is queued — ask what's next rather than assuming.
 
 Two open threads to keep in mind if they come back up, not active right now:
 - OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
