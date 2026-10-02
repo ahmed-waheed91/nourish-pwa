@@ -281,7 +281,6 @@
 
 <script src="vendor/jspdf.umd.min.js"></script>
 <script src="vendor/jspdf.plugin.autotable.min.js"></script>
-<script src="vendor/tesseract/tesseract.min.js"></script>
 <script>
 /* ================= DATA ================= */
 
@@ -410,43 +409,184 @@ function macrosArrayFrom(item){
 }
 function detailLine(item){
   const unit = item.unit || 'g';
-  return `Per 100${unit}: ${item.kcal} kcal, ${item.p}g protein, ${item.c}g carbs, ${item.sugar}g sugar, ${item.f}g fat, ${item.fib}g fiber, ${item.sodium}mg sodium.`;
+  return `Per 100${unit}: ${item.kcal} kcal, ${item.p}g protein, ${item.c}g carbs, ${item.sugar}g sugar, ${item.f}g fat, ${item.fib}g fiber, ${item.sodium}mg sodium.${item.barcode ? ' Barcode ' + item.barcode + '.' : ''}`;
 }
 
-/* ---------- Real OCR for label photos (Tesseract.js, fully vendored/offline) ---------- */
-function vendorUrl(rel){ return new URL(rel, document.baseURI).href; }
-async function runLabelOcr(imageDataUrl){
-  const worker = await Tesseract.createWorker('eng', Tesseract.OEM.LSTM_ONLY, {
-    workerPath: vendorUrl('vendor/tesseract/worker.min.js'),
-    corePath: vendorUrl('vendor/tesseract'),
-    langPath: vendorUrl('vendor/tesseract'),
-  });
-  try {
-    const { data } = await worker.recognize(imageDataUrl);
-    return data.text || '';
-  } finally {
-    await worker.terminate();
+/* ---------- Barcode scanning: Chrome's built-in BarcodeDetector + Open Food Facts lookup ---------- */
+function normalizeBarcode(code){ return String(code||'').replace(/\D/g,''); }
+function sameBarcode(a, b){
+  const x = normalizeBarcode(a).replace(/^0+/, ''), y = normalizeBarcode(b).replace(/^0+/, '');
+  return !!x && x === y;
+}
+function findByBarcode(code){
+  for (const kind of ['foods','ingredients','usda']){
+    const item = (App.state.memory[kind]||[]).find(it => it.barcode && sameBarcode(it.barcode, code));
+    if (item) return { kind, item };
   }
+  return null;
 }
-function parseNutritionLabelText(text){
-  const joined = text.replace(/\r/g, '');
-  const patterns = [
-    ['kcal', /calories\D{0,10}(\d+(?:\.\d+)?)/i],
-    ['p', /protein\D{0,10}(\d+(?:\.\d+)?)/i],
-    ['c', /(?:total\s+)?carbohydrate\D{0,10}(\d+(?:\.\d+)?)/i],
-    ['f', /(?:total\s+)?fat\D{0,10}(\d+(?:\.\d+)?)/i],
-    ['fib', /(?:dietary\s+)?fiber\D{0,10}(\d+(?:\.\d+)?)/i],
-    ['sugar', /sugars?\D{0,10}(\d+(?:\.\d+)?)/i],
-    ['sodium', /sodium\D{0,10}(\d+(?:\.\d+)?)/i],
-  ];
-  const result = {};
-  patterns.forEach(([key, re]) => {
-    const m = joined.match(re);
-    if (m) result[key] = parseFloat(m[1]);
-  });
-  return result;
+function parseOffProduct(p){
+  const n = p.nutriments || {};
+  const get = k => { const v = parseFloat(n[k]); return isFinite(v) ? v : null; };
+  const r1 = v => v == null ? null : Math.round(v*10)/10;
+  let kcal = get('energy-kcal_100g');
+  if (kcal == null){ const kj = get('energy-kj_100g') ?? get('energy_100g'); if (kj != null) kcal = kj/4.184; }
+  let sodium = get('sodium_100g');
+  sodium = sodium != null ? sodium*1000 : (get('salt_100g') != null ? get('salt_100g')*400 : null);
+  const brand = String(p.brands||'').split(',')[0].trim();
+  let name = String(p.product_name||'').trim();
+  if (brand && name && !name.toLowerCase().includes(brand.toLowerCase())) name = brand + ' ' + name;
+  else if (!name) name = brand;
+  const unit = /\d\s*(ml|cl|ltr|litres?|liters?|l)\b/i.test(String(p.quantity||'')) ? 'ml' : 'g';
+  const vals = {
+    kcal: kcal == null ? null : Math.round(kcal), p: r1(get('proteins_100g')), c: r1(get('carbohydrates_100g')),
+    f: r1(get('fat_100g')), fib: r1(get('fiber_100g')), sugar: r1(get('sugars_100g')),
+    sodium: sodium == null ? null : Math.round(sodium),
+  };
+  const labels = { kcal:'calories', p:'protein', c:'carbs', f:'fat', fib:'fiber', sugar:'sugar', sodium:'sodium' };
+  const missing = Object.keys(vals).filter(k => vals[k] == null).map(k => labels[k]);
+  return { name, unit, vals, missing };
+}
+async function fetchOffProduct(code){
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,quantity,nutriments`, { signal: ctrl.signal });
+    if (res.status === 404) return { status:'notfound' };
+    if (res.status === 429 || res.status >= 500) return { status:'busy' };
+    if (!res.ok) return { status:'error' };
+    const j = await res.json();
+    if (!j || j.status !== 1 || !j.product) return { status:'notfound' };
+    return { status:'ok', product: parseOffProduct(j.product) };
+  } catch (e) {
+    return { status:'offline' };
+  } finally { clearTimeout(t); }
 }
 
+const scanCam = { stream:null, timer:null, last:null, busy:false };
+function stopScanCamera(){
+  if (scanCam.timer){ clearInterval(scanCam.timer); scanCam.timer = null; }
+  if (scanCam.stream){ scanCam.stream.getTracks().forEach(t => t.stop()); scanCam.stream = null; }
+  scanCam.last = null; scanCam.busy = false;
+}
+async function startScanCamera(){
+  stopScanCamera();
+  const fail = (msg, noDet) => {
+    const cur = App.state.library.scan;
+    if (!cur || cur.phase !== 'camera') return;
+    cur.err = msg; if (noDet) cur.noDetector = true;
+    App.showScanOverlay();
+  };
+  if (!App.state.library.scan) return;
+  if (!('BarcodeDetector' in window)) return fail("This phone's browser can't scan barcodes automatically.", true);
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('The camera is not available here.', true);
+  let detector;
+  try {
+    let formats = ['ean_13','ean_8','upc_a','upc_e'];
+    if (BarcodeDetector.getSupportedFormats){ const sup = await BarcodeDetector.getSupportedFormats(); formats = formats.filter(f => sup.includes(f)); }
+    if (!formats.length) return fail("This browser can't read these barcode types.", true);
+    detector = new BarcodeDetector({ formats });
+  } catch (e) { return fail('Barcode scanning is not available in this browser.', true); }
+  try {
+    scanCam.stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } }, audio:false });
+  } catch (e) {
+    return fail(e && e.name === 'NotAllowedError' ? 'Camera permission was blocked. Allow the camera for this app in your phone settings, or type the number below.' : 'Could not start the camera.', false);
+  }
+  const cur = App.state.library.scan;
+  if (!cur || cur.phase !== 'camera'){ stopScanCamera(); return; }  // closed while the permission prompt was open
+  const video = document.getElementById('scan-video');
+  if (!video){ stopScanCamera(); return; }
+  video.srcObject = scanCam.stream;
+  try { await video.play(); } catch (e) { /* autoplay is allowed for muted inline video */ }
+  scanCam.timer = setInterval(async () => {
+    if (scanCam.busy || video.readyState < 2) return;
+    scanCam.busy = true;
+    try {
+      const found = await detector.detect(video);
+      const raw = found && found[0] && found[0].rawValue;
+      // the same code must be read twice in a row, so a smudged misread is ignored
+      if (raw && scanCam.last === raw){ stopScanCamera(); App.handleScannedCode(normalizeBarcode(raw)); return; }
+      scanCam.last = raw || null;
+    } catch (e) { /* ignore a failed frame */ }
+    scanCam.busy = false;
+  }, 250);
+}
+function scanOverlayHtml(sc){
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const kindDefs = [
+    ['foods','Saved foods','A food or meal you log by percentage'],
+    ['ingredients','Ingredients','Logged by weight, per 100 g / ml'],
+    ['usda','USDA / reference','Generic reference foods'],
+  ];
+  const header = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;flex-shrink:0;">
+      <div style="font-size:16px;font-weight:800;">Scan barcode</div>
+      <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:#fff;padding:2px;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>`;
+  const secondaryBtn = 'width:100%;padding:12px 0;border-radius:12px;background:transparent;color:#d6d6d6;border:1px solid #3a3a3a;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;';
+  if (sc.phase === 'camera'){
+    const viewfinder = (sc.noDetector || sc.err)
+      ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;text-align:center;font-size:13px;line-height:1.5;color:#d6d6d6;">${esc(sc.err || "This phone's browser can't scan barcodes automatically.")} Type the number below instead.</div>`
+      : `<video id="scan-video" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover;"></video>
+         <div style="position:absolute;left:8%;right:8%;top:34%;height:32%;border:2px solid rgba(255,255,255,0.9);border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,0.38);pointer-events:none;"></div>`;
+    return header + `
+      <div style="position:relative;flex:1;min-height:0;background:#000;overflow:hidden;">${viewfinder}</div>
+      <div style="padding:14px 18px 22px;background:#141414;flex-shrink:0;">
+        <div id="scan-msg" style="font-size:12px;color:#bdbdbd;margin-bottom:10px;min-height:16px;">${(sc.noDetector || sc.err) ? '' : 'Hold the barcode inside the frame.'}</div>
+        <div style="display:flex;gap:8px;">
+          <input id="scan-typed" type="text" inputmode="numeric" placeholder="Or type the barcode number" style="flex:1;min-width:0;padding:11px 12px;border-radius:10px;border:1px solid #3a3a3a;background:#1d1d1d;color:#fff;font-size:14px;font-family:inherit;text-align:left;"/>
+          <button onclick="App.scanSubmitTyped()" style="padding:0 18px;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Look up</button>
+        </div>
+      </div>`;
+  }
+  if (sc.phase === 'looking'){
+    return header + `<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:28px;text-align:center;font-size:14px;color:#d6d6d6;">Looking up ${esc(sc.code)} in Open Food Facts...</div>`;
+  }
+  if (sc.phase === 'existing'){
+    const h = sc.hit;
+    const where = (kindDefs.find(k => k[0] === h.kind) || [])[1] || h.kind;
+    return header + `
+      <div style="flex:1;padding:8px 18px 24px;overflow-y:auto;">
+        <div style="font-size:12px;color:#bdbdbd;margin-bottom:6px;">${esc(sc.code)}</div>
+        <div style="font-size:16px;font-weight:800;margin-bottom:4px;">Already in your Memory</div>
+        <div style="font-size:13px;color:#d6d6d6;line-height:1.5;margin-bottom:18px;">${esc(h.item.name)} &middot; ${where}</div>
+        <button onclick="App.openScannedExisting()" style="width:100%;padding:13px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px;">Open it</button>
+        <button onclick="App.scanAnother()" style="${secondaryBtn}">Scan another</button>
+      </div>`;
+  }
+  const res = sc.result || { status:'error' };
+  let summary;
+  if (res.status === 'ok'){
+    const r = res.product, v = r.vals, fm = x => x == null ? '-' : x;
+    summary = `
+      <div style="font-size:16px;font-weight:800;margin-bottom:4px;">${esc(r.name || 'Unnamed product')}</div>
+      <div style="font-size:12px;color:#bdbdbd;line-height:1.55;">Per 100 ${r.unit}: ${fm(v.kcal)} kcal &middot; ${fm(v.p)}g protein &middot; ${fm(v.c)}g carbs &middot; ${fm(v.f)}g fat<br>${fm(v.fib)}g fiber &middot; ${fm(v.sugar)}g sugar &middot; ${fm(v.sodium)}mg sodium</div>
+      ${r.missing.length ? `<div style="font-size:11.5px;color:#f0c36d;margin-top:6px;line-height:1.4;">Not in the database: ${r.missing.join(', ')}. You can fill these in on the next screen.</div>` : ''}`;
+  } else if (res.status === 'notfound'){
+    summary = `
+      <div style="font-size:16px;font-weight:800;margin-bottom:4px;">Not in Open Food Facts</div>
+      <div style="font-size:12.5px;color:#bdbdbd;line-height:1.5;">You can still save it: enter the details from the label next. The barcode is remembered, so scanning it again later finds it instantly.</div>`;
+  } else {
+    summary = `
+      <div style="font-size:16px;font-weight:800;margin-bottom:4px;">${res.status === 'busy' ? 'Open Food Facts is busy' : "Couldn't reach Open Food Facts"}</div>
+      <div style="font-size:12.5px;color:#bdbdbd;line-height:1.5;">${res.status === 'busy' ? 'Try again in a minute.' : 'Check your connection.'} Or save it now and enter the details from the label &mdash; the barcode is remembered.</div>
+      <button onclick="App.retryScanLookup()" style="margin-top:12px;${secondaryBtn}">Try again</button>`;
+  }
+  return header + `
+    <div style="flex:1;padding:8px 18px 24px;overflow-y:auto;">
+      <div style="font-size:12px;color:#bdbdbd;margin-bottom:6px;">${esc(sc.code)}</div>
+      ${summary}
+      <div style="font-size:12px;font-weight:700;color:#bdbdbd;margin:20px 0 8px;text-transform:uppercase;letter-spacing:0.04em;">Save to</div>
+      ${kindDefs.map(([id,label,hint]) => `
+        <button onclick="App.chooseScanKind('${id}')" style="display:block;width:100%;text-align:left;padding:12px 14px;border-radius:12px;background:#222;color:#fff;border:1px solid #3a3a3a;cursor:pointer;font-family:inherit;margin-bottom:8px;">
+          <div style="font-size:14px;font-weight:700;">${label}</div>
+          <div style="font-size:11.5px;color:#a8a8a8;margin-top:2px;">${hint}</div>
+        </button>`).join('')}
+      <button onclick="App.scanAnother()" style="margin-top:6px;${secondaryBtn}">Scan another</button>
+    </div>`;
+}
 function makeId(name){
   return (name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'item') + '_' + Math.random().toString(36).slice(2,6);
 }
@@ -730,7 +870,7 @@ const App = {
       usda: mergeCommonFoodsIntoUsda(USDA_FOODS.map(x => ({...x}))),
     },
     builtinFoodsSeeded: true,
-    library: { activeTab:'foods', searchScope:'all', openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{}, bulkAction:null, usdaQuery:'', usdaIncludeBranded:false, usdaLoading:false, usdaResults:null, usdaError:null, returnToLog:false },
+    library: { activeTab:'foods', searchScope:'all', scan:null, openId:null, form:null, composer:null, confirmDeleteKey:null, confirmMoveKey:null, confirmArchiveKey:null, openMenuKey:null, shareStatus:null, selectMode:false, selected:{}, bulkAction:null, usdaQuery:'', usdaIncludeBranded:false, usdaLoading:false, usdaResults:null, usdaError:null, returnToLog:false },
     history: { view:'day', openIdx:null, selectedDayNum:null, confirmDeleteDate:null, tagOtherFor:null },
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], recentOpen:false, memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
@@ -780,7 +920,7 @@ const App = {
     if (screen === 'today') return !!(this.state.today.macroInfoOpen || this.state.today.expandedStat);
     if (screen === 'library'){
       const st = this.state.library;
-      return !!(st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode || st.bulkAction);
+      return !!(st.scan || st.form || st.composer || st.confirmDeleteKey || st.confirmMoveKey || st.confirmArchiveKey || st.selectMode || st.bulkAction);
     }
     if (screen === 'trends') return !!(this.state.maint.confirmTarget || this.state.maint.tipsOpen);
     if (screen === 'history') return !!this.state.history.confirmDeleteDate;
@@ -794,6 +934,7 @@ const App = {
     if (screen === 'today' && this.state.today.expandedStat) return this.closeStatDetail();
     if (screen === 'library'){
       const st = this.state.library;
+      if (st.scan) return this.closeScanner();
       if (st.form) return this.closeForm();
       if (st.composer) return this.closeComposer();
       if (st.confirmDeleteKey) return this.cancelDelete();
@@ -1309,12 +1450,106 @@ const App = {
     if (!patched) this.render();
   },
 
+  // ---- Barcode scanner. The full-screen overlay is built outside the normal render cycle, so a
+  // stray re-render can never tear down the live camera preview.
+  openScanner(){
+    this.state.library.scan = { phase:'camera', code:null, result:null, hit:null, err:null, noDetector:false };
+    this.render();
+    this.showScanOverlay();
+    startScanCamera();
+  },
+  closeScanner(){
+    stopScanCamera();
+    const el = document.getElementById('scan-overlay');
+    if (el) el.remove();
+    this.state.library.scan = null;
+    this.render();
+  },
+  showScanOverlay(){
+    const sc = this.state.library.scan;
+    if (!sc) return;
+    let el = document.getElementById('scan-overlay');
+    if (!el){
+      el = document.createElement('div');
+      el.id = 'scan-overlay';
+      el.style.cssText = 'position:fixed;inset:0;z-index:120;background:#0b0b0b;color:#fff;display:flex;flex-direction:column;font-family:inherit;';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = scanOverlayHtml(sc);
+  },
+  scanAnother(){
+    if (!this.state.library.scan) return;
+    this.state.library.scan = { phase:'camera', code:null, result:null, hit:null, err:null, noDetector:false };
+    this.showScanOverlay();
+    startScanCamera();
+  },
+  scanSubmitTyped(){
+    const code = normalizeBarcode(document.getElementById('scan-typed')?.value);
+    if (code.length < 8){
+      const m = document.getElementById('scan-msg');
+      if (m) m.textContent = 'Enter the full barcode number (8 to 14 digits).';
+      return;
+    }
+    stopScanCamera();
+    this.handleScannedCode(code);
+  },
+  async handleScannedCode(code){
+    const lib = this.state.library;
+    if (!lib.scan) return;
+    const hit = findByBarcode(code);
+    if (hit){ lib.scan = { ...lib.scan, phase:'existing', code, hit }; this.showScanOverlay(); return; }
+    lib.scan = { ...lib.scan, phase:'looking', code, hit:null, result:null };
+    this.showScanOverlay();
+    const result = await fetchOffProduct(code);
+    const cur = this.state.library.scan;
+    if (!cur || cur.code !== code || cur.phase !== 'looking') return;  // closed or restarted while waiting
+    this.state.library.scan = { ...cur, phase:'choose', result };
+    this.showScanOverlay();
+  },
+  retryScanLookup(){ const sc = this.state.library.scan; if (sc && sc.code) this.handleScannedCode(sc.code); },
+  openScannedExisting(){
+    const sc = this.state.library.scan;
+    if (!sc || !sc.hit) return;
+    const { kind, item } = sc.hit;
+    stopScanCamera();
+    const el = document.getElementById('scan-overlay');
+    if (el) el.remove();
+    this.state.library.scan = null;
+    this.editMemoryItem(kind, item.id);
+  },
+  // "Save to" is asked every time: the existing add form opens prefilled, nothing is saved until Save.
+  chooseScanKind(kind){
+    const sc = this.state.library.scan;
+    if (!sc || !sc.code) return;
+    const r = (sc.result && sc.result.status === 'ok') ? sc.result.product : null;
+    const v = r ? r.vals : {};
+    const unit = r ? r.unit : 'g';
+    let notice;
+    if (r) notice = 'Prefilled from Open Food Facts (per 100 ' + unit + '). Check it against the label before saving.' + (r.missing.length ? ' Left blank because the database has no value: ' + r.missing.join(', ') + '.' : '');
+    else if (sc.result && sc.result.status === 'notfound') notice = 'This barcode is not in Open Food Facts, so enter the details from the label. The barcode is saved with the item, so scanning it again later finds it instantly.';
+    else notice = "Couldn't reach Open Food Facts, so enter the details from the label. The barcode is saved with the item.";
+    if (kind === 'foods') notice += ' For a Saved Food, 100% means 100 ' + unit + '.';
+    stopScanCamera();
+    const el = document.getElementById('scan-overlay');
+    if (el) el.remove();
+    const lib = this.state.library;
+    lib.scan = null; lib.activeTab = kind; lib.composer = null;
+    lib.form = {
+      kind, editId:null, name: r ? r.name : '', desc: kind === 'foods' ? ('Per 100 ' + unit + ' (barcode ' + sc.code + ')') : '',
+      unit, source: r ? 'Open Food Facts' : '',
+      kcal: v.kcal ?? '', p: v.p ?? '', c: v.c ?? '', f: v.f ?? '', fib: v.fib ?? '', sugar: v.sugar ?? '', sodium: v.sodium ?? '',
+      wholeProduce:false, photo:null, barcode: sc.code, notice,
+    };
+    __scrollTopNext = true;
+    this.render();
+  },
+
   genId(name){
     return (name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'item') + '_' + Math.random().toString(36).slice(2,6);
   },
   openAddForm(kind){
     this.state.library.activeTab = kind;
-    this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', wholeProduce:false, scanned:false, photo:null, ocrRunning:false, ocrFailed:false };
+    this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', wholeProduce:false, photo:null, barcode:'', notice:null };
     this.state.library.composer = null;
     __scrollTopNext = true;
     this.render();
@@ -1328,7 +1563,7 @@ const App = {
       source: item.source || item.fdc || '', totalWeightG: item.totalWeightG || null,
       kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium,
       wholeProduce: !!item.wholeProduce,
-      scanned:false, photo:item.photo||null, ocrRunning:false, ocrFailed:false,
+      photo:item.photo||null, barcode:item.barcode||'', notice:null,
     };
     __scrollTopNext = true;
     this.render();
@@ -1340,26 +1575,8 @@ const App = {
     const reader = new FileReader();
     reader.onload = (e) => {
       if (!this.state.library.form) return;
-      const photo = e.target.result;
-      this.state.library.form = { ...this.state.library.form, photo, scanned:false, ocrRunning:true, ocrFailed:false };
+      this.state.library.form = { ...this.state.library.form, photo: e.target.result };
       this.render();
-      runLabelOcr(photo).then(text => {
-        const f = this.state.library.form;
-        if (!f || f.photo !== photo) return; // form closed or photo replaced while OCR was running
-        const parsed = parseNutritionLabelText(text);
-        const found = Object.keys(parsed).length > 0;
-        this.state.library.form = {
-          ...f, ocrRunning:false, scanned:found, ocrFailed:!found,
-          kcal: parsed.kcal ?? f.kcal, p: parsed.p ?? f.p, c: parsed.c ?? f.c, f: parsed.f ?? f.f,
-          fib: parsed.fib ?? f.fib, sugar: parsed.sugar ?? f.sugar, sodium: parsed.sodium ?? f.sodium,
-        };
-        this.render();
-      }).catch(() => {
-        const f = this.state.library.form;
-        if (!f || f.photo !== photo) return;
-        this.state.library.form = { ...f, ocrRunning:false, ocrFailed:true };
-        this.render();
-      });
     };
     reader.readAsDataURL(file);
   },
@@ -1369,7 +1586,7 @@ const App = {
     const val = id => (document.getElementById(id)?.value ?? '').trim();
     const num = id => parseFloat(document.getElementById(id)?.value) || 0;
     const name = val('mf-name') || 'Untitled item';
-    const data = { name, kcal:num('mf-kcal'), p:num('mf-p'), c:num('mf-c'), f:num('mf-f'), fib:num('mf-fib'), sugar:num('mf-sugar'), sodium:num('mf-sodium'), wholeProduce: !!document.getElementById('mf-whole-produce')?.checked, photo:f.photo||null };
+    const data = { name, kcal:num('mf-kcal'), p:num('mf-p'), c:num('mf-c'), f:num('mf-f'), fib:num('mf-fib'), sugar:num('mf-sugar'), sodium:num('mf-sodium'), wholeProduce: !!document.getElementById('mf-whole-produce')?.checked, photo:f.photo||null, barcode: normalizeBarcode(document.getElementById('mf-barcode')?.value) || null };
 
     if (f.kind === 'foods'){
       data.recipe = val('mf-desc') || 'No description added.';
@@ -1640,7 +1857,7 @@ const App = {
     const idx = fromList.findIndex(x => x.id === id);
     if (idx === -1) return;
     const item = fromList[idx];
-    const shared = { name:item.name, kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium, photo:item.photo||null };
+    const shared = { name:item.name, kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium, photo:item.photo||null, barcode:item.barcode||null };
     const toList = this.state.memory[toKind];
     let moved = toKind === 'ingredients'
       ? { ...shared, id:item.id, unit:item.unit||'g', source:'Per label', kcalPer100:item.kcal }
@@ -3268,8 +3485,9 @@ function renderMemoryForm(f){
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
       </div>
-      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Label photo (optional)</label>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      ${f.notice ? `<div style="font-size:11.5px;line-height:1.45;padding:9px 11px;border-radius:9px;background:var(--brand-tint);color:var(--brand-dark);margin-bottom:12px;">${f.notice}</div>` : ''}
+      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Photo (optional)</label>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
         <label style="display:flex;align-items:center;gap:7px;padding:9px 13px;border-radius:9px;border:1.5px dashed rgba(11,11,11,0.22);cursor:pointer;font-size:12.5px;font-weight:700;color:var(--ink-2);">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 012-2h2M4 16v2a2 2 0 002 2h2M20 8V6a2 2 0 00-2-2h-2M20 16v2a2 2 0 01-2 2h-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="currentColor" stroke-width="2"/></svg>
           ${f.photo ? 'Retake / replace' : 'Take or upload photo'}
@@ -3277,9 +3495,8 @@ function renderMemoryForm(f){
         </label>
         ${f.photo ? `<img src="${f.photo}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"/>` : ''}
       </div>
-      ${f.photo && f.ocrRunning ? `<div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Reading label…</div>` : ''}
-      ${f.scanned ? `<div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Values read from the photo — check them (or the photo above) before saving.</div>` : ''}
-      ${f.ocrFailed ? `<div style="font-size:11px;color:var(--warning);margin-bottom:12px;line-height:1.4;">Couldn't automatically read numbers from that photo — enter them manually below.</div>` : ''}
+      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Barcode (optional)</label>
+      <input id="mf-barcode" type="text" inputmode="numeric" value="${esc2(g(f.barcode))}" placeholder="Filled in when you scan one" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
       <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Name</label>
       <input id="mf-name" type="text" value="${esc2(g(f.name))}" placeholder="${isFoods?'e.g. Protein Shake':'e.g. Almarai Full Fat Milk'}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
       ${isFoods ? `
@@ -3708,7 +3925,10 @@ function renderLibrary(){
     <div class="topbar">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
         <div class="disp" style="font-size:20px;font-weight:800;">Memory &amp; library</div>
-        ${st.activeTab!=='archive' ? `<button onclick="${st.selectMode ? 'App.backOneLevel()' : 'App.toggleLibrarySelectMode()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>` : ''}
+        <div style="display:flex;align-items:center;gap:12px;">
+          ${st.activeTab!=='archive' && !st.selectMode && !st.form && !st.composer ? `<button onclick="App.openScanner()" style="display:flex;align-items:center;gap:6px;background:var(--brand-tint);border:none;color:var(--brand-dark);font-size:12px;font-weight:700;cursor:pointer;padding:6px 11px;border-radius:9px;font-family:inherit;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Scan</button>` : ''}
+          ${st.activeTab!=='archive' ? `<button onclick="${st.selectMode ? 'App.backOneLevel()' : 'App.toggleLibrarySelectMode()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>` : ''}
+        </div>
       </div>
       <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">${st.selectMode ? 'Tap items to select, then share, archive or delete them together.' : 'Saved foods, ingredients &amp; learned rules — update anytime'}</div>
       ${st.activeTab!=='archive' ? `
