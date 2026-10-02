@@ -294,6 +294,15 @@ function nameMatches(name, query){
   const hay = split(name).join(' ');
   return words.every(w => hay.includes(w));
 }
+function backupStatus(){
+  const iso = App.state.lastBackupAt;
+  const t = iso ? Date.parse(iso) : NaN;
+  const loggedDays = (App.state.dayHistory || []).length + (App.state.today.meals.length ? 1 : 0);
+  if (!isFinite(t)) return { never:true, days:null, overdue: loggedDays >= 3, label:'No backup yet' };
+  const days = Math.max(0, Math.floor((Date.now() - t) / 86400000));
+  return { never:false, days, overdue: days >= 7,
+    label: days === 0 ? 'Last backup: today' : (days === 1 ? 'Last backup: yesterday' : 'Last backup: ' + days + ' days ago') };
+}
 function mealKcal(meal){ return Math.round(meal.items.reduce((a,it)=>a+it.kcal,0)*10)/10; }
 function mealFiberCarbs(meal){
   const carbs = Math.round(meal.items.reduce((a,it)=>a+it.c,0)*10)/10;
@@ -582,6 +591,7 @@ function esc(s){ return String(s); }
 
 const LOCAL_STORAGE_KEY = 'nourish_backup_v2';
 const PROFILE_BACKUP_KEY = 'nourish_profile_backup_v1';
+const SAVE_STAMP_KEY = 'nourish_save_stamp_v1';
 
 /* ---------- Real dates & liters formatting ---------- */
 const MEAL_ORDER = ['Breakfast','Lunch','Snack','Dinner'];
@@ -711,7 +721,7 @@ const App = {
       dailyNote:'', noteSaved:false, meals: [], macroInfoOpen:false, dailyTag:null },
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
-    storageAlert: null,
+    storageAlert: null, lastBackupAt: null, backupSnoozeUntil: 0, backupFlash: null,
     targets: defaultTargets(),
     addfood: { activeTab:'saved', searchScope:'all', selected:{}, targetMeal:null, targetDate:null, expandedSavedId:null },
     memory: {
@@ -1826,9 +1836,13 @@ const App = {
       history: this.state.dayHistory,
       recentExports: this.state.exportScreen.recentExports,
       maintCorrectionOffset: this.state.maint.correctionOffset || 0,
+      lastBackupAt: this.state.lastBackupAt,
+      backupSnoozeUntil: this.state.backupSnoozeUntil || 0,
     };
   },
   exportData(){
+    const prevBackupAt = this.state.lastBackupAt;
+    this.state.lastBackupAt = new Date().toISOString();
     const json = JSON.stringify(this.buildBackupPayload(), null, 2);
     const stamp = new Date().toISOString().slice(0,10);
     try {
@@ -1836,6 +1850,7 @@ const App = {
       this.state.exportScreen.fallbackJson = null;
       this.state.exportScreen.dataStatus = 'Backup saved ✓ — check your Downloads folder.';
     } catch (err) {
+      this.state.lastBackupAt = prevBackupAt;
       this.state.exportScreen.fallbackJson = json;
       this.state.exportScreen.dataStatus = "Couldn't save directly — copy the text below instead.";
     }
@@ -2099,6 +2114,7 @@ const App = {
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
       if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports.slice(0, 5);
       if (typeof data.maintCorrectionOffset === 'number') this.state.maint.correctionOffset = data.maintCorrectionOffset;
+      if (typeof data.lastBackupAt === 'string') this.state.lastBackupAt = data.lastBackupAt;
       if (!this.state.builtinFoodsSeeded){
         mergeCommonFoodsIntoUsda(this.state.memory.usda);
         this.state.builtinFoodsSeeded = true;
@@ -2357,9 +2373,26 @@ const App = {
     } catch (e) { /* ignore */ }
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(this.buildBackupPayload()));
+      this.stampSave();
     } catch (e) {
       this.freeSpaceAndRetry();
     }
+  },
+  // Every save leaves a tiny version stamp. If another copy of the app (e.g. the installed app and
+  // a browser tab) saved since we last did, our in-memory data is stale: on coming back to the
+  // foreground we adopt what is stored instead of overwriting it with old data.
+  stampSave(){
+    try { const st = Date.now().toString(36) + Math.random().toString(36).slice(2, 6); localStorage.setItem(SAVE_STAMP_KEY, st); this._stamp = st; } catch (e) { /* ignore */ }
+  },
+  refreshIfStale(){
+    try {
+      const stored = localStorage.getItem(SAVE_STAMP_KEY);
+      if (stored === null || stored === this._stamp) return false;
+      this.loadLocal();
+      this._stamp = stored;
+      this.render();
+      return true;
+    } catch (e) { return false; }
   },
   freeSpaceAndRetry(){
     let freedCount = 0;
@@ -2367,6 +2400,7 @@ const App = {
       const payload = JSON.stringify(this.buildBackupPayload());
       try {
         localStorage.setItem(LOCAL_STORAGE_KEY, payload);
+        this.stampSave();
         if (freedCount > 0){
           this.state.storageAlert = `This device's storage was full, so your ${freedCount} oldest logged day${freedCount>1?'s':''} ${freedCount>1?'were':'was'} automatically removed to make room (oldest data goes first, like a security-camera drive). Export a backup regularly to keep permanent history.`;
         }
@@ -2382,12 +2416,22 @@ const App = {
     }
   },
   dismissStorageAlert(){ this.state.storageAlert = null; this.render(); },
+  // One tap from the Today banner: runs the normal export, then confirms right there.
+  backupNow(){
+    this.exportData();
+    const ok = this.state.lastBackupAt && (Date.now() - Date.parse(this.state.lastBackupAt) < 5000);
+    this.state.backupFlash = ok ? 'Backup saved ✓ — check your Downloads folder.' : "Couldn't save directly — open the Data tab to copy the backup text.";
+    this.render();
+    setTimeout(() => { if (this.state.backupFlash){ this.state.backupFlash = null; this.render(); } }, 4500);
+  },
+  snoozeBackupNudge(){ this.state.backupSnoozeUntil = Date.now() + 2*86400000; this.render(); },
   storageUsageBytes(){
     try { return JSON.stringify(this.buildBackupPayload()).length; } catch (e) { return 0; }
   },
   loadLocal(){
     try {
       const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      this._stamp = localStorage.getItem(SAVE_STAMP_KEY);
       if (!raw) return;
       const data = JSON.parse(raw);
       if (data.memory && data.memory.foods && data.memory.ingredients && data.memory.usda) this.state.memory = data.memory;
@@ -2410,6 +2454,8 @@ const App = {
       if (data.dayLog && data.dayLog.currentDate) this.state.dayLog = data.dayLog;
       if (Array.isArray(data.recentExports)) this.state.exportScreen.recentExports = data.recentExports.slice(0, 5);
       if (typeof data.maintCorrectionOffset === 'number') this.state.maint.correctionOffset = data.maintCorrectionOffset;
+      if (typeof data.lastBackupAt === 'string') this.state.lastBackupAt = data.lastBackupAt;
+      if (typeof data.backupSnoozeUntil === 'number') this.state.backupSnoozeUntil = data.backupSnoozeUntil;
       this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (!this.state.builtinFoodsSeeded){
         mergeCommonFoodsIntoUsda(this.state.memory.usda);
@@ -2612,6 +2658,22 @@ function renderToday(){
           </button>
         </div>
       </div>
+
+      ${(() => {
+        const S = App.state;
+        if (S.backupFlash) return `<div class="card pad-sm" style="border-color:var(--good);margin-bottom:14px;font-size:12px;font-weight:700;color:var(--good);">${S.backupFlash}</div>`;
+        const bs = backupStatus();
+        if (!bs.overdue || Date.now() < (S.backupSnoozeUntil || 0)) return '';
+        return `
+        <div class="card pad-sm" style="border-color:var(--brand);background:var(--brand-tint);margin-bottom:14px;">
+          <div style="font-size:12.5px;font-weight:700;color:var(--brand-dark);margin-bottom:3px;">Back up your data</div>
+          <div style="font-size:11.5px;color:var(--ink-2);line-height:1.4;margin-bottom:10px;">${bs.never ? "You haven't saved a backup yet." : "Your last backup was " + bs.days + " days ago."} Your data lives only on this phone.</div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="App.backupNow()" style="flex:1;padding:9px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Back up now</button>
+            <button onclick="App.snoozeBackupNudge()" style="padding:9px 16px;border-radius:10px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Later</button>
+          </div>
+        </div>`;
+      })()}
 
       ${App.state.storageAlert ? `
         <div class="card pad-sm" style="border-color:var(--warning);background:var(--warning-tint);margin-bottom:14px;">
@@ -4716,7 +4778,8 @@ function renderRecentExportsModal(exports){
       <div style="font-size:15px;font-weight:700;margin-bottom:4px;">Data backup</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Your memory and settings live only on this device. Export a backup before switching phones, then import it on the new one.</div>
       <div class="card pad" style="margin-bottom:10px;">
-        <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Export all data</div>
+        <div style="font-size:12.5px;font-weight:700;margin-bottom:4px;">Export all data</div>
+        ${(() => { const bs = backupStatus(); return `<div style="font-size:11.5px;font-weight:600;margin-bottom:10px;color:${bs.overdue ? 'var(--warning)' : 'var(--ink-2)'};">${bs.label}${bs.overdue ? ' — time for a new one' : ''}</div>`; })()}
         <button onclick="App.exportData()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 0;border-radius:11px;background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
           Save backup (.json)
@@ -5092,6 +5155,7 @@ if ('serviceWorker' in navigator) {
 // being reloaded, so the boot-time rollover check above never re-runs on its own.
 // Re-check whenever the app comes back to the foreground.
 function recheckDayOnResume(){
+  App.refreshIfStale();
   const before = App.state.dayLog.currentDate;
   App.checkDayRollover();
   if (App.state.dayLog.currentDate !== before) App.render();
