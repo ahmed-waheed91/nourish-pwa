@@ -4,7 +4,11 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-10-02 (eighth checkpoint — see "Dish rows, profile persistence, and search" near
+_Last updated 2026-10-03 (ninth checkpoint — see "Barcode scanning replaces label OCR" near the end:
+the label-photo OCR and its 22 MB Tesseract library were removed from both apps and replaced by
+barcode scanning in the Memory tab — Chrome's BarcodeDetector + an Open Food Facts lookup, with the
+tab to save to asked each time; **phone-confirmed working**, broader testing on real products to
+come). Earlier checkpoint, eighth, 2026-10-02 (see "Dish rows, profile persistence, and search" near
 the end: composed Saved Foods now log as ONE expandable dish row instead of separate ingredient rows;
 the Settings profile (age/height/sex/activity) autosaves, can no longer be blanked by an invalid
 field, and has a separate backup copy; Memory/Log-food search matches words in any order; and a
@@ -307,7 +311,11 @@ day — totals only."
   Maintenance calories (2026-09-20)" below. The "local-first, then live" order described at the top
   of this section no longer applies — saved foods are simply the list you log from.
 
-## Real OCR for label photos — DONE, confirmed working
+## Real OCR for label photos — DONE, confirmed working — **REMOVED 2026-10-03, replaced by barcode scanning (item 53)**
+
+> Historical record only. The Tesseract library, `runLabelOcr`, `parseNutritionLabelText` and every
+> "Reading label…" message were deleted in item 53; `vendor/tesseract/` no longer exists. Don't
+> reintroduce OCR — barcode scanning is the replacement.
 
 - **Tesseract.js 7 vendored locally** at `pwa/vendor/tesseract/` (~22MB: main lib, worker script,
   three WASM core variants — `lstm`/`simd-lstm`/`relaxedsimd-lstm` — and `eng.traineddata.gz`, the
@@ -432,9 +440,8 @@ shared `localStorage` origin, not two isolated copies.
 ## Explicitly NOT implemented / open yet
 
 - No new feature is queued — all four requested features are complete. Ask the user what's next.
-- **OCR accuracy** (see Real OCR section above) — user found it "really bad" in some real-world
-  testing, explicitly asked to leave it as-is for now while they test more. Revisit if they raise
-  it again; don't proactively rework the parsing without their input on what's actually failing.
+- ~~OCR accuracy~~ — **moot: OCR was removed entirely on 2026-10-03 and replaced by barcode scanning
+  (item 53).**
 
 ## Known environment facts / limitations
 
@@ -1983,6 +1990,62 @@ no-mismatch case left in-memory state alone). Note: the in-app test pane reports
 so tests dispatch a `focus` event, which runs the same handler. Commits: `f5a3d85` / `7545d31`
 (shared with #51). **Pushed, not yet phone-tested.**
 
+## Barcode scanning replaces label OCR (2026-10-03, ninth checkpoint) — both apps, functional
+
+User: "get rid of OCR completely and replace it with Barcode Scanning." Asked about UAE data first
+(answer-only round): **there is no official/complete UAE barcode database.** Measured Open Food
+Facts (free, no key): 9,167 products tagged as sold in the UAE (e.g. Mai Dubai water
+`6297000611020`, Al Ain water — 20 products); it throttles heavy queries ("temporarily
+unavailable"), so nutrition-completeness/brand coverage (Almarai, Lulu) could NOT be measured and
+the OFF entry for Mai Dubai water has only sodium filled. FatSecret (56+ countries, UAE unconfirmed,
+free tier needs a server/IP allow-list) and Nutritionix/Edamam (US-focused) were rejected. User
+answers: **Android; ask which tab each time; just save to Memory (don't log to a meal).** Built after
+a written plan was confirmed with "go ahead with those defaults". **User tested the scanning on his
+phone and confirmed it works ("scanning works fine"); he'll test on more real products over the coming
+days.**
+
+### 53. What was built / removed
+- **Removed:** `vendor/tesseract/` (22 MB; `git rm`'d in both repos), its `<script>` tag,
+  `runLabelOcr`, `parseNutritionLabelText`, `vendorUrl`, the `scanned/ocrRunning/ocrFailed` form
+  flags and the "Reading label… / couldn't read" UI. The **optional photo stays** as a plain
+  "Photo (optional)" (existing items have photos; `handlePhotoSelect` now just stores the image).
+- **Scan button** ("Scan", barcode icon) in the Memory header next to Select (hidden on Archive, in
+  select mode, and while a form/composer is open). Opens `#scan-overlay`, a full-screen dark overlay
+  **built imperatively outside `render()`** (`showScanOverlay()` / `scanOverlayHtml(sc)`) so a stray
+  re-render can't kill the live camera preview. State: `library.scan` =
+  `{phase:'camera'|'looking'|'existing'|'choose', code, result, hit, err, noDetector}`. It is wired
+  into the back-button registry (`hasOpenOverlay` / `closeOpenOverlay` → `closeScanner()`), so
+  Android back closes it and stops the camera.
+- **Camera:** Chrome's built-in `BarcodeDetector` (formats ean_13, ean_8, upc_a, upc_e — no library
+  added; `scanCam`, `startScanCamera`, `stopScanCamera`), polled every 250 ms; the **same code must be
+  read twice in a row** before it counts. Falls back to a "Type the barcode number" field (always
+  shown) when there's no detector, no camera API, or camera permission is blocked. The in-app test
+  pane has no BarcodeDetector, so the camera loop was tested with a faked detector + canvas stream.
+- **Lookup flow** (`handleScannedCode`): (1) `findByBarcode()` — if any Memory item (foods,
+  ingredients, usda; leading zeros ignored via `sameBarcode`) already has that barcode → phase
+  "Already in your Memory" → **Open it** (`editMemoryItem`) or Scan another; (2) else
+  `fetchOffProduct()` → `https://world.openfoodfacts.org/api/v2/product/{code}.json?fields=product_name,brands,quantity,nutriments`
+  with a 10 s timeout, returning `ok|notfound|busy (429/5xx)|offline|error`; `parseOffProduct()` maps
+  per-100 values (kcal from `energy-kcal_100g`, else kJ/4.184; sodium mg from `sodium_100g`×1000, else
+  `salt_100g`×400; unit `ml` if `quantity` looks like ml/l else `g`; name = brand + product name) and
+  lists values the database lacks as `missing`.
+- **"Save to" asked every time** (Saved foods / Ingredients / USDA-reference) via `chooseScanKind(kind)`
+  → opens the **existing add form prefilled** (`library.form` now also carries `barcode` and a
+  `notice`), nothing saved until the user presses Save. Not-found/offline → same form with just the
+  barcode (and a note), so the user's own saved scans become the UAE database. Saved Food prefill is
+  per 100 g/ml (note: "100% means 100 g"). Form has a new **Barcode (optional)** field
+  (`mf-barcode`); `saveForm` stores `barcode` (digits only, or null); `confirmMove` carries it;
+  `detailLine()` appends "Barcode N." for Ingredients/USDA rows (Saved Foods show it via the prefilled
+  description). Barcodes ride along in backups and memory sharing automatically (they're item fields).
+- **Service worker (both apps):** `openfoodfacts.org` added to the network-only bypass next to
+  `api.nal.usda.gov` (otherwise the cache-first branch would cache lookups forever), and `CACHE_NAME`
+  bumped (`nourish-v9`→`v10`, `billifit-v2`→`v3`) so phones drop old files.
+- New storage? None — `barcode` lives on existing item objects.
+- Header button label shortened from "Scan barcode" to "Scan" to fit narrow phones.
+Rate limit note: OFF allows roughly 100 product lookups/min — irrelevant at one scan at a time; the
+"busy" screen offers Try again. Commits: `689c29e` (Nourish) / `c07bc4a` (BilliFit). **Phone-confirmed
+working; broader real-product testing still to come.**
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -2015,28 +2078,33 @@ running total here so the next check has an accurate comparison point. **Current
 2026-10-02 (eighth checkpoint, items 46-49: dish rows, profile persistence, any-order search,
 search-scope toggle): ~321 KB (328,952 bytes)** — a ~9.9 KB bump; still far below the ~2x trigger.
 **After items 50-52 (arrow fix, backup reminder, stale-copy guard), same day: ~326 KB (333,592
-bytes)** — ~4.6 KB more; still well under the ~2x trigger, not flagged.
+bytes)** — ~4.6 KB more; still well under the ~2x trigger, not flagged. **After item 53
+(2026-10-03, barcode scanning replacing OCR): `index.html` ~340 KB (348,417 bytes)** — ~15 KB more
+(scanner overlay + lookup code), but the app's `vendor/` folder shrank by **22 MB** (Tesseract
+deleted), leaving only the two jsPDF files (~0.4 MB). Still far below the ~2x trigger.
 
 ## Immediate next steps (pick up here)
 
 No feature is in progress. **Everything through item 50 is confirmed working by the user on a real
-phone** (items 1-35 earlier; 36-45 and 46-50 confirmed 2026-10-02). **Only items 51-52 (backup
-reminder + stale-copy guard, commits `f5a3d85` / `7545d31`) are pushed but not yet phone-tested** —
-ask whether the Today banner / Data-tab "Last backup" line behave, and, for the profile problem,
-whether it has reset again and *when* (the root cause was never proven — see items 47 and 52).
+phone** (items 1-35 earlier; 36-45 and 46-50 confirmed 2026-10-02), and **item 53 (barcode scanning)
+was phone-tested and works** on 2026-10-03. **Items 51-52 (backup reminder + stale-copy guard, commits
+`f5a3d85` / `7545d31`) are pushed but still not explicitly phone-confirmed** — ask whether the Today
+banner / Data-tab "Last backup" line behave, and, for the profile problem, whether it has reset again
+and *when* (the root cause was never proven — see items 47 and 52). For item 53, ask how scanning
+went on real UAE products: which brands were missing from Open Food Facts, whether any scans
+misread, and whether the per-100 g Saved Food prefill felt right.
 
-**Agreed roadmap, discussed 2026-10-02:** #1 (backup safety — done, items 51-52). The user said to
-**skip** "repeat logging" (copy yesterday's meal / recent-frequent list). Still to be *discussed*
-(not approved to build) when the user brings them back: **(a) barcode scanning via Open Food Facts to
-replace the weak label-OCR** (Chrome/Android BarcodeDetector; keep manual entry as the fallback for
-foods missing from that database) and **(b) a small in-app self-test page + moving the repeated
-sugar/status logic toward one shared function** (the breakdown-modal bug in item 45 was this class of
-problem). Declined for now: typo-tolerant search, splitting the single `index.html`, any body-fat
-model until more data. Nothing else is queued — ask what's next rather than assuming.
+**Roadmap (agreed 2026-10-02/03):** #1 backup safety — done (51-52). The user said to **skip**
+"repeat logging" (copy yesterday's meal / recent-frequent list). Barcode scanning (old #3) — done
+(item 53). Still to be *discussed* (not approved to build) when the user brings it back: **(b) a
+small in-app self-test page + moving the repeated sugar/status logic toward one shared function**
+(the breakdown-modal bug in item 45 was this class of problem). Declined for now: typo-tolerant
+search, splitting the single `index.html`, any body-fat model until more data. Possible follow-on
+from item 53 only if real use shows the need: a way to attach a barcode to an *existing* item
+(today a barcode is set via the item's edit form or by scanning into a new one). Nothing else is
+queued — ask what's next rather than assuming.
 
-Two open threads to keep in mind if they come back up, not active right now:
-- OCR accuracy on real-world label photos (user was still testing as of 2026-08-27, explicitly
-  asked to leave it alone for now — don't touch OCR code unless asked).
+Open thread to keep in mind if it comes back up, not active right now:
 - **Body-fat % feasibility tracking** (started 2026-09-23, see item 39-42's "Body-fat %" note
   above): the user is logging weight/body-fat%/skeletal-muscle-mass/calories weekly-to-biweekly in
   `G:\My Drive\Personal\Claude\Calorie Tracking App\Monthly Measurements.csv` for an ongoing
