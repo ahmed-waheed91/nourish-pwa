@@ -930,7 +930,7 @@ const App = {
     const q = searchInput ? searchInput.value.trim().toLowerCase() : '';
     if (q){
       newRow.style.display = nameMatches(newRow.getAttribute('data-name'), q) ? '' : 'none';
-      newRow.querySelectorAll('.src-tag').forEach(tag => tag.classList.add('show'));
+      if (this.state.library.searchScope !== 'tab') newRow.querySelectorAll('.src-tag').forEach(tag => tag.classList.add('show'));
     }
     return true;
   },
@@ -1290,7 +1290,14 @@ const App = {
     this.render();
     if (q){ const inp = document.getElementById('lib-search-input'); if (inp){ inp.value = q; this.filterLibraryRows(q); } }
   },
-  toggleLibraryOpen(id){ const l=this.state.library; l.openId = l.openId===id ? null : id; this.render(); },
+  toggleLibraryOpen(id){
+    const l = this.state.library;
+    const prev = l.openId;
+    l.openId = prev === id ? null : id;
+    let patched = this.patchLibraryRow('foods', id);
+    if (prev && prev !== id) patched = this.patchLibraryRow('foods', prev) && patched;
+    if (!patched) this.render();
+  },
 
   genId(name){
     return (name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'item') + '_' + Math.random().toString(36).slice(2,6);
