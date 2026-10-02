@@ -300,7 +300,7 @@ function computeConsumedTotals(meals){
   const t = { calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sugarCounted:0, sodium:0 };
   meals.forEach(meal => meal.items.forEach(it => {
     t.calories += it.kcal; t.protein += it.p; t.carbs += it.c; t.fat += it.f; t.fiber += it.fib;
-    t.sugar += it.sugar||0; if (!it.wholeProduce) t.sugarCounted += it.sugar||0; t.sodium += it.sodium||0;
+    t.sugar += it.sugar||0; t.sugarCounted += (it.sugarCounted ?? (it.wholeProduce ? 0 : (it.sugar||0))); t.sodium += it.sodium||0;
   }));
   const round1 = n => Math.round(n*10)/10;
   return { calories:Math.round(t.calories), protein:round1(t.protein), carbs:round1(t.carbs), fat:round1(t.fat), fiber:round1(t.fiber), sugar:round1(t.sugar), sugarCounted:round1(t.sugarCounted), sodium:Math.round(t.sodium) };
@@ -572,6 +572,7 @@ function dotColor(ok){ return ok ? 'var(--good)' : 'var(--warning)'; }
 function esc(s){ return String(s); }
 
 const LOCAL_STORAGE_KEY = 'nourish_backup_v2';
+const PROFILE_BACKUP_KEY = 'nourish_profile_backup_v1';
 
 /* ---------- Real dates & liters formatting ---------- */
 const MEAL_ORDER = ['Breakfast','Lunch','Snack','Dinner'];
@@ -697,7 +698,7 @@ const App = {
   state: {
     view: 'mobile',
     screen: 'today',
-    today: { expandedStat:null, expandedMeal:null, waterMl:0, weightKg:null, confirmRemoveKey:null,
+    today: { expandedStat:null, expandedMeal:null, waterMl:0, weightKg:null, confirmRemoveKey:null, expandedItemKey:null,
       dailyNote:'', noteSaved:false, meals: [], macroInfoOpen:false, dailyTag:null },
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
@@ -812,6 +813,7 @@ const App = {
   toggleMeal(id){ const t=this.state.today; t.expandedMeal = t.expandedMeal===id ? null : id; this.render(); },
   requestRemoveItem(mealId, idx){ this.state.today.confirmRemoveKey = mealId+':'+idx; this.render(); },
   cancelRemoveItem(){ this.state.today.confirmRemoveKey = null; this.render(); },
+  toggleItemExpand(key){ const t = this.state.today; t.expandedItemKey = t.expandedItemKey === key ? null : key; this.render(); },
   confirmRemoveItem(mealId, idx){
     const meals = this.state.today.meals;
     const meal = meals.find(m => m.id === mealId);
@@ -823,6 +825,7 @@ const App = {
       }
     }
     this.state.today.confirmRemoveKey = null;
+    this.state.today.expandedItemKey = null;
     this.render();
   },
   addWater(ml){ this.state.today.waterMl = Math.max(0, this.state.today.waterMl + ml); this.render(); },
@@ -1533,18 +1536,33 @@ const App = {
     if (!this.state.addfood.targetMeal) return;
     const food = this.state.memory.foods.find(x => x.id === foodId);
     if (!food || !Array.isArray(food.components)) return;
+    if (food.components.length === 0) return;
     const meal = this.getOrCreateMeal(this.state.addfood.targetMeal);
-    food.components.forEach(comp => {
+    // One meal row for the whole dish, with a frozen snapshot of what was in it at logging time
+    // (later edits to the Saved Food never rewrite past days). The dish totals are summed from the
+    // already-rounded component values so the breakdown always adds up to the row.
+    const comps = food.components.map(comp => {
       const w = parseFloat(document.getElementById(`cf-weight-${foodId}-${comp.id}`)?.value) || comp.weight || 0;
       const per100 = resolveComponentPer100(comp);
       const scale = w/100;
       const round1 = n => Math.round(n*scale*10)/10;
-      meal.items.push({
-        name: `${comp.name}, ${w}${comp.unit||'g'}`,
+      return {
+        name: comp.name, weight: w, unit: comp.unit||'g',
         kcal: Math.round((per100.kcal||0)*scale), p:round1(per100.p||0), c:round1(per100.c||0), f:round1(per100.f||0),
         fib:round1(per100.fib||0), sugar:round1(per100.sugar||0), sodium:Math.round((per100.sodium||0)*scale),
         wholeProduce: !!comp.wholeProduce,
-      });
+      };
+    });
+    const sumOf = k => comps.reduce((a,x) => a + (x[k]||0), 0);
+    const r1 = n => Math.round(n*10)/10;
+    const unitSet = new Set(comps.map(x => x.unit));
+    const totalW = comps.reduce((a,x) => a + (x.weight||0), 0);
+    meal.items.push({
+      name: unitSet.size === 1 ? `${food.name}, ${r1(totalW)}${comps[0].unit}` : food.name,
+      kcal: Math.round(sumOf('kcal')), p:r1(sumOf('p')), c:r1(sumOf('c')), f:r1(sumOf('f')),
+      fib:r1(sumOf('fib')), sugar:r1(sumOf('sugar')), sodium:Math.round(sumOf('sodium')),
+      sugarCounted: r1(comps.reduce((a,x) => a + (x.wholeProduce ? 0 : x.sugar), 0)),
+      components: comps,
     });
     if (this.state.addfood.targetDate) this.recomputeHistoryDay(this.state.addfood.targetDate);
     this.state.addfood.flashId = foodId;
@@ -1676,20 +1694,47 @@ const App = {
 
   // Profile inputs are read from the DOM only on Save (or right before a chip tap re-renders),
   // never per keystroke — an oninput render() would wipe focus mid-typing.
-  readProfileInputs(){
+  // A blank or out-of-range field never overwrites a value you already saved: blank only clears
+  // it on an explicit Save (allowClear), and an out-of-range number is ignored with a hint.
+  readProfileInputs(allowClear){
     const p = this.state.profile;
     const ageEl = document.getElementById('profile-age'), hEl = document.getElementById('profile-height');
-    if (ageEl){ const a = parseInt(ageEl.value, 10); p.age = (a >= 10 && a <= 110) ? a : null; }
-    if (hEl){ const h = parseFloat(hEl.value); p.heightCm = (h >= 100 && h <= 250) ? Math.round(h*10)/10 : null; }
+    let bad = null;
+    if (ageEl){
+      const raw = ageEl.value.trim();
+      if (raw === ''){ if (allowClear) p.age = null; }
+      else { const a = parseInt(raw, 10); if (a >= 10 && a <= 110) p.age = a; else bad = 'Age must be 10 to 110'; }
+    }
+    if (hEl){
+      const raw = hEl.value.trim();
+      if (raw === ''){ if (allowClear) p.heightCm = null; }
+      else { const h = parseFloat(raw); if (h >= 100 && h <= 250) p.heightCm = Math.round(h*10)/10; else bad = 'Height must be 100 to 250 cm'; }
+    }
+    return bad;
+  },
+  // Saves quietly as each field is finished (no re-render, so typing focus is never disturbed).
+  profileFieldChanged(){ this.readProfileInputs(false); this.saveLocal(); },
+  // Separate copy of the profile, so a problem with the main saved blob can't wipe it.
+  restoreProfileFallback(){
+    try {
+      const p = this.state.profile;
+      if (p.age || p.sex || p.heightCm) return;
+      const raw = localStorage.getItem(PROFILE_BACKUP_KEY);
+      if (!raw) return;
+      const b = JSON.parse(raw);
+      if (b && typeof b === 'object') this.state.profile = { ...p, ...b };
+    } catch (e) { /* ignore */ }
   },
   setProfileSex(s){ this.readProfileInputs(); this.state.profile.sex = s; this.render(); },
   setProfileActivity(id){ this.readProfileInputs(); this.state.profile.activity = id; this.render(); },
   saveProfile(){
-    this.readProfileInputs();
+    const bad = this.readProfileInputs(true);
     const p = this.state.profile;
-    this.state.maint.profileStatus = (p.age && p.heightCm && p.sex) ? 'Profile saved ✓' : 'Saved — add age, height and sex to get an estimate';
+    if (!p.age && !p.sex && !p.heightCm){ try { localStorage.removeItem(PROFILE_BACKUP_KEY); } catch (e) {} }
+    this.state.maint.profileStatus = bad ? `${bad} — kept your previous value` : ((p.age && p.heightCm && p.sex) ? 'Profile saved ✓' : 'Saved — add age, height and sex to get an estimate');
     this.render();
-    setTimeout(() => { this.state.maint.profileStatus = null; this.render(); }, 2200);
+    // Keep whatever is being typed right now when this timer re-renders.
+    setTimeout(() => { this.readProfileInputs(false); this.state.maint.profileStatus = null; this.render(); }, 2200);
   },
   toggleMaint(){ const mt = this.state.maint; mt.open = !mt.open; mt.confirmTarget = false; this.render(); },
   openMaintenanceTips(){ this.state.maint.tipsOpen = true; this.render(); },
@@ -1862,7 +1907,15 @@ const App = {
           doc.text(meal.name, margin, y);
           y += 3;
           const mt = computeConsumedTotals([meal]);
-          const body = meal.items.map(item => [item.name, Math.round(item.kcal), item.p, item.c, item.f, item.fib, item.sugar, Math.round(item.sodium||0)]);
+          const body = [];
+          const subRows = new Set();
+          meal.items.forEach(item => {
+            body.push([item.name, Math.round(item.kcal), item.p, item.c, item.f, item.fib, item.sugar, Math.round(item.sodium||0)]);
+            if (Array.isArray(item.components)) item.components.forEach(cp => {
+              subRows.add(body.length);
+              body.push(['   - ' + cp.name + ', ' + cp.weight + cp.unit, Math.round(cp.kcal), cp.p, cp.c, cp.f, cp.fib, cp.sugar, Math.round(cp.sodium||0)]);
+            });
+          });
           body.push(['Meal total', mt.calories, mt.protein, mt.carbs, mt.fat, mt.fiber, mt.sugar, mt.sodium]);
           doc.autoTable({
             startY: y,
@@ -1877,6 +1930,9 @@ const App = {
               if (data.section === 'body' && data.row.index === body.length - 1){
                 data.cell.styles.fillColor = brandTint;
                 data.cell.styles.fontStyle = 'bold';
+              } else if (data.section === 'body' && subRows.has(data.row.index)){
+                data.cell.styles.textColor = muted;
+                data.cell.styles.fontSize = 7.5;
               }
             },
           });
@@ -2250,6 +2306,10 @@ const App = {
   },
   saveLocal(){
     try {
+      const pr = this.state.profile;
+      if (pr.age || pr.sex || pr.heightCm) localStorage.setItem(PROFILE_BACKUP_KEY, JSON.stringify(pr));
+    } catch (e) { /* ignore */ }
+    try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(this.buildBackupPayload()));
     } catch (e) {
       this.freeSpaceAndRetry();
@@ -2606,11 +2666,15 @@ function renderToday(){
                       </div>
                     </div>`;
                   }
+                  const hasComps = Array.isArray(item.components) && item.components.length > 0;
+                  const itemOpen = hasComps && st.expandedItemKey === removeKey;
                   return `
-                  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
-                    <div style="font-size:12.5px;min-width:0;">
+                  <div style="border-bottom:1px solid var(--border);">
+                  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;">
+                    <div ${hasComps ? `onclick="event.stopPropagation();App.toggleItemExpand('${removeKey}')"` : ''} style="font-size:12.5px;min-width:0;${hasComps ? 'cursor:pointer;' : ''}">
                       <div style="font-weight:600;">${item.name}</div>
                       <div style="color:var(--muted);font-size:11px;margin-top:1px;">P ${item.p}g · C ${item.c}g · F ${item.f}g · Fib ${item.fib}g</div>
+                      ${hasComps ? `<div style="color:var(--brand);font-size:10.5px;font-weight:600;margin-top:3px;">${itemOpen ? '&#9662; Hide' : '&#9656; Show'} ${item.components.length} ingredient${item.components.length>1?'s':''}</div>` : ''}
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;padding-left:10px;">
                       <div class="num" style="font-size:12.5px;font-weight:700;">${item.kcal}</div>
@@ -2618,6 +2682,12 @@ function renderToday(){
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                       </button>
                     </div>
+                  </div>
+                  ${itemOpen ? `<div style="padding:0 0 8px 12px;">${item.components.map(cp => `
+                    <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;color:var(--ink-2);">
+                      <div style="min-width:0;">${cp.name}, ${cp.weight}${cp.unit}</div>
+                      <div class="num" style="white-space:nowrap;color:var(--muted);">${cp.kcal} kcal</div>
+                    </div>`).join('')}</div>` : ''}
                   </div>`;
                 }).join('')}
               </div>
@@ -2755,9 +2825,14 @@ function renderStatDetailModal(id, consumed){
             <div style="margin-top:4px;">
               ${m.items.map(it => `
                 <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;color:var(--ink-2);">
-                  <div style="min-width:0;">${esc(it.name)}${id === 'sugar' && it.wholeProduce ? '<div style="font-size:10px;color:var(--good);margin-top:1px;">Whole fruit/veg — not counted</div>' : ''}</div>
+                  <div style="min-width:0;">${esc(it.name)}${id === 'sugar' && it.wholeProduce ? '<div style="font-size:10px;color:var(--good);margin-top:1px;">Whole fruit/veg — not counted</div>' : ''}${id === 'sugar' && it.sugarCounted !== undefined && it.sugarCounted < (it.sugar||0) ? `<div style="font-size:10px;color:var(--good);margin-top:1px;">${fmt((it.sugar||0) - it.sugarCounted)} g whole fruit/veg — not counted</div>` : ''}</div>
                   <div class="num" style="white-space:nowrap;">${fmt(amt(it))} ${info.unit}</div>
-                </div>`).join('')}
+                </div>
+                ${Array.isArray(it.components) ? it.components.filter(cp => (cp[field]||0) > 0).map(cp => `
+                <div style="display:flex;justify-content:space-between;gap:10px;padding:1px 0 1px 12px;font-size:10.5px;color:var(--muted);">
+                  <div style="min-width:0;">${esc(cp.name)}</div>
+                  <div class="num" style="white-space:nowrap;">${fmt(cp[field])} ${info.unit}</div>
+                </div>`).join('') : ''}`).join('')}
             </div>
           </div>`).join('')}
         ${contributing.length > 0 && empty.length > 0 ? `<div style="font-size:11px;color:var(--muted);line-height:1.4;">No ${label.toLowerCase()} from: ${empty.map(esc).join(', ')}.</div>` : ''}
@@ -4168,11 +4243,11 @@ function renderProfileCard(){
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Age</div>
-          <input id="profile-age" type="number" inputmode="numeric" min="10" max="110" value="${p.age ?? ''}" placeholder="years" style="${inputStyle}"/>
+          <input id="profile-age" type="number" inputmode="numeric" min="10" max="110" value="${p.age ?? ''}" onchange="App.profileFieldChanged()" placeholder="years" style="${inputStyle}"/>
         </div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Height</div>
-          <input id="profile-height" type="number" inputmode="decimal" min="100" max="250" value="${p.heightCm ?? ''}" placeholder="cm" style="${inputStyle}"/>
+          <input id="profile-height" type="number" inputmode="decimal" min="100" max="250" value="${p.heightCm ?? ''}" onchange="App.profileFieldChanged()" placeholder="cm" style="${inputStyle}"/>
         </div>
       </div>
       <div style="font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:6px;">Sex (used by the formula)</div>
@@ -4861,15 +4936,24 @@ function renderDesktop(){
               ${open ? `
                 <div style="padding:0 18px 12px 164px;">
                   ${(() => { const fc = mealFiberCarbs(meal); return !fc ? '' : `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0 10px;font-size:12px;color:var(--ink-2);"><span>Fiber : Carbs ratio</span><span style="display:flex;align-items:center;gap:8px;"><span class="num" style="font-weight:700;">${fc.ratio===null ? 'No fiber' : '1 : '+fc.ratio}</span><span class="pill pill-${fc.tier}">${fc.label}</span></span></div>`; })()}
-                  ${meal.items.map(item => `
+                  ${meal.items.map((item, idx) => {
+                    const hasComps = Array.isArray(item.components) && item.components.length > 0;
+                    const dKey = meal.id + ':' + idx;
+                    const itemOpen = hasComps && dt.expandedItemKey === dKey;
+                    return `
                     <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:12px;">
-                      <div style="color:var(--ink-2);">${item.name}</div>
+                      <div ${hasComps ? `onclick="App.toggleItemExpand('${dKey}')"` : ''} style="color:var(--ink-2);${hasComps ? 'cursor:pointer;' : ''}">${item.name}${hasComps ? `<span style="color:var(--brand);font-size:10.5px;font-weight:600;margin-left:8px;">${itemOpen ? '&#9662; Hide' : '&#9656; Show'} ${item.components.length} ingredient${item.components.length>1?'s':''}</span>` : ''}</div>
                       <div style="display:flex;gap:14px;">
                         <div style="color:var(--muted);">P ${item.p}g · C ${item.c}g · F ${item.f}g</div>
                         <div class="num" style="font-weight:700;width:40px;text-align:right;">${item.kcal}</div>
                       </div>
                     </div>
-                  `).join('')}
+                    ${itemOpen ? item.components.map(cp => `
+                    <div style="display:flex;justify-content:space-between;padding:2px 0 2px 14px;font-size:11.5px;color:var(--muted);">
+                      <div>${cp.name}, ${cp.weight}${cp.unit}</div>
+                      <div class="num" style="width:40px;text-align:right;">${cp.kcal}</div>
+                    </div>`).join('') : ''}`;
+                  }).join('')}
                 </div>
               ` : ''}
             </div>`;
@@ -4917,6 +5001,8 @@ function renderDesktop(){
 
 /* ================= BOOT ================= */
 App.loadLocal();
+App.restoreProfileFallback();
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* ignore */ }
 App.checkDayRollover();
 App.render();
 
