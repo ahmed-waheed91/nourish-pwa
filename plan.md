@@ -4,7 +4,12 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-09-23 (seventh checkpoint — see "Sugar limit: whole-fruit/vegetable exemption"
+_Last updated 2026-10-02 (eighth checkpoint — see "Dish rows, profile persistence, and search" near
+the end: composed Saved Foods now log as ONE expandable dish row instead of separate ingredient rows;
+the Settings profile (age/height/sex/activity) autosaves, can no longer be blanked by an invalid
+field, and has a separate backup copy; Memory/Log-food search matches words in any order; and a
+"Search in: All | This tab only" toggle. All both-apps functional, pushed, **not yet confirmed on a
+real phone**). Earlier checkpoint, seventh (2026-09-23; see "Sugar limit: whole-fruit/vegetable exemption"
 near the end: a per-item checkbox excludes whole fruit/veg sugar from the daily sugar ceiling check
 everywhere it's evaluated, while every displayed gram figure stays the true honest total; plus a
 same-day follow-up fix so the Sugar tile's own tap-in breakdown modal explains the exclusion instead
@@ -1850,6 +1855,88 @@ modal's per-meal "Where it came from" list also gets a small inline "Whole fruit
 tag so it's clear item-by-item which sugar didn't count. **User confirmed this working on a real
 phone.** Commits: `4899d41` / `7edae27`.
 
+## Dish rows, profile persistence, and search (2026-10-02, eighth checkpoint) — both apps, functional
+
+Three user requests in one session, each answered with a plan first and built only after "yes go
+ahead with those defaults". All pushed to both apps; **not yet confirmed on a real phone**. Patched
+with PowerShell scripts that assert exact match counts (BOM-prefixed because the scripts embed
+non-ASCII), applied identically to both `index.html` files.
+
+### 46. Composed Saved Foods log as ONE dish row with an expandable ingredient list
+
+Before: `addComposedFoodToMeal()` pushed one meal item *per component*, so a logged dish showed up as
+loose ingredients and the dish name was lost. Now it pushes a single item, e.g. "Chicken curry, 350g"
+(the weight suffix only when every component shares one unit), carrying the summed kcal/macros plus
+`components: [{name, weight, unit, kcal, p, c, f, fib, sugar, sodium, wholeProduce}]` — a **frozen
+snapshot taken at logging time**, so later edits to the Saved Food never rewrite past days. Dish
+totals are summed from the already-rounded component values so the breakdown always adds up to the row.
+- **Sugar-exemption interaction:** a dish can mix whole fruit with honey, so the per-item
+  `wholeProduce` flag can't describe it. A dish row carries its own `sugarCounted` (sum of the
+  non-whole-produce components) and `computeConsumedTotals` now uses
+  `it.sugarCounted ?? (it.wholeProduce ? 0 : it.sugar)` — plain items and old logged data fall through
+  to the old behavior. Displayed sugar stays the true total.
+- **Display:** Today meal list row gets a "▸ Show N ingredients / ▾ Hide" tap target
+  (`App.toggleItemExpand(key)`, `state.today.expandedItemKey`, key = `mealId:index`, cleared on
+  remove); desktop dashboard meal list has the same; the "Where it came from" modal shows the dish
+  with indented per-ingredient amounts for the stat being viewed, plus an "X g whole fruit/veg — not
+  counted" note for a dish's excluded sugar; the PDF meal tables add grey smaller sub-rows
+  ("   - Apple, 150g") under the dish (the Meal total row still sums dish rows only — no double count).
+- **Not changed:** days logged before this change keep their separate ingredient rows (no reliable
+  way to regroup them; user agreed). The checkbox-list path (`confirmAddSelectedFoods`, % scaling)
+  already logged a dish as one row and is untouched.
+- Verified live: apple 150g (wholeProduce) + honey 20g → 1 row, 139 kcal, sugar 31.4g, counted 16.4g.
+Commits: `2396157` (Nourish) / `f421864` (BilliFit) — shared with #47.
+
+### 47. Profile (Settings → "Your profile") no longer loses its values
+
+User reported all four profile fields (age, height, sex, activity) sometimes resetting while the
+Calories/targets stayed — which also rules out a whole-storage wipe. **Root cause is not proven**;
+the code-level problems found and fixed:
+1. Age/height were read from the inputs only on "Save profile" or a sex/activity chip tap — typing
+   then leaving the tab discarded them, and any re-render (e.g. the 2.2s post-Save timer) wiped typed
+   text. Fix: `profileFieldChanged()` on each input's `onchange` reads + `saveLocal()`s quietly with
+   no re-render (a re-render would steal typing focus).
+2. `readProfileInputs()` wrote `null` over a saved value whenever a field was blank or out of range
+   (half-typed number, height in feet). Now `readProfileInputs(allowClear)`: blank only clears on an
+   explicit Save; an out-of-range number is ignored and Save shows "Age must be 10 to 110 / Height must
+   be 100 to 250 cm — kept your previous value". The post-Save timer calls `readProfileInputs(false)`
+   before re-rendering so in-progress typing survives.
+3. Separate backup: `PROFILE_BACKUP_KEY` (`nourish_profile_backup_v1` / BilliFit
+   `billifit_profile_backup_v1`) is written on every `saveLocal()` when any of age/sex/height is set;
+   `restoreProfileFallback()` runs right after `loadLocal()` at boot and restores it only if the main
+   blob came back with an empty profile. It's removed only when the user explicitly Saves with all
+   fields cleared.
+4. `navigator.storage.persist()` is requested at boot (lowers eviction risk for the installed PWA).
+If it still resets on the user's phone, ask *when* it happens; unproven suspects left: two app
+instances (installed PWA + a browser tab) with a stale in-memory state saving over newer data.
+Verified live: autosave on change, blank/invalid not wiping on chip tap or Save, restore from backup
+after deleting `profile` from the main blob. Commits shared with #46.
+
+### 48. Memory / Log-food search matches words in any order
+
+Search was a plain substring test of the whole typed phrase against `data-name`, so "home made
+hazelnut" missed "Hazelnut Coffee - Home Made". New global `nameMatches(name, query)` (above
+`mealKcal`): both sides are lowercased and split on non-letter/digit runs (`/[^\p{L}\p{N}]+/u`), and
+every query word must appear (as a substring, so "haz cof" works) in the space-joined name words —
+punctuation and extra spaces ignored. Replaced the 5 `data-name … .includes(q)` sites (`filterRows`,
+`filterAddFoodRows`, `filterLibraryRows`, `filterArchiveRows`, the post-edit row refresh in
+`patchLibraryRow`). Deliberately not done: typo tolerance (false matches on a small list). The live
+USDA online search and the USDA description matcher are untouched. Commit: `99a8477` / `76b6620`
+(shared with #49).
+
+### 49. "Search in: All | This tab only" toggle
+
+Combined search (Saved + Ingredients + USDA together) stays the default; a two-chip row under the
+search box in the Memory tab (`#lib-scope-*`) and the Log-food picker (`#addfood-scope-*`) switches to
+searching only the active tab. State: `library.searchScope` / `addfood.searchScope` (`'all'|'tab'`),
+not persisted, reset to `'all'` in `setScreen` whenever that screen is opened. `setSearchScope(which,
+scope)` flips chip classes and re-runs the filter directly (no re-render, so typed text survives).
+In tab mode the other groups stay hidden while searching, source tags are not shown, and the context
+label reads "Matching saved foods only" etc. `setAddFoodTab`/`setLibraryTab` carry the typed query
+across tab switches **in tab mode only** (in All mode the box still clears, as before). Archive and
+Quick-add tabs have no toggle. Verified live in both apps (group visibility per mode, query kept
+across tab switch, reset on re-entry, no console errors).
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -1878,12 +1965,18 @@ baseline. The maintenance-calorie work (items 39-42) accounts for most of this c
 checkpoint, after the whole-fruit/vegetable sugar exemption, items 44-45): ~312 KB (319,063
 bytes)** — a small ~3.7 KB bump for the checkbox/form field, the `sugarCounted` split, and the
 breakdown-modal explanation. Still well under the doubling trigger, not flagged, but noting the
-running total here so the next check has an accurate comparison point.
+running total here so the next check has an accurate comparison point. **Current size as of
+2026-10-02 (eighth checkpoint, items 46-49: dish rows, profile persistence, any-order search,
+search-scope toggle): ~321 KB (328,952 bytes)** — a ~9.9 KB bump; still far below the ~2x trigger.
 
 ## Immediate next steps (pick up here)
 
-No feature is in progress. Everything through the fifth checkpoint (items 1-35, 2026-08-28 through
-2026-09-20) is confirmed working by the user on a real device — see earlier revisions of this file
+No feature is in progress. **Items 46-49 (2026-10-02, eighth checkpoint — dish rows with expandable
+ingredients, profile persistence hardening, any-order search, the All / This-tab-only search toggle)
+are pushed and verified in the local dev preview only — not yet confirmed on a real phone.** Ask how
+they held up; for the profile fix specifically ask whether the profile still resets and *when* (the
+root cause was never proven — see item 47). Everything through the fifth checkpoint (items 1-35,
+2026-08-28 through 2026-09-20) is confirmed working by the user on a real device — see earlier revisions of this file
 for that full batch-by-batch history if needed, or the section headers above. **Items 44-45
 (2026-09-23, seventh checkpoint — the whole-fruit/vegetable sugar exemption and its breakdown-modal
 fix) are confirmed working by the user on a real phone.** **Items 36-43 (2026-09-23, sixth
