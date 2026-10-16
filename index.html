@@ -317,7 +317,7 @@ function computeConsumedTotals(meals){
   const t = { calories:0, protein:0, carbs:0, fat:0, fiber:0, sugar:0, sugarCounted:0, sodium:0 };
   meals.forEach(meal => meal.items.forEach(it => {
     t.calories += it.kcal; t.protein += it.p; t.carbs += it.c; t.fat += it.f; t.fiber += it.fib;
-    t.sugar += it.sugar||0; t.sugarCounted += (it.sugarCounted ?? (it.wholeProduce ? 0 : (it.sugar||0))); t.sodium += it.sodium||0;
+    t.sugar += it.sugar||0; t.sugarCounted += itemSugarCounted(it); t.sodium += it.sodium||0;
   }));
   const round1 = n => Math.round(n*10)/10;
   return { calories:Math.round(t.calories), protein:round1(t.protein), carbs:round1(t.carbs), fat:round1(t.fat), fiber:round1(t.fiber), sugar:round1(t.sugar), sugarCounted:round1(t.sugarCounted), sodium:Math.round(t.sodium) };
@@ -811,6 +811,18 @@ function statusFor(id, value){
   if (value > t.high) return 'critical';
   return 'good';
 }
+// The ONE place that decides which number a status check runs against. Sugar is judged on the
+// "counted" figure (whole fruit/veg excluded); every other stat on its own value. `totals` is anything
+// shaped like a day's totals: today's consumed totals, a history entry, a stored day. Every screen that
+// shows a good/under/over verdict must get its input from here (the Self-check page verifies this).
+function statusValueFor(id, totals){
+  if (id === 'sugar') return totals.sugarCounted ?? totals.sugar ?? 0;
+  return totals[id];
+}
+// What one logged item (or one dish ingredient) contributes to the counted sugar.
+function itemSugarCounted(it){
+  return it.sugarCounted ?? (it.wholeProduce ? 0 : (it.sugar||0));
+}
 function statusLabelFor(id, value){
   const s = statusFor(id, value);
   if (s === 'good') return 'In range';
@@ -883,6 +895,13 @@ const App = {
   },
 
   setView(v){ this.state.view = v; this.render(); },
+  // Self-check page: runs on open (fixture data only), re-runs on "Run again".
+  openSelfTest(){
+    __selfTestResults = runSelfTests();
+    if (this.state.view !== 'mobile') this.state.view = 'mobile';
+    if (this.state.screen !== 'selftest') this.setScreen('selftest'); else this.render();
+    fillSelfTestVersion();
+  },
   setScreen(s){
     if (this.state.screen === s) return;
     if (s === 'addfood') this.state.addfood.searchScope = 'all';
@@ -1834,7 +1853,7 @@ const App = {
       name: unitSet.size === 1 ? `${food.name}, ${r1(totalW)}${comps[0].unit}` : food.name,
       kcal: Math.round(sumOf('kcal')), p:r1(sumOf('p')), c:r1(sumOf('c')), f:r1(sumOf('f')),
       fib:r1(sumOf('fib')), sugar:r1(sumOf('sugar')), sodium:Math.round(sumOf('sodium')),
-      sugarCounted: r1(comps.reduce((a,x) => a + (x.wholeProduce ? 0 : x.sugar), 0)),
+      sugarCounted: r1(comps.reduce((a,x) => a + itemSugarCounted(x), 0)),
       components: comps,
     });
     if (this.state.addfood.targetDate) this.recomputeHistoryDay(this.state.addfood.targetDate);
@@ -2125,7 +2144,7 @@ const App = {
         ['Fat', 'fat', entry.fat, `${entry.fat} g`],
         ['Fiber', 'fiber', entry.fiber, `${entry.fiber} g`],
         // Sugar's target check excludes whole-fruit/veg sugar; the printed gram figure stays true.
-        ['Sugar', 'sugar', entry.sugarCounted ?? entry.sugar, `${entry.sugar} g`],
+        ['Sugar', 'sugar', statusValueFor('sugar', entry), `${entry.sugar} g`],
         ['Sodium', 'sodium', entry.sodium, `${entry.sodium} mg`],
         ['Water', 'water', entry.waterMl/1000, `${formatLiters(entry.waterMl)} L`],
       ];
@@ -2774,6 +2793,7 @@ function renderStage(){
     else if (s.screen === 'history') inner = renderHistory();
     else if (s.screen === 'trends') inner = renderTrends();
     else if (s.screen === 'settings') inner = renderSettings();
+    else if (s.screen === 'selftest') inner = renderSelfTest();
     else inner = renderExport();
     stage.innerHTML = `<div class="phone">${inner}</div>`;
   }
@@ -2819,7 +2839,7 @@ function buildTodayStats(consumed){
     const value = consumed[key];
     // Sugar's own good/bad evaluation excludes whole-fruit/veg sugar (see computeConsumedTotals);
     // the displayed gram figure stays the true, honest total either way.
-    const statusValue = id === 'sugar' ? (consumed.sugarCounted ?? value) : value;
+    const statusValue = statusValueFor(id, consumed);
     const info = targetInfo(id);
     const status = statusFor(id, statusValue);
     return {
@@ -3080,7 +3100,7 @@ function renderStatDetailModal(id, consumed){
   const value = consumed[id];
   // Sugar's status/detail exclude whole-fruit/veg sugar, same as the tile itself — the big
   // number above stays the true, honest total either way.
-  const statusValue = id === 'sugar' ? (consumed.sugarCounted ?? value) : value;
+  const statusValue = statusValueFor(id, consumed);
   const status = statusFor(id, statusValue);
   const pillCls = status==='good' ? 'good' : (status==='warning' ? 'warn' : 'crit');
   const fmt = n => (id === 'sodium' ? Math.round(n) : Math.round(n*10)/10).toLocaleString();
@@ -4080,7 +4100,7 @@ function renderHistory(){
                   <div class="dot" style="background:${dotColor(statusFor('calories', d.calories)==='good')};"></div>
                   <div class="dot" style="background:${dotColor(statusFor('protein', d.protein)==='good')};"></div>
                   <div class="dot" style="background:${dotColor(statusFor('fiber', d.fiber)==='good')};"></div>
-                  <div class="dot" style="background:${dotColor(statusFor('sugar', d.sugarCounted ?? d.sugar)==='good')};"></div>
+                  <div class="dot" style="background:${dotColor(statusFor('sugar', statusValueFor('sugar', d))==='good')};"></div>
                 </div>
               </div>
               <div class="num disp" style="font-size:15px;font-weight:800;">${Math.round(d.calories)} <span style="font-size:11px;font-weight:600;color:var(--muted);">kcal</span></div>
@@ -4614,7 +4634,7 @@ function renderTrends(){
   const valueForDay = (d) => {
     if (cat.id === 'weight') return typeof d.weightKg === 'number' ? d.weightKg : null;
     if (cat.id === 'water') return Math.round((d.waterMl/1000)*100)/100;
-    if (cat.id === 'sugar') return d.sugarCounted ?? d.sugar;
+    if (cat.id === 'sugar') return statusValueFor('sugar', d);
     return d[cat.id];
   };
   const windowed = realDays.slice(0, n);
@@ -4874,7 +4894,7 @@ function renderRecentExportsModal(exports){
         ['Carbs', entry.carbs+' g', statusFor('carbs', entry.carbs)],
         ['Fat', entry.fat+' g', statusFor('fat', entry.fat)],
         ['Fiber', entry.fiber+' g', statusFor('fiber', entry.fiber)],
-        ['Sugar', entry.sugar+' g', statusFor('sugar', entry.sugarCounted ?? entry.sugar)],
+        ['Sugar', entry.sugar+' g', statusFor('sugar', statusValueFor('sugar', entry))],
         ['Sodium', Math.round(entry.sodium||0)+' mg', statusFor('sodium', entry.sodium||0)],
       ];
       const macroCals = { protein: entry.protein*4, carbs: entry.carbs*4, fat: entry.fat*9 };
@@ -5117,6 +5137,10 @@ function renderSettings(){
       ${renderProfileCard()}
       ${fields.map(([id,label]) => settingsCard(id,label)).join('')}
       <div style="font-size:10.5px;color:var(--muted);line-height:1.4;margin-top:4px;">Changing a target here updates status colors and bands on Today, Trends and exports right away — nothing about what you've actually logged changes.</div>
+      <div class="card pad" role="button" tabindex="0" onclick="App.openSelfTest()" style="margin-top:14px;cursor:pointer;">
+        <div style="font-size:13px;font-weight:700;">Self-check</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-top:3px;">Runs quick tests of the app's own math on made-up sample data and shows what passed. Nothing of yours is read or changed.</div>
+      </div>
     </div>
     <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;">
       ${App.state.settingsStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${App.state.settingsStatus}</div>` : ''}
@@ -5211,7 +5235,7 @@ function renderDesktop(){
             ['Sodium', consumed.sodium, 'sodium'],
           ].map(([label,rawValue,id]) => {
             const info = targetInfo(id);
-            const s = statusFor(id, id === 'sugar' ? (consumed.sugarCounted ?? rawValue) : rawValue);
+            const s = statusFor(id, statusValueFor(id, consumed));
             const color = s==='good' ? 'var(--good)' : (s==='warning' ? 'var(--warning)' : 'var(--critical)');
             return [label, rawValue.toLocaleString(), info.unit, info.label, color];
           }).map(([label,value,unit,target,color]) => `
@@ -5338,6 +5362,180 @@ function renderDesktop(){
   `;
 }
 
+/* ================= SELF-CHECK PAGE (Settings > Self-check, or open the app with #selftest) ================= */
+// Runs the app's own math against a throw-away copy of the state filled with sample data - never the
+// real log - and writes nothing. Results live only in this variable until the page is closed.
+let __selfTestResults = null;
+function runSelfTests(){
+  const out = [];
+  const realState = App.state;
+  const snap = () => { try { return JSON.stringify(realState.today) + '|' + localStorage.getItem(LOCAL_STORAGE_KEY); } catch (e){ return 'n/a'; } };
+  const before = snap();
+  const check = (group, name, fn) => {
+    let res;
+    try { res = fn(); } catch (e){ res = 'Error: ' + ((e && e.message) || e); }
+    out.push({ group, name, ok: res === true, detail: res === true ? '' : String(res) });
+  };
+  const eq = (got, want) => JSON.stringify(got) === JSON.stringify(want) ? true : 'got ' + JSON.stringify(got) + ', expected ' + JSON.stringify(want);
+  // Fixture state: the real state with default targets and sample data swapped in (shallow copy; nothing here mutates the real parts).
+  const mk = (meals, history) => Object.assign({}, realState, {
+    targets: defaultTargets(), view:'mobile', screen:'today', dayHistory: history || [],
+    today: Object.assign({}, realState.today, { meals, waterMl:0, weightKg:null, expandedStat:null, macroInfoOpen:false, expandedMeal:null, confirmRemoveKey:null }),
+    history: Object.assign({}, realState.history, { view:'day', openIdx:null, confirmDeleteDate:null }),
+  });
+  const withFixture = (meals, history, fn) => { App.state = mk(meals, history); try { return fn(App.state); } finally { App.state = realState; } };
+
+  const item = (name, kcal, sugar, extra) => Object.assign({ name, kcal, p:1, c:10, f:1, fib:1, sugar, sodium:10 }, extra || {});
+  const meal = (name, items) => ({ id:name.toLowerCase(), name, subtitle:'Sample', items });
+  const dish = item('Sample dish, 300g', 250, 30, { sugarCounted:8, components:[
+    { name:'Mango', weight:100, unit:'g', kcal:60, p:1, c:15, f:0, fib:2, sugar:22, sodium:0, wholeProduce:true },
+    { name:'Yoghurt', weight:200, unit:'g', kcal:190, p:9, c:20, f:8, fib:0, sugar:8, sodium:80, wholeProduce:false } ] });
+  // Day A: lots of whole fruit - 75 g true sugar but only 20 g counted, so it must read "in range" (ceiling 50 g).
+  const mealsA = [ meal('Breakfast', [item('Banana', 105, 14, { wholeProduce:true }), item('Apple', 95, 19, { wholeProduce:true })]), meal('Lunch', [dish, item('Yoghurt tub', 120, 12)]) ];
+  // Day B: the same plus a dessert - 115 g true, 60 g counted, so it must read "over".
+  const mealsB = mealsA.concat([meal('Dinner', [item('Dessert', 300, 40)])]);
+  const day = (date, sugar, counted) => { const d = { date, calories:1600, protein:140, carbs:170, fat:60, fiber:32, sugar, sodium:2200, waterMl:2500, weightKg:null, meals:[], note:'', tag:null }; if (counted !== undefined) d.sugarCounted = counted; return d; };
+  const hist = [day('2026-01-01', 60), day('2026-01-02', 40), day('2026-01-03', 75, 20)];
+
+  // ---- Totals ----
+  const T = computeConsumedTotals;
+  check('Totals', 'A plain item counts fully toward counted sugar', () => eq(T([meal('Lunch', [item('Biscuit', 100, 10)])]).sugarCounted, 10));
+  check('Totals', 'Whole fruit adds to the true total but not the counted sugar', () => { const t = T([meal('Breakfast', [item('Banana', 105, 14, { wholeProduce:true })])]); return eq([t.sugar, t.sugarCounted], [14, 0]); });
+  check('Totals', 'A dish row counts only its non-fruit part', () => { const t = T([meal('Lunch', [dish])]); return eq([t.sugar, t.sugarCounted], [30, 8]); });
+  check('Totals', 'An old logged item with no counted figure falls back to its sugar', () => eq(T([meal('Lunch', [item('Old', 100, 9)])]).sugarCounted, 9));
+  check('Totals', 'Sample day A: 75 g true sugar, 20 g counted', () => { const t = T(mealsA); return eq([t.sugar, t.sugarCounted], [75, 20]); });
+  check('Totals', 'Sample day A: calories add up', () => eq(T(mealsA).calories, 570));
+
+  // ---- The one shared rule ----
+  check('Shared sugar rule', 'Sugar is judged on the counted figure', () => eq(statusValueFor('sugar', { sugar:75, sugarCounted:20 }), 20));
+  check('Shared sugar rule', 'A counted figure of 0 is respected, not treated as missing', () => eq(statusValueFor('sugar', { sugar:14, sugarCounted:0 }), 0));
+  check('Shared sugar rule', 'An old stored day with no counted figure uses its sugar', () => eq(statusValueFor('sugar', { sugar:42 }), 42));
+  check('Shared sugar rule', 'Other stats are judged on their own value', () => eq(statusValueFor('protein', { protein:140, sugar:5 }), 140));
+
+  // ---- Status rules (default targets) ----
+  const st = (id, v) => withFixture([], [], () => statusFor(id, v));
+  check('Status rules', 'Calories 1500 and 1700 are both in range', () => eq([st('calories', 1500), st('calories', 1700)], ['good', 'good']));
+  check('Status rules', 'Calories 1499 is under and 1701 is over', () => eq([st('calories', 1499), st('calories', 1701)], ['warning', 'critical']));
+  check('Status rules', 'Sugar 50 g is fine, 50.1 g is over', () => eq([st('sugar', 50), st('sugar', 50.1)], ['good', 'critical']));
+  check('Status rules', 'Fiber 30 g is fine, 29.9 g is under', () => eq([st('fiber', 30), st('fiber', 29.9)], ['good', 'warning']));
+  check('Status rules', 'Labels read Under / In range / Over', () => withFixture([], [], () => eq([statusLabelFor('calories', 1000), statusLabelFor('calories', 1600), statusLabelFor('calories', 2000)], ['Under', 'In range', 'Over'])));
+  check('Status rules', 'Old sodium ceiling 2300 becomes the 2000-2500 range', () => { const t = { sodium:{ kind:'ceiling', value:2300 } }; migrateSodiumTarget(t); return eq([t.sodium.kind, t.sodium.low, t.sodium.high], ['range', 2000, 2500]); });
+  check('Status rules', 'A custom old sodium ceiling stays as the upper bound', () => { const t = { sodium:{ kind:'ceiling', value:2000 } }; migrateSodiumTarget(t); return eq([t.sodium.low, t.sodium.high], [1300, 2000]); });
+
+  // ---- Does every screen show the same sugar verdict? ----
+  const doc = html => new DOMParser().parseFromString(html, 'text/html');
+  const goodOfLabel = t => /in range/i.test(t);
+  const goodOfDot = el => /--good/.test((el && el.getAttribute('style')) || '');
+  const gather = (meals, history) => withFixture(meals, history, s => {
+    const r = {};
+    const safe = (k, f) => { try { r[k] = f(); } catch (e){ r[k] = 'Error: ' + ((e && e.message) || e); } };
+    const consumed = computeConsumedTotals(s.today.meals);
+    safe('tile', () => { const c = [...doc(renderToday()).querySelectorAll('.card[onclick]')].find(x => x.getAttribute('onclick').indexOf("'sugar'") >= 0); return { good: goodOfLabel(c.querySelector('.pill').textContent), shown: c.querySelector('.num').textContent }; });
+    safe('modal', () => goodOfLabel(doc(renderStatDetailModal('sugar', consumed)).querySelector('.pill').textContent));
+    safe('desktop', () => goodOfDot([...doc(renderDesktop()).querySelectorAll('.d-stat')].find(x => /^\s*Sugar/.test(x.textContent)).querySelector('.dot')));
+    safe('history', () => [...doc(renderHistory()).querySelectorAll('.accordion-head')].map(h => goodOfDot(h.querySelectorAll('.dot')[3])));
+    return r;
+  });
+  const A = gather(mealsA, hist), B = gather(mealsB, hist);
+  [['A', A, true, 75, 20], ['B', B, false, 115, 60]].forEach(([k, r, good, raw, cnt]) => {
+    const g = 'Sugar verdict matches on every screen';
+    const tag = 'Day ' + k + ' (' + raw + ' g true, ' + cnt + ' g counted) ';
+    const want = good ? 'in range' : 'over';
+    check(g, tag + '- Today tile says ' + want, () => r.tile && r.tile.good === good ? true : 'got ' + JSON.stringify(r.tile));
+    check(g, tag + '- tile still shows the true total', () => r.tile && r.tile.shown && r.tile.shown.replace(/,/g, '').indexOf(String(raw)) >= 0 ? true : 'got ' + JSON.stringify(r.tile));
+    check(g, tag + '- breakdown popup says ' + want, () => r.modal === good ? true : 'got ' + JSON.stringify(r.modal));
+    check(g, tag + '- desktop dashboard dot says ' + want, () => r.desktop === good ? true : 'got ' + JSON.stringify(r.desktop));
+    check(g, tag + '- History dot says ' + want, () => Array.isArray(r.history) && r.history[0] === good ? true : 'got ' + JSON.stringify(r.history));
+  });
+  check('Sugar verdict matches on every screen', 'History reads stored days: new format, old format under, old format over', () => eq(A.history && A.history.slice(1), [true, true, false]));
+
+  // ---- Every screen still draws ----
+  [['Today', renderToday], ['History', renderHistory], ['Trends', renderTrends], ['Data', renderExport], ['Settings', renderSettings], ['Memory', renderLibrary], ['Add food', renderAddFood], ['Desktop dashboard', renderDesktop]].forEach(([n, fn]) => {
+    check('Screens draw', n + ' screen renders', () => withFixture(mealsA, hist, () => { const h = fn(); return typeof h === 'string' && h.length > 200 ? true : 'rendered ' + (typeof h === 'string' ? h.length + ' characters' : typeof h); }));
+  });
+
+  // ---- Search ----
+  const nm = 'Hazelnut Coffee - Home Made';
+  check('Search', 'Words in the saved order: "hazelnut coffee"', () => eq(nameMatches(nm, 'hazelnut coffee'), true));
+  check('Search', 'Words in any order: "home made hazelnut"', () => eq(nameMatches(nm, 'home made hazelnut'), true));
+  check('Search', 'Words in any order: "home made coffee"', () => eq(nameMatches(nm, 'home made coffee'), true));
+  check('Search', 'Part-words work: "haz cof"', () => eq(nameMatches(nm, 'haz cof'), true));
+  check('Search', 'Punctuation is ignored: "coffee-home"', () => eq(nameMatches(nm, 'coffee-home'), true));
+  check('Search', 'A word that is not there fails: "hazelnut tea"', () => eq(nameMatches(nm, 'hazelnut tea'), false));
+  check('Search', 'An empty search shows everything', () => eq(nameMatches(nm, '  '), true));
+
+  // ---- Barcodes ----
+  check('Barcodes', 'Leading zeros are ignored when comparing', () => eq(sameBarcode('00012345', '12345'), true));
+  check('Barcodes', 'Different codes do not match', () => eq(sameBarcode('12345', '12346'), false));
+  check('Barcodes', 'Two empty codes do not match', () => eq(sameBarcode('', ''), false));
+  check('Barcodes', 'Spaces and dashes are stripped', () => eq(normalizeBarcode('64 1234-5'), '6412345'));
+  check('Barcodes', 'Open Food Facts product is read correctly (name, unit, values)', () => {
+    const p = parseOffProduct({ product_name:'Fresh Milk', brands:'Almarai, Other', quantity:'1 L', nutriments:{ 'energy-kcal_100g':60, 'proteins_100g':3.2, 'carbohydrates_100g':4.8, 'fat_100g':3.3, 'sugars_100g':4.8, 'sodium_100g':0.044 } });
+    return eq([p.name, p.unit, p.vals.kcal, p.vals.sodium, p.missing], ['Almarai Fresh Milk', 'ml', 60, 44, ['fiber']]);
+  });
+  check('Barcodes', 'The brand is not repeated when the name already has it', () => eq(parseOffProduct({ product_name:'Almarai Milk', brands:'Almarai', nutriments:{} }).name, 'Almarai Milk'));
+  check('Barcodes', 'Calories fall back to kilojoules', () => eq(parseOffProduct({ product_name:'X', nutriments:{ 'energy-kj_100g':418.4 } }).vals.kcal, 100));
+  check('Barcodes', 'Sodium falls back to salt', () => eq(parseOffProduct({ product_name:'X', nutriments:{ salt_100g:1 } }).vals.sodium, 400));
+  check('Barcodes', 'Missing nutrients are listed, not guessed', () => eq(parseOffProduct({ product_name:'Y' }).missing.length, 7));
+
+  // ---- Backup reminder ----
+  const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString();
+  const bk = (last, nDays) => withFixture([], Array.from({ length:nDays }, (_, i) => day('2026-01-0' + (i + 1), 10)), s => { s.lastBackupAt = last; return backupStatus(); });
+  check('Backup reminder', 'No backup yet with 2 logged days: no nag', () => eq(bk(null, 2).overdue, false));
+  check('Backup reminder', 'No backup yet with 3 logged days: nag', () => eq(bk(null, 3).overdue, true));
+  check('Backup reminder', 'Backed up 2 days ago: fine, label says so', () => { const b = bk(daysAgo(2), 5); return eq([b.overdue, b.label], [false, 'Last backup: 2 days ago']); });
+  check('Backup reminder', 'Backed up 8 days ago: overdue', () => eq(bk(daysAgo(8), 5).overdue, true));
+  check('Backup reminder', 'Backed up just now: label says today', () => eq(bk(daysAgo(0), 5).label, 'Last backup: today'));
+
+  // ---- Safety ----
+  check('Safety', 'Your real log and saved copy were not touched by these checks', () => App.state === realState && snap() === before ? true : 'the real state changed during the checks');
+  return out;
+}
+function renderSelfTest(){
+  const r = __selfTestResults || [];
+  const bad = r.filter(x => !x.ok);
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const groups = [];
+  r.forEach(x => { let g = groups.find(y => y.name === x.group); if (!g){ g = { name:x.group, rows:[] }; groups.push(g); } g.rows.push(x); });
+  const tone = bad.length ? 'var(--critical)' : 'var(--good)';
+  return `
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+        <button onclick="App.setScreen('settings')" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="disp" style="font-size:18px;font-weight:800;">Self-check</div>
+      </div>
+      <div style="font-size:12px;color:var(--ink-2);padding-left:34px;">The app tests its own math on sample data. Nothing of yours is read or changed.</div>
+    </div>
+    <div class="scroll-area" style="padding:16px 18px 24px 18px;">
+      <div class="card pad" style="margin-bottom:14px;border-color:${tone};">
+        <div class="disp" style="font-size:20px;font-weight:800;color:${tone};">${bad.length ? bad.length + (bad.length === 1 ? ' check failed' : ' checks failed') : 'All ' + r.length + ' checks passed'}</div>
+        <div style="font-size:12px;color:var(--ink-2);margin-top:4px;">${r.length - bad.length} of ${r.length} passed</div>
+        <div id="selftest-version" style="font-size:11px;color:var(--muted);margin-top:6px;">&nbsp;</div>
+        <button onclick="App.openSelfTest()" style="margin-top:10px;padding:9px 16px;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">Run again</button>
+      </div>
+      ${groups.map(g => `
+        <div class="card pad" style="margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;margin-bottom:6px;">${esc(g.name)}</div>
+          ${g.rows.map(x => `
+            <div style="display:flex;gap:9px;align-items:flex-start;padding:5px 0;font-size:12px;line-height:1.35;">
+              <div class="dot" style="margin-top:4px;flex-shrink:0;background:${x.ok ? 'var(--good)' : 'var(--critical)'};"></div>
+              <div style="min-width:0;"><div>${esc(x.name)}</div>${x.ok ? '' : `<div style="color:var(--critical);font-weight:600;margin-top:2px;word-break:break-word;">${esc(x.detail)}</div>`}</div>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>
+  `;
+}
+// Shows which app version this phone is actually running (the cache name changes with every release).
+function fillSelfTestVersion(){
+  if (!window.caches) return;
+  caches.keys().then(keys => {
+    const el = document.getElementById('selftest-version');
+    if (el) el.textContent = 'App version on this device: ' + (keys.filter(k => /v[0-9]+$/.test(k)).join(', ') || 'not cached yet');
+  }).catch(() => {});
+}
+
 /* ================= BOOT ================= */
 App.loadLocal();
 App.restoreProfileFallback();
@@ -5364,6 +5562,9 @@ window.addEventListener('popstate', (e) => {
   App._depth = targetDepth;
   App._navigatingFromPopstate = false;
 });
+
+// Open the app at ...index.html#selftest to jump straight to the Self-check page (handy on a computer).
+if (location.hash === '#selftest') App.openSelfTest();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
