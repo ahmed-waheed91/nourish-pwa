@@ -284,6 +284,17 @@
 <script>
 /* ================= DATA ================= */
 
+// Memory lists are stored in the order items were saved (newest at the end). This orders them for display:
+// A-Z (ignores capitals and accents, numbers in natural order) or newest first. The stored list is never changed.
+function sortMemoryItems(list){
+  if (App.state.memorySort === 'newest') return list.slice().reverse();
+  return list.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity:'base', numeric:true }));
+}
+function memorySortRow(){
+  const m = App.state.memorySort === 'newest' ? 'newest' : 'az';
+  const chip = (id, label) => `<button id="memsort-${id}" class="chip ${m === id ? 'active' : ''}" style="padding:4px 11px;font-size:11px;" onclick="App.setMemorySort('${id}')">${label}</button>`;
+  return `<div style="display:flex;align-items:center;gap:6px;margin-top:6px;"><span style="font-size:11px;font-weight:700;color:var(--muted);">Sort:</span>${chip('az', 'A&ndash;Z')}${chip('newest', 'Newest first')}</div>`;
+}
 // Order-independent search: every typed word must appear somewhere in the name (partial words
 // allowed); punctuation and extra spaces are ignored.
 function nameMatches(name, query){
@@ -293,13 +304,16 @@ function nameMatches(name, query){
   const hay = split(name).join(' ');
   return words.every(w => hay.includes(w));
 }
+// The Today banner shows once the last backup is this many days old; Later hides it for the snooze length.
+const BACKUP_OVERDUE_DAYS = 3;
+const BACKUP_SNOOZE_DAYS = 1;
 function backupStatus(){
   const iso = App.state.lastBackupAt;
   const t = iso ? Date.parse(iso) : NaN;
   const loggedDays = (App.state.dayHistory || []).length + (App.state.today.meals.length ? 1 : 0);
   if (!isFinite(t)) return { never:true, days:null, overdue: loggedDays >= 3, label:'No backup yet' };
   const days = Math.max(0, Math.floor((Date.now() - t) / 86400000));
-  return { never:false, days, overdue: days >= 7,
+  return { never:false, days, overdue: days >= BACKUP_OVERDUE_DAYS,
     label: days === 0 ? 'Last backup: today' : (days === 1 ? 'Last backup: yesterday' : 'Last backup: ' + days + ' days ago') };
 }
 function mealKcal(meal){ return Math.round(meal.items.reduce((a,it)=>a+it.kcal,0)*10)/10; }
@@ -447,7 +461,27 @@ function parseOffProduct(p){
   const missing = Object.keys(vals).filter(k => vals[k] == null).map(k => labels[k]);
   return { name, unit, vals, missing };
 }
+// A 12-digit UPC-A and the 13-digit EAN-13 with a leading 0 are the same product, but a database may
+// hold only one of the two forms.
+function barcodeVariants(code){
+  const d = normalizeBarcode(code);
+  if (d.length === 12) return ['0' + d];
+  if (d.length === 13 && d[0] === '0') return [d.slice(1)];
+  return [];
+}
+// Looks the code up as scanned; if that isn't found, quietly tries the same product under its other form.
 async function fetchOffProduct(code){
+  const first = await fetchOffProductOnce(code);
+  if (first.status !== 'notfound') return first;
+  let retry = null;
+  for (const alt of barcodeVariants(code)){
+    const r = await fetchOffProductOnce(alt);
+    if (r.status === 'ok') return r;
+    if (r.status === 'busy' || r.status === 'offline') retry = retry || r;
+  }
+  return retry || first;
+}
+async function fetchOffProductOnce(code){
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 10000);
   try {
@@ -812,11 +846,12 @@ function statusFor(id, value){
   return 'good';
 }
 // The ONE place that decides which number a status check runs against. Sugar is judged on the
-// "counted" figure (whole fruit/veg excluded); every other stat on its own value. `totals` is anything
+// "counted" figure (whole fruit/veg excluded), water in litres, every other stat on its own value. `totals` is anything
 // shaped like a day's totals: today's consumed totals, a history entry, a stored day. Every screen that
 // shows a good/under/over verdict must get its input from here (the Self-check page verifies this).
 function statusValueFor(id, totals){
   if (id === 'sugar') return totals.sugarCounted ?? totals.sugar ?? 0;
+  if (id === 'water') return (totals.waterMl || 0) / 1000;   // stored in ml, judged in litres
   return totals[id];
 }
 // What one logged item (or one dish ingredient) contributes to the counted sugar.
@@ -827,6 +862,10 @@ function statusLabelFor(id, value){
   const s = statusFor(id, value);
   if (s === 'good') return 'In range';
   return s === 'warning' ? 'Under' : 'Over';
+}
+// The pill colour class for a status, so no screen hand-writes its own good/warning/critical mapping.
+function pillClassFor(status){
+  return status === 'good' ? 'pill-good' : (status === 'warning' ? 'pill-warn' : 'pill-crit');
 }
 function detailFor(id, value){
   const t = App.state.targets[id];
@@ -873,7 +912,7 @@ const App = {
       dailyNote:'', noteSaved:false, meals: [], macroInfoOpen:false, dailyTag:null },
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
-    storageAlert: null, lastBackupAt: null, backupSnoozeUntil: 0, backupFlash: null,
+    storageAlert: null, lastBackupAt: null, backupSnoozeUntil: 0, backupFlash: null, memorySort: 'az',
     targets: defaultTargets(),
     addfood: { activeTab:'saved', searchScope:'all', selected:{}, targetMeal:null, targetDate:null, expandedSavedId:null },
     memory: {
@@ -895,6 +934,17 @@ const App = {
   },
 
   setView(v){ this.state.view = v; this.render(); },
+  // Memory / Log-food sort. A re-render re-orders the rows; whatever is typed in the search box is put back and re-applied.
+  setMemorySort(mode){
+    this.state.memorySort = mode === 'newest' ? 'newest' : 'az';
+    const libQ = (document.getElementById('lib-search-input') || {}).value || '';
+    const addQ = (document.getElementById('addfood-search-input') || {}).value || '';
+    this.render();
+    const li = document.getElementById('lib-search-input');
+    if (li && libQ){ li.value = libQ; this.filterLibraryRows(libQ); }
+    const ai = document.getElementById('addfood-search-input');
+    if (ai && addQ){ ai.value = addQ; this.filterAddFoodRows(addQ); }
+  },
   // Self-check page: runs on open (fixture data only), re-runs on "Run again".
   openSelfTest(){
     __selfTestResults = runSelfTests();
@@ -2074,6 +2124,7 @@ const App = {
       maintCorrectionOffset: this.state.maint.correctionOffset || 0,
       lastBackupAt: this.state.lastBackupAt,
       backupSnoozeUntil: this.state.backupSnoozeUntil || 0,
+      memorySort: this.state.memorySort === 'newest' ? 'newest' : 'az',
     };
   },
   exportData(){
@@ -2146,7 +2197,7 @@ const App = {
         // Sugar's target check excludes whole-fruit/veg sugar; the printed gram figure stays true.
         ['Sugar', 'sugar', statusValueFor('sugar', entry), `${entry.sugar} g`],
         ['Sodium', 'sodium', entry.sodium, `${entry.sodium} mg`],
-        ['Water', 'water', entry.waterMl/1000, `${formatLiters(entry.waterMl)} L`],
+        ['Water', 'water', statusValueFor('water', entry), `${formatLiters(entry.waterMl)} L`],
       ];
       const statusList = summaryDefs.map(([,id,value]) => statusFor(id, value));
       const summaryRows = summaryDefs.map(([label,id,value,consumedStr], i) => [
@@ -2660,7 +2711,7 @@ const App = {
     this.render();
     setTimeout(() => { if (this.state.backupFlash){ this.state.backupFlash = null; this.render(); } }, 4500);
   },
-  snoozeBackupNudge(){ this.state.backupSnoozeUntil = Date.now() + 2*86400000; this.render(); },
+  snoozeBackupNudge(){ this.state.backupSnoozeUntil = Date.now() + BACKUP_SNOOZE_DAYS*86400000; this.render(); },
   storageUsageBytes(){
     try { return JSON.stringify(this.buildBackupPayload()).length; } catch (e) { return 0; }
   },
@@ -2692,6 +2743,7 @@ const App = {
       if (typeof data.maintCorrectionOffset === 'number') this.state.maint.correctionOffset = data.maintCorrectionOffset;
       if (typeof data.lastBackupAt === 'string') this.state.lastBackupAt = data.lastBackupAt;
       if (typeof data.backupSnoozeUntil === 'number') this.state.backupSnoozeUntil = data.backupSnoozeUntil;
+      if (data.memorySort === 'newest' || data.memorySort === 'az') this.state.memorySort = data.memorySort;
       this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (!this.state.builtinFoodsSeeded){
         mergeCommonFoodsIntoUsda(this.state.memory.usda);
@@ -2862,8 +2914,8 @@ function renderToday(){
   const targetMl = waterTarget.high * 1000;
   const waterPct = Math.min(100, Math.round((st.waterMl/targetMl)*100));
   const waterL = formatLiters(st.waterMl);
-  const waterStatus = statusFor('water', st.waterMl/1000);
-  const waterGood = waterStatus === 'good';
+  const waterVal = statusValueFor('water', st);
+  const waterStatus = statusFor('water', waterVal);
 
   const calTarget = App.state.targets.calories;
   const calConsumed = consumed.calories;
@@ -2965,7 +3017,7 @@ function renderToday(){
           <div class="card pad-sm" style="cursor:pointer;" onclick="App.openStatDetail('${sItem.id}')">
             <div style="display:flex;align-items:center;justify-content:space-between;">
               <div style="font-size:12px;color:var(--ink-2);font-weight:600;">${sItem.label}</div>
-              <div class="pill pill-${sItem.status==='good'?'good':(sItem.status==='warning'?'warn':'crit')}">${sItem.statusLabel}</div>
+              <div class="pill ${pillClassFor(sItem.status)}">${sItem.statusLabel}</div>
             </div>
             <div class="num disp" style="font-size:20px;font-weight:800;margin-top:4px;">${sItem.value}<span style="font-size:12px;font-weight:600;color:var(--ink-2);"> ${sItem.unit}</span></div>
             <div style="font-size:11px;color:var(--muted);margin-top:2px;">${sItem.target}</div>
@@ -3044,7 +3096,7 @@ function renderToday(){
       <div class="card pad" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Water</div>
-          <div class="pill ${waterGood?'pill-good':'pill-warn'}">${waterGood?'In range':'Under'}</div>
+          <div class="pill ${pillClassFor(waterStatus)}">${statusLabelFor('water', waterVal)}</div>
         </div>
         <div class="num disp" style="font-size:22px;font-weight:800;">${waterL} L <span style="font-size:12px;font-weight:600;color:var(--ink-2);">of ${waterTarget.label}</span></div>
         <div style="height:8px;border-radius:5px;background:var(--border);margin-top:10px;overflow:hidden;">
@@ -3060,7 +3112,7 @@ function renderToday(){
       <div class="card pad" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Weight</div>
-          ${hasWeight ? `<div class="pill ${weightStatus==='good'?'pill-good':(weightStatus==='warning'?'pill-warn':'pill-crit')}">${statusLabelFor('weight', st.weightKg)}</div>` : ''}
+          ${hasWeight ? `<div class="pill ${pillClassFor(weightStatus)}">${statusLabelFor('weight', st.weightKg)}</div>` : ''}
         </div>
         <div class="num disp" style="font-size:22px;font-weight:800;">${hasWeight ? st.weightKg.toFixed(1)+' kg' : '<span style="font-size:14px;color:var(--muted);font-weight:600;">Not logged today</span>'} <span style="font-size:12px;font-weight:600;color:var(--ink-2);">goal ${weightTarget.label}</span></div>
         <div style="display:flex;gap:8px;margin-top:12px;">
@@ -3378,13 +3430,13 @@ function renderAddFood(){
 
   const groups = `<div id="addfood-groups">
     <div data-kind="saved" style="display:${st.activeTab==='saved'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.foods.map(f => renderSavedFoodRow(f, st)).join('')}
+      ${sortMemoryItems(App.state.memory.foods).map(f => renderSavedFoodRow(f, st)).join('')}
     </div>
     <div data-kind="ingredients" style="display:${st.activeTab==='ingredients'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.ingredients.map(ing => renderIngredientAddRow(ing, st)).join('')}
+      ${sortMemoryItems(App.state.memory.ingredients).map(ing => renderIngredientAddRow(ing, st)).join('')}
     </div>
     <div data-kind="usda" style="display:${st.activeTab==='usda'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.usda.map(u => renderUsdaAddRow(u, st)).join('')}
+      ${sortMemoryItems(App.state.memory.usda).map(u => renderUsdaAddRow(u, st)).join('')}
     </div>
   </div>`;
 
@@ -3433,6 +3485,7 @@ function renderAddFood(){
         <button id="addfood-scope-all" class="chip ${(st.searchScope||'all')==='all'?'active':''}" style="padding:4px 11px;font-size:11px;" onclick="App.setSearchScope('addfood','all')">All</button>
         <button id="addfood-scope-tab" class="chip ${st.searchScope==='tab'?'active':''}" style="padding:4px 11px;font-size:11px;" onclick="App.setSearchScope('addfood','tab')">This tab only</button>
       </div>
+      ${memorySortRow()}
       ` : ''}
       <div class="seg" style="margin-top:12px;">
         ${tabs.map(([id,label]) => `<button class="seg-btn" style="flex:1;${st.activeTab===id?'background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(11,11,11,0.10);':''}" onclick="App.setAddFoodTab('${id}')">${label}</button>`).join('')}
@@ -3927,13 +3980,13 @@ function renderLibrary(){
 
   const groups = `<div id="lib-groups">
     <div data-kind="foods" style="display:${st.activeTab==='foods'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.foods.filter(f => !f.archived).map(f => renderFoodLibraryRow(f, st)).join('')}
+      ${sortMemoryItems(App.state.memory.foods.filter(f => !f.archived)).map(f => renderFoodLibraryRow(f, st)).join('')}
     </div>
     <div data-kind="ingredients" style="display:${st.activeTab==='ingredients'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.ingredients.filter(ing => !ing.archived).map(ing => renderIngredientLibraryRow(ing, st)).join('')}
+      ${sortMemoryItems(App.state.memory.ingredients.filter(ing => !ing.archived)).map(ing => renderIngredientLibraryRow(ing, st)).join('')}
     </div>
     <div data-kind="usda" style="display:${st.activeTab==='usda'?'flex':'none'};flex-direction:column;gap:8px;">
-      ${App.state.memory.usda.filter(u => !u.archived).map(u => renderUsdaLibraryRow(u, st)).join('')}
+      ${sortMemoryItems(App.state.memory.usda.filter(u => !u.archived)).map(u => renderUsdaLibraryRow(u, st)).join('')}
     </div>
     <div id="lib-archive-group" data-kind="archive" style="display:${st.activeTab==='archive'?'flex':'none'};flex-direction:column;gap:8px;">
       ${archived.length ? archived.map(({kind,item}) => renderArchiveRow(kind, item)).join('') : '<div style="text-align:center;color:var(--muted);font-size:12px;margin-top:10px;">Nothing archived yet.</div>'}
@@ -3961,6 +4014,7 @@ function renderLibrary(){
         <button id="lib-scope-all" class="chip ${(st.searchScope||'all')==='all'?'active':''}" style="padding:4px 11px;font-size:11px;" onclick="App.setSearchScope('lib','all')">All</button>
         <button id="lib-scope-tab" class="chip ${st.searchScope==='tab'?'active':''}" style="padding:4px 11px;font-size:11px;" onclick="App.setSearchScope('lib','tab')">This tab only</button>
       </div>
+      ${memorySortRow()}
       <div id="lib-context-label" style="display:none;font-size:11.5px;color:var(--muted);margin-top:10px;text-transform:uppercase;letter-spacing:0.04em;">Matching saved foods, ingredients &amp; USDA</div>
       ` : ''}
       <div class="seg" style="margin-top:12px;overflow-x:auto;">
@@ -4633,7 +4687,7 @@ function renderTrends(){
   const realDays = App.allRealDays().filter(d => !d.isToday);
   const valueForDay = (d) => {
     if (cat.id === 'weight') return typeof d.weightKg === 'number' ? d.weightKg : null;
-    if (cat.id === 'water') return Math.round((d.waterMl/1000)*100)/100;
+    if (cat.id === 'water') return Math.round(statusValueFor('water', d)*100)/100;
     if (cat.id === 'sugar') return statusValueFor('sugar', d);
     return d[cat.id];
   };
@@ -5160,7 +5214,8 @@ function renderDesktop(){
   const targetMl = targetInfo('water').high * 1000;
   const waterPct = Math.min(100, Math.round((dt.waterMl/targetMl)*100));
   const waterL = formatLiters(dt.waterMl);
-  const waterGood = statusFor('water', dt.waterMl/1000) === 'good';
+  const waterVal = statusValueFor('water', dt);
+  const waterStatus = statusFor('water', waterVal);
 
   const navDefs = ['Today','History','Trends','Library','Data'];
   const macroCals = { protein: consumed.protein*4, carbs: consumed.carbs*4, fat: consumed.fat*9 };
@@ -5328,7 +5383,7 @@ function renderDesktop(){
         <div class="card pad" style="margin-bottom:16px;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
             <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Water</div>
-            <div class="pill ${waterGood?'pill-good':'pill-warn'}">${waterGood?'In range':'Under'}</div>
+            <div class="pill ${pillClassFor(waterStatus)}">${statusLabelFor('water', waterVal)}</div>
           </div>
           <div class="num disp" style="font-size:22px;font-weight:800;">${waterL} L <span style="font-size:12px;font-weight:600;color:var(--ink-2);">of ${targetInfo('water').label}</span></div>
           <div style="height:8px;border-radius:5px;background:var(--border);margin-top:10px;overflow:hidden;">
@@ -5449,6 +5504,34 @@ function runSelfTests(){
   });
   check('Sugar verdict matches on every screen', 'History reads stored days: new format, old format under, old format over', () => eq(A.history && A.history.slice(1), [true, true, false]));
 
+  // ---- Water: same verdict on Today and the desktop dashboard (above 3 L must read "Over", not "Under") ----
+  const waterOn = ml => withFixture(mealsA, hist, s => {
+    s.today.waterMl = ml;
+    const pillOf = html => { const c = [...doc(html).querySelectorAll('.card.pad')].find(x => x.firstElementChild && /^\s*Water/.test(x.firstElementChild.textContent)); return c && c.querySelector('.pill').textContent.trim(); };
+    return { today: pillOf(renderToday()), desktop: pillOf(renderDesktop()) };
+  });
+  [[1000, 'Under'], [2500, 'In range'], [3000, 'In range'], [3500, 'Over']].forEach(([ml, want]) => {
+    const r = waterOn(ml);
+    check('Water verdict matches on every screen', (ml / 1000) + ' L: Today and desktop both say ' + want, () => eq([r.today, r.desktop], [want, want]));
+  });
+
+  // ---- Memory sorting ----
+  const sortNames = mode => withFixture([], [], s => { s.memorySort = mode; return sortMemoryItems(names0.map(n => ({ name:n }))).map(x => x.name); });
+  const names0 = ['banana', 'Apple', 'egg', 'Rice 10', 'Rice 2', '\u00c9clair'];
+  check('Memory sorting', 'A-Z ignores capitals and accents, and puts Rice 2 before Rice 10', () => eq(sortNames('az'), ['Apple', 'banana', '\u00c9clair', 'egg', 'Rice 2', 'Rice 10']));
+  check('Memory sorting', 'Newest first reverses the saved order', () => eq(sortNames('newest'), names0.slice().reverse()));
+  check('Memory sorting', 'Sorting never changes the stored list', () => { const l = names0.map(n => ({ name:n })); withFixture([], [], () => sortMemoryItems(l)); return eq(l.map(x => x.name), names0); });
+  const food = (id, name) => ({ id, name, unit:'g', kcal:100, p:1, c:10, f:1, fib:1, sugar:2, sodium:10, desc:'', recipe:'Sample recipe', updated:'Just now' });
+  const memoryOrder = (mode, fn, groupSel) => withFixture([], [], s => {
+    s.memorySort = mode;
+    s.memory = Object.assign({}, realState.memory, { foods:[food('a1', 'Banana bread'), food('a2', 'apple pie'), food('a3', 'Cheese toast')] });
+    return [...doc(fn()).querySelectorAll(groupSel + ' [data-name]')].map(r => r.getAttribute('data-name').toLowerCase());
+  });
+  check('Memory sorting', 'Memory > Saved foods follows A-Z', () => eq(memoryOrder('az', renderLibrary, '#lib-groups [data-kind="foods"]'), ['apple pie', 'banana bread', 'cheese toast']));
+  check('Memory sorting', 'Memory > Saved foods follows Newest first', () => eq(memoryOrder('newest', renderLibrary, '#lib-groups [data-kind="foods"]'), ['cheese toast', 'apple pie', 'banana bread']));
+  check('Memory sorting', 'The log-food picker follows the same setting', () => eq([memoryOrder('az', renderAddFood, '#addfood-groups [data-kind="saved"]'), memoryOrder('newest', renderAddFood, '#addfood-groups [data-kind="saved"]')], [['apple pie', 'banana bread', 'cheese toast'], ['cheese toast', 'apple pie', 'banana bread']]));
+  check('Memory sorting', 'Both screens show the sort control', () => withFixture([], [], () => eq([renderLibrary().indexOf('id="memsort-az"') >= 0, renderAddFood().indexOf('id="memsort-az"') >= 0], [true, true])));
+
   // ---- Every screen still draws ----
   [['Today', renderToday], ['History', renderHistory], ['Trends', renderTrends], ['Data', renderExport], ['Settings', renderSettings], ['Memory', renderLibrary], ['Add food', renderAddFood], ['Desktop dashboard', renderDesktop]].forEach(([n, fn]) => {
     check('Screens draw', n + ' screen renders', () => withFixture(mealsA, hist, () => { const h = fn(); return typeof h === 'string' && h.length > 200 ? true : 'rendered ' + (typeof h === 'string' ? h.length + ' characters' : typeof h); }));
@@ -5468,6 +5551,9 @@ function runSelfTests(){
   check('Barcodes', 'Leading zeros are ignored when comparing', () => eq(sameBarcode('00012345', '12345'), true));
   check('Barcodes', 'Different codes do not match', () => eq(sameBarcode('12345', '12346'), false));
   check('Barcodes', 'Two empty codes do not match', () => eq(sameBarcode('', ''), false));
+  check('Barcodes', 'A 12-digit code is also tried with a leading zero', () => eq(barcodeVariants('123456789012'), ['0123456789012']));
+  check('Barcodes', 'A 13-digit code starting with 0 is also tried without it', () => eq(barcodeVariants('0123456789012'), ['123456789012']));
+  check('Barcodes', 'Other codes have no second form to try', () => eq([barcodeVariants('6281007012345'), barcodeVariants('12345678')], [[], []]));
   check('Barcodes', 'Spaces and dashes are stripped', () => eq(normalizeBarcode('64 1234-5'), '6412345'));
   check('Barcodes', 'Open Food Facts product is read correctly (name, unit, values)', () => {
     const p = parseOffProduct({ product_name:'Fresh Milk', brands:'Almarai, Other', quantity:'1 L', nutriments:{ 'energy-kcal_100g':60, 'proteins_100g':3.2, 'carbohydrates_100g':4.8, 'fat_100g':3.3, 'sugars_100g':4.8, 'sodium_100g':0.044 } });
@@ -5484,7 +5570,10 @@ function runSelfTests(){
   check('Backup reminder', 'No backup yet with 2 logged days: no nag', () => eq(bk(null, 2).overdue, false));
   check('Backup reminder', 'No backup yet with 3 logged days: nag', () => eq(bk(null, 3).overdue, true));
   check('Backup reminder', 'Backed up 2 days ago: fine, label says so', () => { const b = bk(daysAgo(2), 5); return eq([b.overdue, b.label], [false, 'Last backup: 2 days ago']); });
-  check('Backup reminder', 'Backed up 8 days ago: overdue', () => eq(bk(daysAgo(8), 5).overdue, true));
+  check('Backup reminder', 'Backed up 3 days ago: overdue (the reminder comes after 3 days)', () => eq(bk(daysAgo(3), 5).overdue, true));
+  check('Backup reminder', 'Backed up 8 days ago: still overdue', () => eq(bk(daysAgo(8), 5).overdue, true));
+  check('Backup reminder', 'The Today banner shows when overdue and hides while snoozed', () => withFixture(mealsA, hist, s => { s.lastBackupAt = daysAgo(5); s.backupSnoozeUntil = 0; const shown = renderToday().indexOf('Back up your data') >= 0; s.backupSnoozeUntil = Date.now() + 3600000; const hidden = renderToday().indexOf('Back up your data') < 0; return eq([shown, hidden], [true, true]); }));
+  check('Backup reminder', 'Settings: reminder after 3 days, Later hides it for 1 day', () => eq([BACKUP_OVERDUE_DAYS, BACKUP_SNOOZE_DAYS], [3, 1]));
   check('Backup reminder', 'Backed up just now: label says today', () => eq(bk(daysAgo(0), 5).label, 'Last backup: today'));
 
   // ---- Safety ----
