@@ -4,7 +4,12 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-10-03 (ninth checkpoint — see "Barcode scanning replaces label OCR" near the end:
+_Last updated 2026-10-16 (tenth checkpoint -- see "Shared status rules, Self-check page, and Memory sort"
+near the end: the repeated sugar/water status logic now lives in one shared helper, a Settings ->
+Self-check page runs 75 checks on sample data, water above 3 L now reads "Over" instead of "Under", the
+backup reminder comes after 3 days (snooze 1 day), barcode lookups retry the leading-zero form, and
+Memory / Log food can be sorted A-Z or Newest first; all both-apps functional, pushed). Earlier
+checkpoint, ninth, 2026-10-03 (ninth checkpoint — see "Barcode scanning replaces label OCR" near the end:
 the label-photo OCR and its 22 MB Tesseract library were removed from both apps and replaced by
 barcode scanning in the Memory tab — Chrome's BarcodeDetector + an Open Food Facts lookup, with the
 tab to save to asked each time; **phone-confirmed working**, broader testing on real products to
@@ -2046,6 +2051,95 @@ Rate limit note: OFF allows roughly 100 product lookups/min — irrelevant at on
 "busy" screen offers Try again. Commits: `689c29e` (Nourish) / `c07bc4a` (BilliFit). **Phone-confirmed
 working; broader real-product testing still to come.**
 
+## Shared status rules, Self-check page, and Memory sort (2026-10-16, tenth checkpoint) — both apps, functional
+
+Started from the user's wish to "discuss the self-test page" (roadmap #4). Answer-only round first
+(findings + defaults), then "yes go ahead with those defaults". Later small asks in the same session
+were added and pushed in two batches. **Self-check confirmed working on the phone** ("self-check is
+working"); the other items below were pushed 2026-10-16 and are awaiting phone feedback.
+
+### 54. One shared status rule (commits `cdda558` / `15dc736`)
+`statusFor()` was already one function; what was duplicated was *which number each screen feeds it*
+(the item-45 bug class). New globals next to `statusFor`:
+- `statusValueFor(id, totals)` -- sugar -> `sugarCounted ?? sugar ?? 0`; water -> `waterMl/1000`
+  (stored ml, judged in litres); everything else `totals[id]`. `totals` is anything day-shaped
+  (today's consumed totals, a history entry, a stored day, `state.today`).
+- `itemSugarCounted(it)` -- the per-item rule (`sugarCounted ?? (wholeProduce ? 0 : sugar)`), used by
+  `computeConsumedTotals` and the dish builder (`addComposedFoodToMeal`).
+- `pillClassFor(status)` -- good/warning/critical -> `pill-good/pill-warn/pill-crit`; used by the Today
+  stat tiles, the weight pill and both water pills.
+The seven sugar call sites now all use `statusValueFor`: Today tile (`buildTodayStats`), the Sugar
+breakdown modal (`renderStatDetailModal`), desktop dashboard dot, PDF `summaryDefs`, History dot,
+Trends `valueForDay`, Data-tab preview. **Rule for the future: any new screen that shows a
+good/under/over verdict must take its input from `statusValueFor`** -- the Self-check page verifies
+the existing ones but cannot catch a future copy that skips the helper.
+
+### 55. Self-check page
+- Entry: a "Self-check" card at the bottom of Settings (`App.openSelfTest()`), or open the app with
+  `#selftest` on the URL (handy on a computer; forces mobile view). It is a normal screen
+  (`state.screen === 'selftest'`, branch in `renderStage`, `renderSelfTest()`), so the back-button
+  registry needed no change (back goes to Today like any non-Today screen).
+- `runSelfTests()` builds a **shallow copy of `App.state` with fixture data** (`mk` / `withFixture`:
+  default targets, sample meals, sample history), swaps it into `App.state` for the duration of each
+  check and restores in `finally`. It never reads or writes the real localStorage keys, and a final
+  "Safety" check proves the real `today` and the saved payload were untouched. Results live only in
+  `__selfTestResults` (not saved). "Run again" re-runs; the page also prints the service-worker cache
+  name via `caches.keys()` ("App version on this device") so you can see which release the phone runs
+  (shows "not cached yet" in the dev preview because the SW doesn't register there).
+- Groups (75 checks at this checkpoint): Totals, Shared sugar rule, Status rules (edges, labels, sodium
+  migration), **Sugar verdict matches on every screen** (renders Today tile, breakdown modal, desktop
+  dashboard and History from two sample days -- A: 75 g true / 20 g counted = in range; B: 115 / 60 =
+  over -- plus old-format stored days), **Water verdict** (Today vs desktop at 1/2.5/3/3.5 L), Memory
+  sorting, Screens draw (every main screen renders), Search, Barcodes, Backup reminder, Safety.
+- Adding a check: `check(group, name, fn)` -- `fn` must return exactly `true` (anything else, or a
+  throw, is a failure and the returned string is shown as the detail). Use `withFixture(meals, history,
+  s => ...)` for anything that reads `App.state`; parse rendered HTML with `doc(html)` (DOMParser).
+- Verified it bites: temporarily making `statusValueFor` judge sugar on the raw total made 7 checks
+  fail in both apps (tile, modal, desktop, History, ...), and restoring it made them pass.
+- ~10-14 KB inline; runs only when opened.
+
+### 56. Water verdict bug fixed (found while consolidating)
+Today and desktop water pills were hand-written `waterGood ? 'In range' : 'Under'`, so **drinking more
+than 3 L showed "Under"**. Both now use `statusLabelFor('water', ...)` / `pillClassFor(...)` ("Over" in
+the critical colour). Trends still rounds the water series to 2 decimals for plotting (differs from the
+tile only for 2,495-2,499 ml -- left as is). The Today calorie card was deliberately left alone: it
+already uses `statusFor`, and its "On track" wording differs from "In range" on purpose.
+
+### 57. Backup reminder: 7 days -> 3 days, snooze 2 days -> 1 day
+User felt 7 days was too long. Constants `BACKUP_OVERDUE_DAYS = 3`, `BACKUP_SNOOZE_DAYS = 1` (above
+`backupStatus()`). The "never backed up and 3+ logged days" nudge is unchanged. **User confirmed the
+backup reminder works** (item 51); the stale-copy guard (item 52) is still not explicitly confirmed.
+
+### 58. Barcode: leading-zero retry
+User: the camera reads the code but "finds no data" -- i.e. the product isn't in Open Food Facts (no app
+change can add products). Added `barcodeVariants(code)` (12-digit UPC-A -> also try `0`+code; 13-digit
+starting `0` -> also try without it; anything else none). `fetchOffProduct` now calls
+`fetchOffProductOnce`, and only on `notfound` tries the variant (a `busy/offline` answer from the retry
+is surfaced so the user can try again). Tested with a faked network (both directions find it on the
+second try; ordinary codes make one call). **Not tested against live Open Food Facts; most UAE codes are
+13-digit `628...` and have no second form, so expect it to rescue only a few misses.** Saving a scanned
+product to Memory still makes the next scan of it work.
+
+### 59. Memory / Log-food sort
+`sortMemoryItems(list)` (A-Z via `localeCompare(..., {sensitivity:'base', numeric:true})`, or reversed
+saved order for "Newest first"; never mutates the stored list), `memorySortRow()` (the "Sort: A-Z |
+Newest first" chips under the search-scope row) and `App.setMemorySort(mode)` (re-renders, then puts
+back and re-applies whatever was typed in the search box). One setting, `state.memorySort`
+(`'az'` default | `'newest'`), applies to Memory (Saved foods / Ingredients / USDA) and the three Log-food
+lists; Archive stays A-Z. Persisted in the payload and restored on load/import. Stored lists are still
+in save order (newest at the end) -- the old "oldest first" order is no longer offered.
+Commit for 56-59: `a89a5ff` (Nourish) / `7a53078` (BilliFit). `CACHE_NAME` nourish-v12 / billifit-v5.
+
+### Tooling notes from this session
+- The session scratchpad can be wiped between sessions: `serve-pwa.ps1` (tiny `HttpListener` static
+  server, args `-Root -Port`) had to be rewritten; run it as a background task with `timeout: 7200000`.
+- **The Write tool turns `\uXXXX` escapes in a file it writes into real characters**, and PS 5.1 then
+  reads a BOM-less script as ANSI (mojibake). For non-ASCII in a patch script either add a UTF-8 BOM or
+  build the characters with `[char]0x...`; check the patched file for mojibake afterwards (it happened
+  once with `\u00c9` in a test; fixed).
+- Navigating the preview to a new hash on the same URL doesn't reload; call `location.reload()`.
+  `App.setScreen('today')` can defer via `history.go`, so tests set `App.state.screen` then `App.render()`.
+- Dev-preview servers 8791 (Nourish) / 8792 (BilliFit); always remove the three localStorage keys after.
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -2081,37 +2175,28 @@ search-scope toggle): ~321 KB (328,952 bytes)** — a ~9.9 KB bump; still far be
 bytes)** — ~4.6 KB more; still well under the ~2x trigger, not flagged. **After item 53
 (2026-10-03, barcode scanning replacing OCR): `index.html` ~340 KB (348,417 bytes)** — ~15 KB more
 (scanner overlay + lookup code), but the app's `vendor/` folder shrank by **22 MB** (Tesseract
-deleted), leaving only the two jsPDF files (~0.4 MB). Still far below the ~2x trigger.
-
+deleted), leaving only the two jsPDF files (~0.4 MB). Still far below the ~2x trigger. **After the tenth
+checkpoint (2026-10-16: shared status helpers, Self-check page, water fix, barcode retry, Memory sort):
+`index.html` ~365 KB (373,150 bytes)** -- ~25 KB more, of which the Self-check page is ~14 KB; still under
+the ~2x (~420 KB) trigger, not flagged.
 ## Immediate next steps (pick up here)
 
-No feature is in progress. **Everything through item 50 is confirmed working by the user on a real
-phone** (items 1-35 earlier; 36-45 and 46-50 confirmed 2026-10-02), and **item 53 (barcode scanning)
-was phone-tested and works** on 2026-10-03. **Items 51-52 (backup reminder + stale-copy guard, commits
-`f5a3d85` / `7545d31`) are pushed but still not explicitly phone-confirmed** — ask whether the Today
-banner / Data-tab "Last backup" line behave, and, for the profile problem, whether it has reset again
-and *when* (the root cause was never proven — see items 47 and 52). For item 53, ask how scanning
-went on real UAE products: which brands were missing from Open Food Facts, whether any scans
-misread, and whether the per-100 g Saved Food prefill felt right.
+No feature is in progress. **Everything through item 53 is confirmed working by the user on a real
+phone, except item 52 (stale-copy guard) which was never explicitly confirmed.** Also phone-confirmed
+2026-10-16: the Self-check page (item 55) and the backup reminder (item 51). The profile has **not reset
+again** as of 2026-10-16 (root cause still never proven -- see items 47 and 52; if it recurs, ask *when*).
 
-**Roadmap (agreed 2026-10-02/03):** #1 backup safety — done (51-52). The user said to **skip**
-"repeat logging" (copy yesterday's meal / recent-frequent list). Barcode scanning (old #3) — done
-(item 53). Still to be *discussed* (not approved to build) when the user brings it back: **(b) a
-small in-app self-test page + moving the repeated sugar/status logic toward one shared function**
-(the breakdown-modal bug in item 45 was this class of problem). Declined for now: typo-tolerant
-search, splitting the single `index.html`, any body-fat model until more data. Possible follow-on
-from item 53 only if real use shows the need: a way to attach a barcode to an *existing* item
-(today a barcode is set via the item's edit form or by scanning into a new one). Nothing else is
-queued — ask what's next rather than assuming.
+**Pushed 2026-10-16, awaiting phone feedback** (commits `a89a5ff` / `7a53078`, and `cdda558` / `15dc736`
+for 54-55 which are already confirmed): the 3-day backup reminder with 1-day snooze (does the banner come
+at 3 days and stay away a day after "Later"?), the Memory / Log-food sort row (does Newest first work, does
+the setting stick?), the water "Over" fix, and the barcode leading-zero retry (do any previously missed
+barcodes now resolve? which brands are still missing from Open Food Facts?).
 
-Open thread to keep in mind if it comes back up, not active right now:
-- **Body-fat % feasibility tracking** (started 2026-09-23, see item 39-42's "Body-fat %" note
-  above): the user is logging weight/body-fat%/skeletal-muscle-mass/calories weekly-to-biweekly in
-  `G:\My Drive\Personal\Claude\Calorie Tracking App\Monthly Measurements.csv` for an ongoing
-  re-analysis of whether a two-compartment fat/lean maintenance model is ever worth adding. This is
-  tracked in memory (`project_bodyfat_feasibility_tracking.md`), not in this repo — when the user
-  says they've updated the file, re-read it and redo the analysis described there rather than
-  starting from scratch.
+**Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
+CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
+existing item", and (earlier) repeat logging. Declined for now: typo-tolerant search, splitting the
+single `index.html`. The one-time scheduled task `maintenance-calories-reminder` fired on 2026-10-02 and
+is disabled. Nothing else is queued -- ask what's next rather than assuming.
 
 The Limited Edition App's icon redesign thread is now fully closed out, not just paused: the
 uncommitted 2026-08-28 icon-regeneration files flagged above in earlier checkpoints were **discarded
