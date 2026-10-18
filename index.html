@@ -4151,10 +4151,10 @@ function renderHistory(){
               <div>
                 <div style="font-size:13.5px;font-weight:700;">${label}</div>
                 <div style="display:flex;gap:5px;margin-top:6px;">
-                  <div class="dot" style="background:${dotColor(statusFor('calories', d.calories)==='good')};"></div>
+                  <div class="dot" style="background:${dotColor(statusFor('carbs', d.carbs)==='good')};"></div>
                   <div class="dot" style="background:${dotColor(statusFor('protein', d.protein)==='good')};"></div>
-                  <div class="dot" style="background:${dotColor(statusFor('fiber', d.fiber)==='good')};"></div>
-                  <div class="dot" style="background:${dotColor(statusFor('sugar', statusValueFor('sugar', d))==='good')};"></div>
+                  <div class="dot" style="background:${dotColor(statusFor('fat', d.fat)==='good')};"></div>
+                  <div class="dot" style="background:${dotColor(statusFor('calories', d.calories)==='good')};"></div>
                 </div>
               </div>
               <div class="num disp" style="font-size:15px;font-weight:800;">${Math.round(d.calories)} <span style="font-size:11px;font-weight:600;color:var(--muted);">kcal</span></div>
@@ -4162,9 +4162,9 @@ function renderHistory(){
             ${open ? `
               <div style="padding:0 13px 12px 13px;border-top:1px solid var(--border);">
                 <div style="display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:6px;margin-top:10px;">
+                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.carbs}g</div><div style="font-size:9.5px;color:var(--muted);">Carbs</div></div>
                   <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.protein}g</div><div style="font-size:9.5px;color:var(--muted);">Protein</div></div>
-                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.fiber}g</div><div style="font-size:9.5px;color:var(--muted);">Fiber</div></div>
-                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.sugar}g</div><div style="font-size:9.5px;color:var(--muted);">Sugar</div></div>
+                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.fat}g</div><div style="font-size:9.5px;color:var(--muted);">Fat</div></div>
                   <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${Math.round(d.calories)}</div><div style="font-size:9.5px;color:var(--muted);">Calories</div></div>
                 </div>
                 ${statusFor('calories', d.calories) !== 'good' ? renderDayTagBlock(d) : ''}
@@ -5488,7 +5488,6 @@ function runSelfTests(){
     safe('tile', () => { const c = [...doc(renderToday()).querySelectorAll('.card[onclick]')].find(x => x.getAttribute('onclick').indexOf("'sugar'") >= 0); return { good: goodOfLabel(c.querySelector('.pill').textContent), shown: c.querySelector('.num').textContent }; });
     safe('modal', () => goodOfLabel(doc(renderStatDetailModal('sugar', consumed)).querySelector('.pill').textContent));
     safe('desktop', () => goodOfDot([...doc(renderDesktop()).querySelectorAll('.d-stat')].find(x => /^\s*Sugar/.test(x.textContent)).querySelector('.dot')));
-    safe('history', () => [...doc(renderHistory()).querySelectorAll('.accordion-head')].map(h => goodOfDot(h.querySelectorAll('.dot')[3])));
     return r;
   });
   const A = gather(mealsA, hist), B = gather(mealsB, hist);
@@ -5500,10 +5499,27 @@ function runSelfTests(){
     check(g, tag + '- tile still shows the true total', () => r.tile && r.tile.shown && r.tile.shown.replace(/,/g, '').indexOf(String(raw)) >= 0 ? true : 'got ' + JSON.stringify(r.tile));
     check(g, tag + '- breakdown popup says ' + want, () => r.modal === good ? true : 'got ' + JSON.stringify(r.modal));
     check(g, tag + '- desktop dashboard dot says ' + want, () => r.desktop === good ? true : 'got ' + JSON.stringify(r.desktop));
-    check(g, tag + '- History dot says ' + want, () => Array.isArray(r.history) && r.history[0] === good ? true : 'got ' + JSON.stringify(r.history));
   });
-  check('Sugar verdict matches on every screen', 'History reads stored days: new format, old format under, old format over', () => eq(A.history && A.history.slice(1), [true, true, false]));
-
+  // ---- History day view: the four dots and the four tiles are Carbs, Protein, Fat, Calories (no sugar) ----
+  const dayWith = (date, over) => Object.assign(day(date, 10), over);
+  const histDays = [dayWith('2026-02-01', { carbs:250 }), dayWith('2026-02-02', { protein:100 }), dayWith('2026-02-03', { fat:120 }), dayWith('2026-02-04', { calories:2600 }), dayWith('2026-02-05', {})];
+  const histRun = withFixture([], histDays, s => {
+    const days = App.allRealDays();
+    const dots = {};
+    [...doc(renderHistory()).querySelectorAll('.accordion-head')].forEach((h, i) => { dots[days[i].date] = [...h.querySelectorAll('.dot')].map(goodOfDot); });
+    s.history.openIdx = days.findIndex(d => d.date === '2026-02-05');
+    const card = [...doc(renderHistory()).querySelectorAll('.accordion-head')][s.history.openIdx].parentElement;
+    const tiles = [...card.querySelectorAll('div[style*="grid-template-columns"] > div')].map(x => [x.lastElementChild.textContent.trim(), x.firstElementChild.textContent.trim()]);
+    return { dots, tiles, hasSugar: /sugar/i.test(card.textContent) };
+  });
+  const hg = 'History day view';
+  check(hg, 'Carbs off: only the 1st dot is red', () => eq(histRun.dots['2026-02-01'], [false, true, true, true]));
+  check(hg, 'Protein off: only the 2nd dot is red', () => eq(histRun.dots['2026-02-02'], [true, false, true, true]));
+  check(hg, 'Fat off: only the 3rd dot is red', () => eq(histRun.dots['2026-02-03'], [true, true, false, true]));
+  check(hg, 'Calories off: only the 4th dot is red', () => eq(histRun.dots['2026-02-04'], [true, true, true, false]));
+  check(hg, 'A day inside every range: all four dots green', () => eq(histRun.dots['2026-02-05'], [true, true, true, true]));
+  check(hg, 'Opened day shows Carbs, Protein, Fat, Calories in that order', () => eq(histRun.tiles, [['Carbs', '170g'], ['Protein', '140g'], ['Fat', '60g'], ['Calories', '1600']]));
+  check(hg, 'Opened day does not mention sugar', () => histRun.hasSugar === false ? true : 'sugar still shown');
   // ---- Water: same verdict on Today and the desktop dashboard (above 3 L must read "Over", not "Under") ----
   const waterOn = ml => withFixture(mealsA, hist, s => {
     s.today.waterMl = ml;
