@@ -4,7 +4,9 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-10-16 (tenth checkpoint -- see "Shared status rules, Self-check page, and Memory sort"
+_Last updated 2026-10-18 (tenth checkpoint, plus items 60-61: the History day view now shows Carbs /
+Protein / Fat / Calories on both its dots and tiles with no sugar, and BilliFit's exported file names say
+"billifit" instead of "nourish"; Self-check is now 79 checks). Earlier, 2026-10-16 (tenth checkpoint -- see "Shared status rules, Self-check page, and Memory sort"
 near the end: the repeated sugar/water status logic now lives in one shared helper, a Settings ->
 Self-check page runs 75 checks on sample data, water above 3 L now reads "Over" instead of "Under", the
 backup reminder comes after 3 days (snooze 1 day), barcode lookups retry the leading-zero form, and
@@ -2130,6 +2132,27 @@ lists; Archive stays A-Z. Persisted in the payload and restored on load/import. 
 in save order (newest at the end) -- the old "oldest first" order is no longer offered.
 Commit for 56-59: `a89a5ff` (Nourish) / `7a53078` (BilliFit). `CACHE_NAME` nourish-v12 / billifit-v5.
 
+### 60. History day view: Carbs / Protein / Fat / Calories, no sugar (2026-10-18, commits `b846cdc` / `c58d0b0`)
+User: "each day shows sugar instead of carbs ... i do not need sugar in history tab. so the colour dots
+should reflect what the written things say when clicked to open it. which is Carbs, protein, Fats & Kcal."
+Before: collapsed row had 4 unlabeled dots (Calories, Protein, Fiber, Sugar) and the opened day showed
+tiles Protein / Fiber / Sugar / Calories. Now **both use the same four stats in the same order: Carbs,
+Protein, Fat, Calories** (`statusFor` on `d.carbs`, `d.protein`, `d.fat`, `d.calories`; tiles `Carbs`,
+`Protein`, `Fat`, `Calories`). Sugar and Fiber are gone from the History *Day* view only; Week view
+still shows avg fiber and Month panel still shows fiber (not asked to change). Because History no longer
+shows sugar, the three History checks were removed from the "Sugar verdict matches on every screen" group
+and a new **History day view** group (7 checks) was added: five sample days where exactly one stat is out
+of range (diagonal dot pattern) plus a day in range, tile labels/values in order, and "no sugar shown".
+**Self-check now runs 79 checks** (was 75), 0 failures in both apps. `CACHE_NAME` nourish-v13 / billifit-v6.
+Awaiting phone confirmation.
+
+### 61. BilliFit export file names said "nourish" (BilliFit-only, branding)
+The PDF contents never named the app; only the saved **file names** did. BilliFit now saves
+`billifit-daily-<date>.pdf`, `billifit-weekly-<from>-to-<to>.pdf` and `billifit-backup-<stamp>.json`
+(the backup had the same leftover). Nourish keeps `nourish-...`. Memory export file names were already
+`billifit-...`. Lesson: when forking branding, grep the other app for the old name in *template strings*
+(file names), not just visible labels.
+
 ### Tooling notes from this session
 - The session scratchpad can be wiped between sessions: `serve-pwa.ps1` (tiny `HttpListener` static
   server, args `-Root -Port`) had to be rewritten; run it as a background task with `timeout: 7200000`.
@@ -2191,6 +2214,10 @@ for 54-55 which are already confirmed): the 3-day backup reminder with 1-day sno
 at 3 days and stay away a day after "Later"?), the Memory / Log-food sort row (does Newest first work, does
 the setting stick?), the water "Over" fix, and the barcode leading-zero retry (do any previously missed
 barcodes now resolve? which brands are still missing from Open Food Facts?).
+
+**Pushed 2026-10-18, awaiting phone feedback** (commits `b846cdc` / `c58d0b0`, item 60-61): History day
+view dots + tiles are Carbs / Protein / Fat / Calories (does it read right? should Week/Month also drop
+fiber?), and BilliFit PDF/backup file names now start `billifit-`.
 
 **Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
 CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
