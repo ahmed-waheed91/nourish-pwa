@@ -4,7 +4,8 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-10-18 (tenth checkpoint, plus items 60-61: the History day view now shows Carbs /
+_Last updated 2026-10-23 (item 62: logging food no longer drops the search-bar focus / keyboard; items
+56-61 phone-confirmed; Self-check is now 83 checks). Before that, 2026-10-18 (tenth checkpoint, plus items 60-61: the History day view now shows Carbs /
 Protein / Fat / Calories on both its dots and tiles with no sugar, and BilliFit's exported file names say
 "billifit" instead of "nourish"; Self-check is now 79 checks). Earlier, 2026-10-16 (tenth checkpoint -- see "Shared status rules, Self-check page, and Memory sort"
 near the end: the repeated sugar/water status logic now lives in one shared helper, a Settings ->
@@ -2153,6 +2154,19 @@ The PDF contents never named the app; only the saved **file names** did. BilliFi
 `billifit-...`. Lesson: when forking branding, grep the other app for the old name in *template strings*
 (file names), not just visible labels.
 
+### 62. Log food: search bar no longer loses focus after logging (both apps, 2026-10-23, commits `c2cae97` / `61a04d3`)
+User report: logging an ingredient / USDA food and then tapping the search bar within ~2-3 s redrew the
+page, kicked them out of the search box and closed the keyboard; waiting 3-4 s avoided it. Cause:
+`addScaledItemToMeal` set `flashId` (green "Added ✓" button) and 1.4 s later called a **full
+`render()`** to clear it, which rebuilt the search input. Fix: new `App.clearAddFlash(kind, id)` clears
+`flashId` (only if it is still that row's) and patches **just that row's button** (`addbtn-<kind>-<id>`:
+text, disabled, background, opacity) -- no render. Saved Foods were never affected (they jump to Today).
+Self-check +4 checks, group "Log food flash" (no redraw; button text; "Select a meal" case; an older
+timer doesn't cancel a newer row's flash) -> **83 checks**, 0 failures in both apps; also verified live
+that the search node stays the same, focused, with its typed text. `CACHE_NAME` nourish-v14 /
+billifit-v7. **Pushed; awaiting phone feedback.** General lesson: a delayed `render()` from a
+`setTimeout` can steal focus from whatever the user is typing in -- patch the one element instead.
+
 ### Tooling notes from this session
 - The session scratchpad can be wiped between sessions: `serve-pwa.ps1` (tiny `HttpListener` static
   server, args `-Root -Port`) had to be rewritten; run it as a background task with `timeout: 7200000`.
@@ -2204,20 +2218,15 @@ checkpoint (2026-10-16: shared status helpers, Self-check page, water fix, barco
 the ~2x (~420 KB) trigger, not flagged.
 ## Immediate next steps (pick up here)
 
-No feature is in progress. **Everything through item 53 is confirmed working by the user on a real
-phone, except item 52 (stale-copy guard) which was never explicitly confirmed.** Also phone-confirmed
-2026-10-16: the Self-check page (item 55) and the backup reminder (item 51). The profile has **not reset
-again** as of 2026-10-16 (root cause still never proven -- see items 47 and 52; if it recurs, ask *when*).
-
-**Pushed 2026-10-16, awaiting phone feedback** (commits `a89a5ff` / `7a53078`, and `cdda558` / `15dc736`
-for 54-55 which are already confirmed): the 3-day backup reminder with 1-day snooze (does the banner come
-at 3 days and stay away a day after "Later"?), the Memory / Log-food sort row (does Newest first work, does
-the setting stick?), the water "Over" fix, and the barcode leading-zero retry (do any previously missed
-barcodes now resolve? which brands are still missing from Open Food Facts?).
-
-**Pushed 2026-10-18, awaiting phone feedback** (commits `b846cdc` / `c58d0b0`, item 60-61): History day
-view dots + tiles are Carbs / Protein / Fat / Calories (does it read right? should Week/Month also drop
-fiber?), and BilliFit PDF/backup file names now start `billifit-`.
+No feature is in progress. **Everything through item 61 is confirmed working by the user on a real
+phone (2026-10-23: "everything you are waiting for feedback on is working well"), except item 52
+(stale-copy guard) which was never explicitly confirmed.** That covers the 3-day backup reminder with
+1-day snooze, the Memory / Log-food sort row, the water "Over" fix, the barcode leading-zero retry, the
+History day view (Carbs / Protein / Fat / Calories dots + tiles) and BilliFit's `billifit-` file names.
+The profile has **not reset again** as of 2026-10-23 (root cause still never proven -- see items 47 and
+52; if it recurs, ask *when*). History Week/Month views still show avg fiber; the user did not ask to
+change them, so they stay as is. Only **item 62** (Log food flash no longer steals search focus, pushed
+2026-10-23) awaits phone feedback: does tapping search right after logging now keep the keyboard open?
 
 **Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
 CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
