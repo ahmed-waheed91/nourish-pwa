@@ -1396,7 +1396,19 @@ const App = {
     if (this.state.addfood.targetDate) this.recomputeHistoryDay(this.state.addfood.targetDate);
     this.state.addfood.flashId = id;
     this.render();
-    setTimeout(() => { this.state.addfood.flashId = null; this.render(); }, 1400);
+    setTimeout(() => this.clearAddFlash(kind, id), 1400);
+  },
+  // Ends the green "Added" flash on one row by patching just its button. A full render() here would
+  // rebuild the search box and kick the user out of it (and close the keyboard) if they had tapped it.
+  clearAddFlash(kind, id){
+    const st = this.state.addfood;
+    if (st.flashId === id) st.flashId = null;
+    const btn = document.getElementById('addbtn-'+kind+'-'+id);
+    if (!btn) return;
+    btn.textContent = st.targetMeal ? '+ Add to ' + st.targetMeal : '+ Select a meal';
+    btn.disabled = !st.targetMeal;
+    btn.style.background = 'var(--brand)';
+    btn.style.opacity = st.targetMeal ? '1' : '0.5';
   },
   scaleRow(id, kcalPer100, inputEl){
     const w = parseFloat(inputEl.value) || 0;
@@ -5520,6 +5532,22 @@ function runSelfTests(){
   check(hg, 'A day inside every range: all four dots green', () => eq(histRun.dots['2026-02-05'], [true, true, true, true]));
   check(hg, 'Opened day shows Carbs, Protein, Fat, Calories in that order', () => eq(histRun.tiles, [['Carbs', '170g'], ['Protein', '140g'], ['Fat', '60g'], ['Calories', '1600']]));
   check(hg, 'Opened day does not mention sugar', () => histRun.hasSugar === false ? true : 'sugar still shown');
+  // ---- Log food: the green "Added" flash must end by patching one button, never by redrawing the screen (a redraw closes the keyboard) ----
+  const flashRun = (flashId, endId, targetMeal) => withFixture([], [], s => {
+    s.addfood = Object.assign({}, s.addfood, { flashId, targetMeal });
+    const btn = document.createElement('button');
+    btn.id = 'addbtn-ingredients-x'; btn.textContent = 'Added ✓'; btn.style.background = 'var(--good)';
+    document.body.appendChild(btn);
+    const realRender = App.render; let renders = 0;
+    App.render = () => { renders++; };
+    try { App.clearAddFlash('ingredients', endId); return { renders, flashId: s.addfood.flashId, text: btn.textContent, disabled: btn.disabled, bg: btn.style.background }; }
+    finally { App.render = realRender; btn.remove(); }
+  });
+  const fg = 'Log food flash';
+  check(fg, 'Ending the flash does not redraw the screen', () => flashRun('x', 'x', 'Lunch').renders === 0 ? true : 'screen was redrawn');
+  check(fg, 'The row button goes back to "+ Add to <meal>"', () => { const r = flashRun('x', 'x', 'Lunch'); return eq([r.text, r.disabled, r.bg], ['+ Add to Lunch', false, 'var(--brand)']); });
+  check(fg, 'With no meal chosen it reads "+ Select a meal" and is disabled', () => { const r = flashRun('x', 'x', null); return eq([r.text, r.disabled], ['+ Select a meal', true]); });
+  check(fg, 'An older timer does not cancel a newer row\'s flash', () => { const r = flashRun('y', 'x', 'Lunch'); return eq([r.flashId, r.renders], ['y', 0]); });
   // ---- Water: same verdict on Today and the desktop dashboard (above 3 L must read "Over", not "Under") ----
   const waterOn = ml => withFixture(mealsA, hist, s => {
     s.today.waterMl = ml;
