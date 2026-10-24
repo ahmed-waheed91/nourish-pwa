@@ -4,7 +4,8 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-10-23 (item 62: logging food no longer drops the search-bar focus / keyboard; items
+_Last updated 2026-10-24 (item 63: Data tab "View full day" opens any past day in the Today layout,
+editable behind a warning; Self-check is now 92 checks). Before that, 2026-10-23 (item 62: logging food no longer drops the search-bar focus / keyboard; items
 56-61 phone-confirmed; Self-check is now 83 checks). Before that, 2026-10-18 (tenth checkpoint, plus items 60-61: the History day view now shows Carbs /
 Protein / Fat / Calories on both its dots and tiles with no sugar, and BilliFit's exported file names say
 "billifit" instead of "nourish"; Self-check is now 79 checks). Earlier, 2026-10-16 (tenth checkpoint -- see "Shared status rules, Self-check page, and Memory sort"
@@ -2167,6 +2168,39 @@ that the search node stays the same, focused, with its typed text. `CACHE_NAME` 
 billifit-v7. **Pushed; awaiting phone feedback.** General lesson: a delayed `render()` from a
 `setTimeout` can steal focus from whatever the user is typing in -- patch the one element instead.
 
+### 63. Data tab: "View full day" -- any past day in the Today layout (both apps, 2026-10-24, commits `8564e74` / `8b40555`)
+User ask: see a past day's details like the Today tab without exporting. Agreed defaults: full screen,
+opened from the **Data tab only**, **editable** behind a warning, and visibly different from Today.
+- Data tab, 1-Day Report: a **View full day ->** button under the preview (`App.openPastDay(date)`); for
+  today it reads **Open Today** and goes to the Today tab. State: `exportScreen.pastDay = { date, ...the
+  Today panel flags, editOk, pendingEdit }`; `renderExport` returns `renderDayScreen(App.pastDayCtx())`.
+- **One shared screen:** `renderToday()` is now `renderDayScreen(App.todayCtx())`. A context `c` carries
+  `day` (data: meals/waterMl/weightKg; the note is `dailyNote` on today, `note` on a history entry, read via
+  `c.note`), `ui` (expandedMeal/Stat, confirmRemoveKey, macroInfoOpen, noteSaved...), `past`, `date`.
+  `App.dayCtx()` picks the past day when `screen==='exportScreen'` and one is open, else today; all Today
+  handlers (toggleMeal, remove item, water, weight, note, stat/macro popups) go through it.
+  `renderStatDetailModal(id, consumed, c)` takes the context (defaults to today).
+- **Looks different:** dark `--brand-dark` strip "PAST DAY / Friday, Oct 23" with back arrow and older/newer
+  arrows (`stepPastDay(-1|1)`, stops before today, keeps the Data tab's offset in step), one-line note
+  under it, `--brand-tint` page tint, no gear / backup banner / storage alert / FAB / bottom nav, "+ Log food
+  to Oct 23", "Notes for this day" plus the History reason-tag chips (`renderDayTagBlock`).
+- **Warning:** the first change per opened day (remove food, water, weight, note, tag, log food) calls
+  `pastEditBlocked(action, args)` -> "Editing a past day" popup. Continue sets `editOk` and goes back one
+  level; `closePastEditWarning` then runs the held action via `setTimeout(0)` so the back-stack settles
+  first. Edits to a past day call `recomputeHistoryDay`; Today is never touched.
+- **Log food** from a past day reuses backdated logging (`startBackdateLog`) with `addfood.returnTo =
+  'pastday'`; `exitAddFood` returns to the past day.
+- **Back button:** new `overlayDepth()` (0/1/2) replaces the boolean in `_syncBackStack` (depth = away +
+  overlayDepth). The past day is one level; a popup on it, or Log food opened from it, is a second. Verified
+  live: Log food -> past day -> Data -> Today, one press each. `setScreen` clears `pastDay` when leaving to
+  anything but Data/Log food; opening/closing a day scrolls to the top (`__scrollTopNext`).
+- Self-check +9, group "Past day view" (renders strip/no FAB; Today unchanged; first change only asks;
+  water/weight go to that day; removing food recomputes that day only; arrows stop at ends; back order;
+  Log food round-trip; Data button) -> **92 checks**, 0 failures in both apps. Tests stub `App.render`
+  **and `App.saveLocal`** (recomputeHistoryDay saves -- must never write fixture data to storage).
+  `CACHE_NAME` nourish-v15 / billifit-v8. **Pushed; awaiting phone feedback.**
+- Size: `index.html` now ~380 KB (389,624 bytes) -- about 93% of the ~420 KB (2x) watch trigger.
+
 ### Tooling notes from this session
 - The session scratchpad can be wiped between sessions: `serve-pwa.ps1` (tiny `HttpListener` static
   server, args `-Root -Port`) had to be rewritten; run it as a background task with `timeout: 7200000`.
@@ -2226,7 +2260,9 @@ History day view (Carbs / Protein / Fat / Calories dots + tiles) and BilliFit's 
 The profile has **not reset again** as of 2026-10-23 (root cause still never proven -- see items 47 and
 52; if it recurs, ask *when*). History Week/Month views still show avg fiber; the user did not ask to
 change them, so they stay as is. Only **item 62** (Log food flash no longer steals search focus, pushed
-2026-10-23) awaits phone feedback: does tapping search right after logging now keep the keyboard open?
+2026-10-23) and **item 63** (Data tab "View full day", pushed 2026-10-24) await phone feedback: does
+tapping search right after logging now keep the keyboard open, and how does the past-day screen feel?
+Size watch: `index.html` is ~380 KB, ~93% of the ~420 KB trigger -- mention it before the next big addition.
 
 **Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
 CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
