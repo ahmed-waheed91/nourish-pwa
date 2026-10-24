@@ -958,6 +958,7 @@ const App = {
     if (s === 'library') this.state.library.searchScope = 'all';
     if (s !== 'library' && s !== 'addfood') this.state.library.returnToLog = false;
     if (s !== 'trends') this.state.maint.confirmTarget = false;
+    if (s !== 'exportScreen' && s !== 'addfood') this.state.exportScreen.pastDay = null;
     if (s === 'today' && !this._navigatingFromPopstate && (this._depth||0) > 0){
       // Returning to Today directly (bottom nav, a back-arrow, etc.) rather than via the
       // hardware back button still needs to unwind through any pushed history entries first —
@@ -993,7 +994,7 @@ const App = {
     }
     if (screen === 'trends') return !!(this.state.maint.confirmTarget || this.state.maint.tipsOpen);
     if (screen === 'history') return !!this.state.history.confirmDeleteDate;
-    if (screen === 'exportScreen') return !!(this.state.memoryImport || this.state.exportScreen.recentOpen);
+    if (screen === 'exportScreen') return !!(this.state.memoryImport || this.state.exportScreen.recentOpen || this.state.exportScreen.pastDay);
     if (screen === 'addfood') return !!this.state.addfood.targetDate;
     return false;
   },
@@ -1015,9 +1016,26 @@ const App = {
     if (screen === 'trends' && this.state.maint.tipsOpen) return this.closeMaintenanceTips();
     if (screen === 'trends' && this.state.maint.confirmTarget) return this.cancelMaintTarget();
     if (screen === 'history' && this.state.history.confirmDeleteDate) return this.cancelDeleteDay();
+    if (screen === 'exportScreen' && this.state.exportScreen.pastDay){
+      const pd = this.state.exportScreen.pastDay;
+      if (pd.pendingEdit) return this.closePastEditWarning();
+      if (pd.macroInfoOpen) return this.closeMacroInfo();
+      if (pd.expandedStat) return this.closeStatDetail();
+      return this.closePastDay();
+    }
     if (screen === 'exportScreen' && this.state.memoryImport) return this.cancelMemoryImport();
     if (screen === 'exportScreen' && this.state.exportScreen.recentOpen) return this.closeRecentExports();
     if (screen === 'addfood' && this.state.addfood.targetDate) return this.exitAddFood();
+  },
+  // How many back presses the open sub-panels need. A past day (Data tab -> View full day) is one level;
+  // a popup on top of it, or Log food opened from it, is a second, so back unwinds one step at a time.
+  overlayDepth(){
+    if (!this.hasOpenOverlay()) return 0;
+    const pd = this.state.exportScreen.pastDay;
+    if (!pd) return 1;
+    if (this.state.screen === 'exportScreen' && (pd.pendingEdit || pd.macroInfoOpen || pd.expandedStat)) return 2;
+    if (this.state.screen === 'addfood' && this.state.addfood.returnTo === 'pastday') return 2;
+    return 1;
   },
   // Reconciles the browser history stack to match the app's current depth (0=Today,
   // 1=away from Today, 2=away with an overlay open) after every render. Pushes when going
@@ -1028,8 +1046,7 @@ const App = {
   _syncBackStack(){
     if (this._navigatingFromPopstate) return;
     const away = this.state.screen !== 'today';
-    const overlay = this.hasOpenOverlay();
-    const desired = away ? (overlay ? 2 : 1) : (overlay ? 1 : 0);
+    const desired = (away ? 1 : 0) + this.overlayDepth();
     const current = this._depth || 0;
     if (desired === current) return;
     if (desired > current) history.pushState({ depth: desired }, '', location.href);
@@ -1037,35 +1054,55 @@ const App = {
     this._depth = desired;
   },
 
-  openStatDetail(id){ this.state.today.expandedStat = id; this.render(); },
-  closeStatDetail(){ this.state.today.expandedStat = null; this.render(); },
-  openMacroInfo(){ this.state.today.macroInfoOpen = true; this.render(); },
-  closeMacroInfo(){ this.state.today.macroInfoOpen = false; this.render(); },
-  toggleMeal(id){ const t=this.state.today; t.expandedMeal = t.expandedMeal===id ? null : id; this.render(); },
-  requestRemoveItem(mealId, idx){ this.state.today.confirmRemoveKey = mealId+':'+idx; this.render(); },
-  cancelRemoveItem(){ this.state.today.confirmRemoveKey = null; this.render(); },
-  toggleItemExpand(key){ const t = this.state.today; t.expandedItemKey = t.expandedItemKey === key ? null : key; this.render(); },
+  // The Today screen's buttons also drive a past day opened from the Data tab ("View full day").
+  // dayCtx() says which: day = the data being changed, ui = which panels are open, past = true for a saved day.
+  todayCtx(){ const t = this.state.today; return { past:false, date:this.state.dayLog.currentDate, day:t, ui:t, note:t.dailyNote }; },
+  pastDayCtx(){
+    const pd = this.state.exportScreen.pastDay;
+    const e = pd && this.state.dayHistory.find(h => h.date === pd.date);
+    return e ? { past:true, date:pd.date, day:e, ui:pd, note:e.note } : null;
+  },
+  dayCtx(){ return (this.state.screen === 'exportScreen' && this.pastDayCtx()) || this.todayCtx(); },
+  openStatDetail(id){ this.dayCtx().ui.expandedStat = id; this.render(); },
+  closeStatDetail(){ this.dayCtx().ui.expandedStat = null; this.render(); },
+  openMacroInfo(){ this.dayCtx().ui.macroInfoOpen = true; this.render(); },
+  closeMacroInfo(){ this.dayCtx().ui.macroInfoOpen = false; this.render(); },
+  toggleMeal(id){ const t=this.dayCtx().ui; t.expandedMeal = t.expandedMeal===id ? null : id; this.render(); },
+  requestRemoveItem(mealId, idx){
+    if (this.pastEditBlocked('requestRemoveItem', [mealId, idx])) return;
+    this.dayCtx().ui.confirmRemoveKey = mealId+':'+idx; this.render();
+  },
+  cancelRemoveItem(){ this.dayCtx().ui.confirmRemoveKey = null; this.render(); },
+  toggleItemExpand(key){ const t = this.dayCtx().ui; t.expandedItemKey = t.expandedItemKey === key ? null : key; this.render(); },
   confirmRemoveItem(mealId, idx){
-    const meals = this.state.today.meals;
+    const c = this.dayCtx();
+    const meals = c.day.meals;
     const meal = meals.find(m => m.id === mealId);
     if (meal){
       meal.items.splice(idx, 1);
       if (meal.items.length === 0){
         meals.splice(meals.indexOf(meal), 1);
-        if (this.state.today.expandedMeal === mealId) this.state.today.expandedMeal = null;
+        if (c.ui.expandedMeal === mealId) c.ui.expandedMeal = null;
       }
     }
-    this.state.today.confirmRemoveKey = null;
-    this.state.today.expandedItemKey = null;
+    c.ui.confirmRemoveKey = null;
+    c.ui.expandedItemKey = null;
+    if (c.past) this.recomputeHistoryDay(c.date);
     this.render();
   },
-  addWater(ml){ this.state.today.waterMl = Math.max(0, this.state.today.waterMl + ml); this.render(); },
-  saveDailyNote(){
-    const v = document.getElementById('daily-note-input')?.value ?? '';
-    this.state.today.dailyNote = v;
-    this.state.today.noteSaved = true;
+  addWater(ml){
+    if (this.pastEditBlocked('addWater', [ml])) return;
+    const d = this.dayCtx().day;
+    d.waterMl = Math.max(0, (d.waterMl||0) + ml); this.render();
+  },
+  saveDailyNote(text){
+    const v = typeof text === 'string' ? text : (document.getElementById('daily-note-input')?.value ?? '');
+    if (this.pastEditBlocked('saveDailyNote', [v])) return;
+    const c = this.dayCtx();
+    if (c.past) c.day.note = v; else c.day.dailyNote = v;
+    c.ui.noteSaved = true;
     this.render();
-    setTimeout(() => { this.state.today.noteSaved = false; this.render(); }, 1400);
+    setTimeout(() => { c.ui.noteSaved = false; this.render(); }, 1400);
   },
   saveUsdaKey(){
     const v = (document.getElementById('usda-key-input')?.value || '').trim();
@@ -1075,11 +1112,63 @@ const App = {
     this.render();
     setTimeout(() => { this.state.usdaKeyStatus = null; this.render(); }, 1800);
   },
-  saveWeight(){
-    const v = parseFloat(document.getElementById('weight-input')?.value);
+  saveWeight(kg){
+    const v = typeof kg === 'number' ? kg : parseFloat(document.getElementById('weight-input')?.value);
     if (!v) return;
-    this.state.today.weightKg = Math.round(v*10)/10;
+    if (this.pastEditBlocked('saveWeight', [v])) return;
+    this.dayCtx().day.weightKg = Math.round(v*10)/10;
     this.render();
+  },
+
+  // Data tab -> "View full day": the Today layout for a saved day (renderDayScreen with c.past).
+  openPastDay(date){
+    if (!this.state.dayHistory.some(h => h.date === date)) return;
+    this.state.exportScreen.pastDay = { date, expandedMeal:null, expandedStat:null, macroInfoOpen:false, confirmRemoveKey:null, expandedItemKey:null, noteSaved:false, editOk:false, pendingEdit:null };
+    this.state.history.tagOtherFor = null;
+    __scrollTopNext = true;
+    this.render();
+  },
+  closePastDay(){ this.state.exportScreen.pastDay = null; __scrollTopNext = true; this.render(); },
+  // -1 = older, +1 = newer. Stops at the oldest saved day and before today. Keeps the Data tab on the same day.
+  stepPastDay(dir){
+    const pd = this.state.exportScreen.pastDay;
+    if (!pd) return;
+    const days = this.allRealDays();
+    const i = days.findIndex(x => x.date === pd.date) - dir;
+    if (i < 1 || i >= days.length) return;
+    this.state.exportScreen.mode = 'day';
+    this.state.exportScreen.offset = i;
+    this.openPastDay(days[i].date);
+  },
+  // The first change on a past day asks first (once per day opened). Returns true when the change has to wait for that answer.
+  pastEditBlocked(action, args){
+    const c = this.dayCtx();
+    if (!c.past || c.ui.editOk) return false;
+    c.ui.pendingEdit = { action, args };
+    this.render();
+    return true;
+  },
+  confirmPastEdit(){
+    const pd = this.state.exportScreen.pastDay;
+    if (!pd || !pd.pendingEdit) return;
+    pd.editOk = true;
+    this.backOneLevel();
+  },
+  // Closes the warning (Cancel, back button, or Continue). After Continue the held change runs once the
+  // back-stack has settled, so a change that opens another screen (Log food) gets its own back step.
+  closePastEditWarning(){
+    const pd = this.state.exportScreen.pastDay;
+    const p = pd && pd.pendingEdit;
+    if (pd) pd.pendingEdit = null;
+    this.render();
+    if (p && pd.editOk) setTimeout(() => this[p.action](...p.args), 0);
+  },
+  logFoodToPastDay(){
+    if (this.pastEditBlocked('logFoodToPastDay', [])) return;
+    const c = this.pastDayCtx();
+    if (!c) return;
+    this.state.addfood.returnTo = 'pastday';
+    this.startBackdateLog(c.date);
   },
 
   saveTargets(){
@@ -1298,6 +1387,7 @@ const App = {
   },
   openAddFood(){
     this.state.addfood.targetDate = null;
+    this.state.addfood.returnTo = null;
     this.state.addfood.targetMeal = null;
     this.setScreen('addfood');
   },
@@ -1310,8 +1400,10 @@ const App = {
   },
   exitAddFood(){
     const wasBackdate = !!this.state.addfood.targetDate;
+    const toPastDay = this.state.addfood.returnTo === 'pastday' && !!this.state.exportScreen.pastDay;
     this.state.addfood.targetDate = null;
-    this.setScreen(wasBackdate ? 'history' : 'today');
+    this.state.addfood.returnTo = null;
+    this.setScreen(toPastDay ? 'exportScreen' : (wasBackdate ? 'history' : 'today'));
   },
   setBackdateWater(ml){
     const date = this.state.addfood.targetDate;
@@ -2033,6 +2125,7 @@ const App = {
   // day's tag lives on its dayHistory entry (found/created via getOrCreateHistoryDay, same as
   // backdated logging).
   setDayTag(date, tag){
+    if (this.pastEditBlocked('setDayTag', [date, tag])) return;
     if (date === this.state.dayLog.currentDate) this.state.today.dailyTag = tag;
     else this.getOrCreateHistoryDay(date).tag = tag;
     this.state.history.tagOtherFor = null;
@@ -2912,9 +3005,12 @@ function buildTodayStats(consumed){
     };
   });
 }
-function renderToday(){
-  const st = App.state.today;
-  const consumed = computeConsumedTotals(st.meals);
+function renderToday(){ return renderDayScreen(App.todayCtx()); }
+// Today and the Data tab's "View full day" share this screen. c.day holds the day's data (meals, water,
+// weight), c.ui its open panels; c.past adds the "Past day" strip and hides the live-only parts.
+function renderDayScreen(c){
+  const st = c.ui, d = c.day;
+  const consumed = computeConsumedTotals(d.meals);
   const macroCals = { protein: consumed.protein*4, carbs: consumed.carbs*4, fat: consumed.fat*9 };
   const macroTotal = Math.max(1, macroCals.protein + macroCals.carbs + macroCals.fat);
   const macro = [
@@ -2924,9 +3020,9 @@ function renderToday(){
   ];
   const waterTarget = targetInfo('water');
   const targetMl = waterTarget.high * 1000;
-  const waterPct = Math.min(100, Math.round((st.waterMl/targetMl)*100));
-  const waterL = formatLiters(st.waterMl);
-  const waterVal = statusValueFor('water', st);
+  const waterPct = Math.min(100, Math.round((d.waterMl/targetMl)*100));
+  const waterL = formatLiters(d.waterMl);
+  const waterVal = statusValueFor('water', d);
   const waterStatus = statusFor('water', waterVal);
 
   const calTarget = App.state.targets.calories;
@@ -2943,12 +3039,12 @@ function renderToday(){
   const stats = buildTodayStats(consumed);
 
   const weightTarget = targetInfo('weight');
-  const hasWeight = typeof st.weightKg === 'number';
-  const weightStatus = hasWeight ? statusFor('weight', st.weightKg) : null;
+  const hasWeight = typeof d.weightKg === 'number';
+  const weightStatus = hasWeight ? statusFor('weight', d.weightKg) : null;
 
   return `
-    <div class="scroll-area" style="padding:20px 18px 100px 18px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+    <div class="scroll-area" style="padding:20px 18px 100px 18px;${c.past ? 'background:var(--brand-tint);' : ''}">
+      ${c.past ? renderPastDayHeader(c) : `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
         <div>
           <div class="disp" style="font-size:22px;font-weight:800;letter-spacing:-0.01em;">Today</div>
           <div style="font-size:13px;color:var(--ink-2);margin-top:2px;">${formatFullDate(App.state.dayLog.currentDate)}</div>
@@ -2958,9 +3054,9 @@ function renderToday(){
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V19a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H4a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H10a1.65 1.65 0 001-1.51V4a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V10a1.65 1.65 0 001.51 1H20a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </button>
         </div>
-      </div>
+      </div>`}
 
-      ${(() => {
+      ${c.past ? '' : (() => {
         const S = App.state;
         if (S.backupFlash) return `<div class="card pad-sm" style="border-color:var(--good);margin-bottom:14px;font-size:12px;font-weight:700;color:var(--good);">${S.backupFlash}</div>`;
         const bs = backupStatus();
@@ -2976,7 +3072,7 @@ function renderToday(){
         </div>`;
       })()}
 
-      ${App.state.storageAlert ? `
+      ${!c.past && App.state.storageAlert ? `
         <div class="card pad-sm" style="border-color:var(--warning);background:var(--warning-tint);margin-bottom:14px;">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
             <div style="font-size:12px;color:var(--warning);line-height:1.45;font-weight:600;">${App.state.storageAlert}</div>
@@ -3039,14 +3135,14 @@ function renderToday(){
 
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div style="font-size:15px;font-weight:700;">Meal breakdown</div>
-        <button onclick="App.openAddFood()" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">+ Log food</button>
+        <button onclick="${c.past ? 'App.logFoodToPastDay()' : 'App.openAddFood()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${c.past ? '+ Log food to ' + formatShortDate(c.date) : '+ Log food'}</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
-        ${st.meals.length===0 ? `
+        ${d.meals.length===0 ? `
           <div class="card pad" style="text-align:center;color:var(--muted);font-size:13px;">
-            Nothing logged today yet.<br/>Tap <strong style="color:var(--ink-2);">+ Log food</strong> above to get started.
+            ${c.past ? 'Nothing logged on this day.' : 'Nothing logged today yet.'}<br/>Tap <strong style="color:var(--ink-2);">${c.past ? '+ Log food to ' + formatShortDate(c.date) : '+ Log food'}</strong> above to get started.
           </div>
-        ` : sortedMealsForDisplay(st.meals).map(meal => {
+        ` : sortedMealsForDisplay(d.meals).map(meal => {
           const open = st.expandedMeal === meal.id;
           return `
           <div class="card" style="overflow:hidden;">
@@ -3115,7 +3211,7 @@ function renderToday(){
           <div style="height:100%;width:${waterPct}%;border-radius:5px;background:var(--brand);"></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <button onclick="App.addWater(-250)" ${st.waterMl<=0?'disabled':''} style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid var(--border);font-family:inherit;opacity:${st.waterMl<=0?'0.5':'1'};">− 250 ml</button>
+          <button onclick="App.addWater(-250)" ${d.waterMl<=0?'disabled':''} style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid var(--border);font-family:inherit;opacity:${d.waterMl<=0?'0.5':'1'};">− 250 ml</button>
           <button onclick="App.addWater(250)" style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">+ 250 ml</button>
           <button onclick="App.addWater(500)" style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">+ 500 ml</button>
         </div>
@@ -3124,32 +3220,65 @@ function renderToday(){
       <div class="card pad" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Weight</div>
-          ${hasWeight ? `<div class="pill ${pillClassFor(weightStatus)}">${statusLabelFor('weight', st.weightKg)}</div>` : ''}
+          ${hasWeight ? `<div class="pill ${pillClassFor(weightStatus)}">${statusLabelFor('weight', d.weightKg)}</div>` : ''}
         </div>
-        <div class="num disp" style="font-size:22px;font-weight:800;">${hasWeight ? st.weightKg.toFixed(1)+' kg' : '<span style="font-size:14px;color:var(--muted);font-weight:600;">Not logged today</span>'} <span style="font-size:12px;font-weight:600;color:var(--ink-2);">goal ${weightTarget.label}</span></div>
+        <div class="num disp" style="font-size:22px;font-weight:800;">${hasWeight ? d.weightKg.toFixed(1)+' kg' : '<span style="font-size:14px;color:var(--muted);font-weight:600;">' + (c.past ? 'Not logged this day' : 'Not logged today') + '</span>'} <span style="font-size:12px;font-weight:600;color:var(--ink-2);">goal ${weightTarget.label}</span></div>
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <input id="weight-input" type="number" step="0.1" placeholder="e.g. 84.0" value="${hasWeight ? st.weightKg : ''}" style="flex:1;text-align:left;"/>
+          <input id="weight-input" type="number" step="0.1" placeholder="e.g. 84.0" value="${hasWeight ? d.weightKg : ''}" style="flex:1;text-align:left;"/>
           <button onclick="App.saveWeight()" style="flex-shrink:0;padding:9px 16px;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">Save</button>
         </div>
       </div>
 
       <div class="card pad">
-        <div style="font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Today's notes</div>
-        <textarea id="daily-note-input" placeholder="Anything worth remembering about today — how you felt, what to adjust next time..." style="width:100%;min-height:70px;padding:10px 11px;border-radius:10px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;resize:vertical;">${(st.dailyNote||'').replace(/</g,'&lt;')}</textarea>
+        <div style="font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">${c.past ? 'Notes for this day' : "Today's notes"}</div>
+        <textarea id="daily-note-input" placeholder="Anything worth remembering about today — how you felt, what to adjust next time..." style="width:100%;min-height:70px;padding:10px 11px;border-radius:10px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;resize:vertical;">${(c.note||'').replace(/</g,'&lt;')}</textarea>
         <button onclick="App.saveDailyNote()" style="margin-top:8px;padding:9px 16px;border-radius:10px;background:${st.noteSaved?'var(--good)':'var(--brand-tint)'};color:${st.noteSaved?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${st.noteSaved?'Saved ✓':'Save note'}</button>
         <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.4;">Included in your PDF export for this day.</div>
+        ${c.past ? renderDayTagBlock(d) : ''}
       </div>
     </div>
 
-    <button class="fab" onclick="App.openAddFood()" title="Log food">
+    ${c.past ? '' : `<button class="fab" onclick="App.openAddFood()" title="Log food">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
     </button>
 
-    ${bottomNav('today')}
+    ${bottomNav('today')}`}
 
     ${st.macroInfoOpen ? renderMacroInfoModal(consumed, macroCals, macro) : ''}
-    ${st.expandedStat ? renderStatDetailModal(st.expandedStat, consumed) : ''}
+    ${st.expandedStat ? renderStatDetailModal(st.expandedStat, consumed, c) : ''}
+    ${c.past && st.pendingEdit ? renderPastEditWarning(c) : ''}
   `;
+}
+// Top of a past day: makes it plain this is a saved day, not the live Today tab.
+function renderPastDayHeader(c){
+  const days = App.allRealDays();
+  const idx = days.findIndex(x => x.date === c.date);
+  const canOlder = idx >= 1 && idx < days.length - 1, canNewer = idx > 1;
+  const btn = (onclick, on, title, path) => `<button onclick="${onclick}" ${on ? '' : 'disabled'} title="${title}" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,0.16);border:none;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;opacity:${on ? '1' : '0.35'};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="${path}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  return `
+      <div style="background:var(--brand-dark);color:#fff;border-radius:16px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;">
+        ${btn('App.backOneLevel()', true, 'Back to Data', 'M19 12H5m0 0l6-6m-6 6l6 6')}
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:10.5px;opacity:0.75;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;">Past day</div>
+          <div class="disp" style="font-size:16px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${WEEKDAY_NAMES[dateFromISO(c.date).getDay()]}, ${formatShortDate(c.date)}</div>
+        </div>
+        ${btn('App.stepPastDay(-1)', canOlder, 'Older day', 'M15 6l-6 6 6 6')}
+        ${btn('App.stepPastDay(1)', canNewer, 'Newer day', 'M9 6l6 6-6 6')}
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-2);margin:0 2px 14px;line-height:1.4;">A saved day, not the live Today tab. Changes here update this day's totals.</div>`;
+}
+function renderPastEditWarning(c){
+  return `
+    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
+      <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:320px;padding:18px;box-shadow:var(--shadow);">
+        <div style="font-size:14.5px;font-weight:800;margin-bottom:8px;">Editing a past day</div>
+        <div style="font-size:12.5px;color:var(--ink-2);line-height:1.5;margin-bottom:14px;">You're changing <strong>${formatFullDate(c.date)}</strong>, not today. This isn't the live Today tab &mdash; changes will update that day's totals.</div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+          <button onclick="App.confirmPastEdit()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Continue</button>
+        </div>
+      </div>
+    </div>`;
 }
 // Tapping a Today stat tile opens this popup: the day's total against target, then where it came from —
 // each meal's amount and share, with that meal's logged items listed underneath (largest first).
@@ -3157,7 +3286,8 @@ function renderToday(){
 function netCarbs(carbs, fiber, sugar){ return Math.max(0, carbs - fiber - sugar); }
 const STAT_ITEM_FIELD = { protein:'p', carbs:'c', fat:'f', fiber:'fib', sugar:'sugar', sodium:'sodium' };
 const STAT_BAR_COLOR = { protein:'var(--protein)', carbs:'var(--carbs)', fat:'var(--fat)' };
-function renderStatDetailModal(id, consumed){
+function renderStatDetailModal(id, consumed, c){
+  c = c || App.todayCtx();
   const field = STAT_ITEM_FIELD[id];
   const label = TODAY_LABELS[id];
   const info = targetInfo(id);
@@ -3171,7 +3301,7 @@ function renderStatDetailModal(id, consumed){
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const amt = it => it[field] || 0;
   const barColor = STAT_BAR_COLOR[id] || 'var(--brand)';
-  const meals = sortedMealsForDisplay(App.state.today.meals).map(meal => ({
+  const meals = sortedMealsForDisplay(c.day.meals).map(meal => ({
     name: meal.name,
     total: meal.items.reduce((a,it) => a + amt(it), 0),
     items: meal.items.filter(it => amt(it) > 0).sort((a,b) => amt(b) - amt(a)),
@@ -3208,7 +3338,7 @@ function renderStatDetailModal(id, consumed){
       <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:340px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
           <div style="display:flex;align-items:center;gap:8px;">
-            <div style="font-size:14.5px;font-weight:800;">${label} today</div>
+            <div style="font-size:14.5px;font-weight:800;">${label} ${c.past ? 'that day' : 'today'}</div>
             <div class="pill pill-${pillCls}">${statusLabelFor(id, statusValue)}</div>
           </div>
           <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
@@ -3221,7 +3351,7 @@ function renderStatDetailModal(id, consumed){
         ${netBlock}
         ${sugarBlock}
         <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--border);">Where it came from</div>
-        ${contributing.length === 0 ? `<div style="font-size:12px;color:var(--muted);line-height:1.4;">${App.state.today.meals.length === 0 ? 'Nothing logged today yet.' : 'None of today&rsquo;s logged items has any ' + label.toLowerCase() + '.'}</div>` : contributing.map(m => `
+        ${contributing.length === 0 ? `<div style="font-size:12px;color:var(--muted);line-height:1.4;">${c.day.meals.length === 0 ? (c.past ? 'Nothing logged on this day.' : 'Nothing logged today yet.') : 'None of ' + (c.past ? 'that day&rsquo;s' : 'today&rsquo;s') + ' logged items has any ' + label.toLowerCase() + '.'}</div>` : contributing.map(m => `
           <div style="margin-bottom:12px;">
             <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;">
               <div style="font-size:13px;font-weight:700;">${esc(m.name)}</div>
@@ -4921,6 +5051,11 @@ function renderRecentExportsModal(exports){
   `;
 }function renderExport(){
   if (App.state.memoryImport) return renderMemoryImportReview();
+  if (App.state.exportScreen.pastDay){
+    const pc = App.pastDayCtx();
+    if (pc) return renderDayScreen(pc);
+    App.state.exportScreen.pastDay = null;
+  }
   const st = App.state.exportScreen;
   const realDays = App.allRealDays();
 
@@ -5048,6 +5183,7 @@ function renderRecentExportsModal(exports){
         </button>
       </div>
       ${preview}
+      ${st.mode === 'day' && entry ? `<button onclick="${entry.isToday ? "App.setScreen('today')" : `App.openPastDay('${entry.date}')`}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:12px 0;margin-bottom:10px;border-radius:13px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">${entry.isToday ? 'Open Today' : 'View full day'} &rarr;</button>` : ''}
       <div style="display:flex;gap:8px;margin-bottom:20px;">
       <button onclick="App.exportPdf()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
@@ -5548,6 +5684,27 @@ function runSelfTests(){
   check(fg, 'The row button goes back to "+ Add to <meal>"', () => { const r = flashRun('x', 'x', 'Lunch'); return eq([r.text, r.disabled, r.bg], ['+ Add to Lunch', false, 'var(--brand)']); });
   check(fg, 'With no meal chosen it reads "+ Select a meal" and is disabled', () => { const r = flashRun('x', 'x', null); return eq([r.text, r.disabled], ['+ Select a meal', true]); });
   check(fg, 'An older timer does not cancel a newer row\'s flash', () => { const r = flashRun('y', 'x', 'Lunch'); return eq([r.flashId, r.renders], ['y', 0]); });
+  // ---- Past day (Data tab -> View full day): Today's layout for a saved day; the first change asks, and edits touch that day only ----
+  const pastRun = fn => withFixture(mealsA, [day('2026-02-28', 10), Object.assign(day('2026-03-01', 10), { meals: JSON.parse(JSON.stringify(mealsB)), waterMl: 1000 })], s => {
+    s.screen = 'exportScreen'; s.memoryImport = null;
+    s.exportScreen = Object.assign({}, s.exportScreen, { mode:'day', offset:1, pastDay:null, recentOpen:false });
+    s.addfood = Object.assign({}, s.addfood, { targetDate:null, returnTo:null });
+    s.library = Object.assign({}, s.library); s.maint = Object.assign({}, s.maint);
+    const realRender = App.render, realSave = App.saveLocal;
+    App.render = () => {}; App.saveLocal = () => {};
+    try { App.openPastDay('2026-03-01'); return fn(s, s.dayHistory[1]); }
+    finally { App.render = realRender; App.saveLocal = realSave; }
+  });
+  const pg = 'Past day view';
+  check(pg, 'Shows the "Past day" strip and that day\'s meals, without the live-only parts', () => pastRun(s => { const h = renderExport(); return eq([h.indexOf('Past day') >= 0, h.indexOf('Dinner') >= 0, h.indexOf('Log food to') >= 0, h.indexOf('class="fab"') >= 0], [true, true, true, false]); }));
+  check(pg, 'Today itself is unchanged', () => pastRun(s => { const h = renderToday(); return eq([h.indexOf('Past day') >= 0, h.indexOf('class="fab"') >= 0, h.indexOf('Dinner') >= 0], [false, true, false]); }));
+  check(pg, 'The first change asks first and changes nothing yet', () => pastRun((s, e) => { App.addWater(250); return eq([s.exportScreen.pastDay.pendingEdit, e.waterMl, s.today.waterMl, renderExport().indexOf('Editing a past day') >= 0], [{ action:'addWater', args:[250] }, 1000, 0, true]); }));
+  check(pg, 'After Continue, water and weight go to that day, not today', () => pastRun((s, e) => { s.exportScreen.pastDay.editOk = true; App.addWater(500); App.saveWeight(80.24); return eq([e.waterMl, e.weightKg, s.today.waterMl, s.today.weightKg], [1500, 80.2, 0, null]); }));
+  check(pg, 'Removing a food updates that day\'s totals only', () => pastRun((s, e) => { s.exportScreen.pastDay.editOk = true; App.confirmRemoveItem('dinner', 0); return eq([e.calories, e.meals.length, s.today.meals.length], [570, 2, 2]); }));
+  check(pg, 'Arrows step between saved days and stop before today', () => pastRun(s => { const seen = []; [-1, -1, 1, 1].forEach(dir => { App.stepPastDay(dir); seen.push(s.exportScreen.pastDay.date + '@' + s.exportScreen.offset); }); return eq(seen, ['2026-02-28@2', '2026-02-28@2', '2026-03-01@1', '2026-03-01@1']); }));
+  check(pg, 'Back closes the warning first, then the past day', () => pastRun(s => { const pd = s.exportScreen.pastDay; const d1 = App.overlayDepth(); pd.pendingEdit = { action:'addWater', args:[250] }; const d2 = App.overlayDepth(); App.closeOpenOverlay(); const still = !!s.exportScreen.pastDay; App.closeOpenOverlay(); return eq([d1, d2, still, s.exportScreen.pastDay], [1, 2, true, null]); }));
+  check(pg, 'Log food from a past day logs to that day and comes back to it', () => pastRun(s => { s.exportScreen.pastDay.editOk = true; App.logFoodToPastDay(); const r = [s.screen, s.addfood.targetDate, App.overlayDepth()]; App.exitAddFood(); return eq(r.concat([s.screen, s.exportScreen.pastDay && s.exportScreen.pastDay.date]), ['addfood', '2026-03-01', 2, 'exportScreen', '2026-03-01']); }));
+  check(pg, 'Data tab offers "View full day" for a past day and "Open Today" for today', () => pastRun(s => { s.exportScreen.pastDay = null; const past = renderExport().indexOf("App.openPastDay('2026-03-01')") >= 0; s.exportScreen.offset = 0; return eq([past, renderExport().indexOf('Open Today') >= 0], [true, true]); }));
   // ---- Water: same verdict on Today and the desktop dashboard (above 3 L must read "Over", not "Under") ----
   const waterOn = ml => withFixture(mealsA, hist, s => {
     s.today.waterMl = ml;
