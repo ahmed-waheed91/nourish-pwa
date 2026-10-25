@@ -902,6 +902,14 @@ function pdfDetailLabel(id, value){
 }
 function pdfStatusLabel(status){ return status === 'good' ? 'OK' : (status === 'warning' ? 'Under' : 'Over'); }
 
+// Water quick buttons, in ml: [take-away amount, add amount, add amount]. User-editable; anything
+// malformed (old saves, bad backups) falls back to the defaults.
+const WATER_BUTTONS_DEFAULT = [250, 250, 500];
+function validWaterButton(n){ return Number.isInteger(n) && n >= 50 && n <= 2000; }
+function normalizeWaterButtons(v){
+  return Array.isArray(v) && v.length === 3 && v.every(validWaterButton) ? v.slice() : WATER_BUTTONS_DEFAULT.slice();
+}
+
 /* ================= APP STATE ================= */
 
 const App = {
@@ -913,6 +921,7 @@ const App = {
     dayLog: { currentDate: todayISO() },
     dayHistory: [],
     storageAlert: null, lastBackupAt: null, backupSnoozeUntil: 0, backupFlash: null, memorySort: 'az',
+    waterButtons: WATER_BUTTONS_DEFAULT.slice(), waterUi: { open:false, editing:false, draft:'', editDraft:null, status:null },
     targets: defaultTargets(),
     addfood: { activeTab:'saved', searchScope:'all', selected:{}, targetMeal:null, targetDate:null, expandedSavedId:null },
     memory: {
@@ -958,6 +967,7 @@ const App = {
     if (s === 'library') this.state.library.searchScope = 'all';
     if (s !== 'library' && s !== 'addfood') this.state.library.returnToLog = false;
     if (s !== 'trends') this.state.maint.confirmTarget = false;
+    Object.assign(this.state.waterUi, { open:false, editing:false, draft:'', editDraft:null, status:null });
     if (s !== 'exportScreen' && s !== 'addfood') this.state.exportScreen.pastDay = null;
     if (s === 'today' && !this._navigatingFromPopstate && (this._depth||0) > 0){
       // Returning to Today directly (bottom nav, a back-arrow, etc.) rather than via the
@@ -1094,6 +1104,30 @@ const App = {
     if (this.pastEditBlocked('addWater', [ml])) return;
     const d = this.dayCtx().day;
     d.waterMl = Math.max(0, (d.waterMl||0) + ml); this.render();
+  },
+  // Water card "Other" panel: add/remove a typed amount, or edit the three quick buttons.
+  // The raw values can be passed in (Self-check); otherwise they're read from the inputs.
+  toggleWaterOther(){ const w = this.state.waterUi; w.open = !w.open; w.editing = false; w.editDraft = null; w.status = null; this.render(); },
+  addWaterTyped(sign, raw){
+    const w = this.state.waterUi;
+    if (raw === undefined) raw = document.getElementById('water-custom-input')?.value ?? '';
+    const ml = Number(raw);
+    if (String(raw).trim() === '' || !Number.isInteger(ml) || ml < 1 || ml > 5000){ w.draft = String(raw); w.status = 'Enter a whole number from 1 to 5000 ml.'; this.render(); return; }
+    w.draft = ''; w.status = null;
+    this.addWater(sign * ml);
+  },
+  toggleWaterEdit(){ const w = this.state.waterUi; w.editing = !w.editing; w.editDraft = null; w.status = null; this.render(); },
+  saveWaterButtons(raw){
+    const w = this.state.waterUi;
+    if (!raw) raw = [0, 1, 2].map(i => document.getElementById('water-btn-' + i)?.value ?? '');
+    const vals = raw.map(v => String(v).trim() === '' ? NaN : Number(v));
+    if (!vals.every(validWaterButton)){ w.editDraft = raw.map(String); w.status = 'Each button must be a whole number from 50 to 2000 ml.'; this.render(); return; }
+    this.state.waterButtons = vals; w.editing = false; w.editDraft = null; w.status = 'Quick buttons saved.'; this.render();
+  },
+  resetWaterButtons(){
+    const w = this.state.waterUi;
+    this.state.waterButtons = WATER_BUTTONS_DEFAULT.slice(); w.editing = false; w.editDraft = null;
+    w.status = 'Quick buttons reset to ' + WATER_BUTTONS_DEFAULT.join(' / ') + ' ml.'; this.render();
   },
   saveDailyNote(text){
     const v = typeof text === 'string' ? text : (document.getElementById('daily-note-input')?.value ?? '');
@@ -2230,6 +2264,7 @@ const App = {
       lastBackupAt: this.state.lastBackupAt,
       backupSnoozeUntil: this.state.backupSnoozeUntil || 0,
       memorySort: this.state.memorySort === 'newest' ? 'newest' : 'az',
+      waterButtons: normalizeWaterButtons(this.state.waterButtons),
     };
   },
   exportData(){
@@ -2492,6 +2527,7 @@ const App = {
       if (typeof data.dailyTag === 'string') this.state.today.dailyTag = data.dailyTag;
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
       if (data.profile && typeof data.profile === 'object') this.state.profile = { ...this.state.profile, ...data.profile };
+      this.state.waterButtons = normalizeWaterButtons(data.waterButtons);
       this.state.builtinFoodsSeeded = typeof data.builtinFoodsSeeded === 'boolean' ? data.builtinFoodsSeeded : false;
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       // Calories used to be a single "stay under" ceiling; it's now a low-high range like the
@@ -2833,6 +2869,7 @@ const App = {
       if (typeof data.dailyTag === 'string') this.state.today.dailyTag = data.dailyTag;
       if (typeof data.usdaApiKey === 'string') this.state.usdaApiKey = data.usdaApiKey;
       if (data.profile && typeof data.profile === 'object') this.state.profile = { ...this.state.profile, ...data.profile };
+      this.state.waterButtons = normalizeWaterButtons(data.waterButtons);
       if (data.targets) this.state.targets = { ...defaultTargets(), ...data.targets };
       // Calories used to be a single "stay under" ceiling; it's now a low-high range like the
       // other macros. Anyone whose saved data (or an older backup file) still has the old shape
@@ -3006,6 +3043,54 @@ function buildTodayStats(consumed){
   });
 }
 function renderToday(){ return renderDayScreen(App.todayCtx()); }
+
+// The Water card's buttons: three quick amounts (the first takes water away) plus "Other", which opens
+// a panel to add/remove a typed amount or edit the quick amounts. Shared by Today, a past day and desktop.
+function renderWaterControls(d){
+  const [minus, a1, a2] = normalizeWaterButtons(App.state.waterButtons);
+  const w = App.state.waterUi;
+  const empty = (d.waterMl || 0) <= 0;
+  const base = 'text-align:center;padding:9px 0;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;';
+  const plain = base + 'background:var(--surface);color:var(--ink-2);border:1px solid var(--border);';
+  const tint = base + 'background:var(--brand-tint);color:var(--brand-dark);border:none;';
+  const off = empty ? 'disabled' : '';
+  const dim = `opacity:${empty ? '0.5' : '1'};`;
+  const field = 'min-width:0;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;font-family:inherit;background:var(--card);color:var(--ink);box-sizing:border-box;text-align:left;';
+  const clean = v => String(v ?? '').replace(/[^0-9.\-]/g, '');
+  let panel = '';
+  if (w.open){
+    const body = w.editing ? `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+          <span style="font-size:11.5px;font-weight:700;color:var(--ink-2);">Quick buttons (ml)</span>
+          <button onclick="App.resetWaterButtons()" style="padding:0;background:none;border:none;color:var(--brand-dark);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">Reset to default</button>
+        </div>
+        <div style="display:flex;gap:8px;">
+          ${['Take away', 'Add', 'Add'].map((lbl, i) => `<label style="flex:1;min-width:0;font-size:10.5px;font-weight:600;color:var(--ink-2);">${lbl}
+            <input id="water-btn-${i}" type="number" inputmode="numeric" min="50" max="2000" step="1" value="${clean(w.editDraft ? w.editDraft[i] : [minus, a1, a2][i])}" style="${field}display:block;width:100%;margin-top:3px;"/></label>`).join('')}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button onclick="App.toggleWaterEdit()" style="flex:1;${plain}">Cancel</button>
+          <button onclick="App.saveWaterButtons()" style="flex:1;${tint}">Save</button>
+        </div>` : `
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="water-custom-input" type="number" inputmode="numeric" min="1" max="5000" step="1" placeholder="Amount in ml" value="${clean(w.draft)}" onkeydown="if(event.key==='Enter')App.addWaterTyped(1)" style="${field}flex:1;"/>
+          <button onclick="App.addWaterTyped(-1)" ${off} style="${plain}${dim}padding:9px 12px;">Remove</button>
+          <button onclick="App.addWaterTyped(1)" style="${tint}padding:9px 16px;">Add</button>
+        </div>
+        <button onclick="App.toggleWaterEdit()" style="margin-top:8px;padding:0;background:none;border:none;color:var(--brand-dark);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">Edit quick buttons</button>`;
+    panel = `
+      <div style="margin-top:10px;padding:10px;border-radius:10px;background:var(--surface);border:1px solid var(--border);">${body}
+        ${w.status ? `<div style="font-size:11.5px;color:var(--ink-2);margin-top:6px;">${w.status}</div>` : ''}
+      </div>`;
+  }
+  return `
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button onclick="App.addWater(-${minus})" ${off} style="flex:1;${plain}${dim}">− ${minus} ml</button>
+          <button onclick="App.addWater(${a1})" style="flex:1;${tint}">+ ${a1} ml</button>
+          <button onclick="App.addWater(${a2})" style="flex:1;${tint}">+ ${a2} ml</button>
+          <button onclick="App.toggleWaterOther()" aria-expanded="${w.open}" style="${w.open ? tint : plain}padding:9px 12px;">Other</button>
+        </div>${panel}`;
+}
 // Today and the Data tab's "View full day" share this screen. c.day holds the day's data (meals, water,
 // weight), c.ui its open panels; c.past adds the "Past day" strip and hides the live-only parts.
 function renderDayScreen(c){
@@ -3210,11 +3295,7 @@ function renderDayScreen(c){
         <div style="height:8px;border-radius:5px;background:var(--border);margin-top:10px;overflow:hidden;">
           <div style="height:100%;width:${waterPct}%;border-radius:5px;background:var(--brand);"></div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:12px;">
-          <button onclick="App.addWater(-250)" ${d.waterMl<=0?'disabled':''} style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid var(--border);font-family:inherit;opacity:${d.waterMl<=0?'0.5':'1'};">− 250 ml</button>
-          <button onclick="App.addWater(250)" style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">+ 250 ml</button>
-          <button onclick="App.addWater(500)" style="flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">+ 500 ml</button>
-        </div>
+        ${renderWaterControls(d)}
       </div>
 
       <div class="card pad" style="margin-bottom:16px;">
@@ -3598,8 +3679,7 @@ function renderAddFood(){
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--brand-dark);font-weight:600;">Water</span>
-        <button class="chip" onclick="App.setBackdateWater(250)">+250ml</button>
-        <button class="chip" onclick="App.setBackdateWater(500)">+500ml</button>
+        ${normalizeWaterButtons(App.state.waterButtons).slice(1).map(ml => `<button class="chip" onclick="App.setBackdateWater(${ml})">+${ml}ml</button>`).join('')}
         <span style="font-size:11px;color:var(--brand-dark);">${formatLiters(backdateEntry.waterMl||0)}</span>
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
@@ -5537,11 +5617,7 @@ function renderDesktop(){
           <div style="height:8px;border-radius:5px;background:var(--border);margin-top:10px;overflow:hidden;">
             <div style="height:100%;width:${waterPct}%;border-radius:5px;background:var(--brand);"></div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:12px;">
-            <button onclick="App.addWater(-250)" ${dt.waterMl<=0?'disabled':''} style="flex:1;text-align:center;padding:8px 0;border-radius:9px;background:var(--surface);color:var(--ink-2);font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--border);font-family:inherit;opacity:${dt.waterMl<=0?'0.5':'1'};">− 250 ml</button>
-            <button onclick="App.addWater(250)" style="flex:1;text-align:center;padding:8px 0;border-radius:9px;background:var(--brand-tint);color:var(--brand-dark);font-size:12px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">+ 250 ml</button>
-            <button onclick="App.addWater(500)" style="flex:1;text-align:center;padding:8px 0;border-radius:9px;background:var(--brand-tint);color:var(--brand-dark);font-size:12px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">+ 500 ml</button>
-          </div>
+          ${renderWaterControls(dt)}
         </div>
 
         <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Memory · saved foods</div>
@@ -5715,6 +5791,23 @@ function runSelfTests(){
     const r = waterOn(ml);
     check('Water verdict matches on every screen', (ml / 1000) + ' L: Today and desktop both say ' + want, () => eq([r.today, r.desktop], [want, want]));
   });
+
+  // ---- Water quick buttons: custom amounts, typed amounts, never below 0, kept in backups ----
+  const waterRun = fn => withFixture(mealsA, [], s => {
+    s.waterUi = { open:true, editing:false, draft:'', editDraft:null, status:null };
+    s.addfood = Object.assign({}, s.addfood, { targetDate:null, returnTo:null });
+    s.exportScreen = Object.assign({}, s.exportScreen, { pastDay:null });
+    const realRender = App.render, realSave = App.saveLocal;
+    App.render = () => {}; App.saveLocal = () => {};
+    try { return fn(s); }
+    finally { App.render = realRender; App.saveLocal = realSave; }
+  });
+  const wq = 'Water quick buttons';
+  check(wq, 'Default buttons are − 250, + 250 and + 500 ml', () => waterRun(s => { s.waterButtons = undefined; const h = renderToday(); return eq(['App.addWater(-250)', 'App.addWater(250)', 'App.addWater(500)', 'App.toggleWaterOther()'].map(x => h.indexOf(x) >= 0), [true, true, true, true]); }));
+  check(wq, 'Custom amounts show on Today and on the Log food backdate chips', () => waterRun(s => { s.waterButtons = [100, 300, 750]; const h = renderToday(); s.addfood.targetDate = '2026-03-01'; const a = renderAddFood(); return eq([h.indexOf('App.addWater(-100)') >= 0, h.indexOf('+ 750 ml') >= 0, a.indexOf('setBackdateWater(300)') >= 0, a.indexOf('setBackdateWater(750)') >= 0], [true, true, true, true]); }));
+  check(wq, 'A typed amount adds, Remove never goes below 0, bad input changes nothing', () => waterRun(s => { s.today.waterMl = 300; App.addWaterTyped(1, '450'); const a = s.today.waterMl; App.addWaterTyped(-1, '2000'); const b = s.today.waterMl; App.addWaterTyped(1, '0'); App.addWaterTyped(1, '6000'); App.addWaterTyped(1, '12.5'); return eq([a, b, s.today.waterMl, !!s.waterUi.status], [750, 0, 0, true]); }));
+  check(wq, 'Saving checks each amount is 50-2000 ml; Reset restores the defaults', () => waterRun(s => { s.waterButtons = [250, 250, 500]; App.saveWaterButtons(['10', '300', '750']); const bad = s.waterButtons.slice(); App.saveWaterButtons(['100', '300', '750']); const good = s.waterButtons.slice(); App.resetWaterButtons(); return eq([bad, good, s.waterButtons], [[250, 250, 500], [100, 300, 750], [250, 250, 500]]); }));
+  check(wq, 'The amounts go into backups, and bad saved values fall back to the defaults', () => waterRun(s => { s.waterButtons = [100, 300, 750]; return eq([App.buildBackupPayload().waterButtons, normalizeWaterButtons([10, 300, 750]), normalizeWaterButtons(undefined), normalizeWaterButtons([100, 300])], [[100, 300, 750], [250, 250, 500], [250, 250, 500], [250, 250, 500]]); }));
 
   // ---- Memory sorting ----
   const sortNames = mode => withFixture([], [], s => { s.memorySort = mode; return sortMemoryItems(names0.map(n => ({ name:n }))).map(x => x.name); });
