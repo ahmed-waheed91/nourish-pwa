@@ -4,7 +4,9 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-10-25 (items 64-66: customizable water buttons + typed amount; tidy-up that removed
+_Last updated 2026-10-26 (item 67: Memory form's "Label values are per [100] g/ml" box -- per-serving
+label numbers are converted to per 100 on save; Self-check is now 102 checks; `index.html` ~340 KB).
+Before that, 2026-10-25 (items 64-66: customizable water buttons + typed amount; tidy-up that removed
 the desktop dashboard, moved Self-check into `selftest.js` and shared repeated styles -- `index.html`
 ~337 KB; Self-check is now 94 checks). Before that, 2026-10-24 (item 63: Data tab "View full day" opens any past day in the Today layout,
 editable behind a warning; Self-check is now 92 checks). Before that, 2026-10-23 (item 62: logging food no longer drops the search-bar focus / keyboard; items
@@ -2252,6 +2254,22 @@ Two "Memory sorting" checks drew Log food on the user's last-used tab; Quick hid
 design, so they failed on the phone (pre-existing since item 59, not caused by 65). The fixture `mk`
 now pins `addfood` to the Saved tab. Verified 94/94 with Log food on every tab. Lesson: fixtures must
 pin every piece of UI state a render depends on. `CACHE_NAME` nourish-v18 / billifit-v11.
+
+### 67. Label serving size in the Memory form (2026-10-25, commits `de2b185` / `37b99b9`)
+User: labels often list nutrition per serving, not per 100 g, and the Ingredients form had no way to say so.
+- The Ingredients / USDA form (`renderMemoryForm`, not Saved foods) now has **Measured in: grams | millilitres**
+  (replaces the old "per 100 g / per 100 ml" radios) and **Label values are per [100] g/ml** (`mf-serving`),
+  with a preview line (`mf-serving-preview`, e.g. "= 400 kcal per 100 g") updated by `App.updateServingPreview`.
+- Helpers after `normalizeWaterButtons`: `LABEL_NUTRIENT_KEYS`, `validLabelServing` (0 < n <= 5000),
+  `labelToPer100` (2 decimals), `per100ToLabel` (1 decimal), `servingPreviewText`.
+- `saveForm`: a valid serving other than 100 converts all seven numbers to per 100 and stores
+  `labelServing`; otherwise `labelServing:null` and the numbers are saved as typed. Storage stays per 100,
+  so logging, search, composites and backups are unchanged. `editMemoryItem` shows the label's numbers
+  and the serving again. Barcode prefill (Open Food Facts, already per 100) leaves the box at 100.
+  Moving an item between Ingredients and Saved foods drops `labelServing` (fine: values stay per 100).
+- Self-check **102 checks** (new group "Label serving size": maths, round trip, preview, save/edit flow via
+  a hidden copy of the form, Saved foods have no box). `CACHE_NAME` nourish-v19 / billifit-v12.
+- Offered but not built: a "1 serving" button when logging such an ingredient.
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -2304,10 +2322,10 @@ The profile has **not reset again** as of 2026-10-23 (root cause still never pro
 52; if it recurs, ask *when*). History Week/Month views still show avg fiber; the user did not ask to
 change them, so they stay as is. Awaiting phone feedback: **item 62** (Log food flash no longer steals
 search focus), **item 63** (Data tab "View full day"), **item 64** (custom water buttons + Other panel)
-and **item 66** (Self-check should now read 94/94 on the phone with app version nourish-v18 /
-billifit-v11). Item 65 (tidy-up) should look unchanged. The History tab's "Log a forgotten item" stays:
+**item 66** (Self-check fix) and **item 67** (label serving-size box in the Memory form) -- Self-check
+should now read **102/102** on the phone with app version nourish-v19 / billifit-v12. Item 65 (tidy-up) should look unchanged. The History tab's "Log a forgotten item" stays:
 it is the only way to log to a day with nothing logged (View full day only reaches days with data).
-Size watch: `index.html` is ~337 KB, ~82% of the ~420 KB trigger.
+Size watch: `index.html` is ~340 KB (348,227 bytes, 2026-10-26), ~83% of the ~420 KB trigger.
 
 **Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
 CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
