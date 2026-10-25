@@ -1,7 +1,8 @@
-const CACHE_NAME = 'nourish-v16';
+const CACHE_NAME = 'nourish-v17';
 const PRECACHE = [
   './',
   './index.html',
+  './selftest.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

@@ -50,6 +50,8 @@
     min-height: 100vh;
   }
   .disp{ font-family:'Manrope', system-ui, sans-serif; }
+  button{ cursor:pointer; font-family:inherit; }
+  input, textarea, select{ font-family:inherit; }
   .num{ font-variant-numeric: tabular-nums; }
   a{ color: var(--brand); }
   a:hover{ color: var(--brand-dark); }
@@ -92,7 +94,6 @@
     color: var(--ink-2); background: transparent; border:none; font-family:inherit;
   }
   .seg-btn.active{ background:#fff; color:var(--ink); box-shadow: 0 1px 3px rgba(11,11,11,0.10); }
-  .toolbar-div{ width:1px; align-self:stretch; background:var(--border); margin: 4px 2px; }
   .tab-strip{ display:flex; gap:4px; flex-wrap:wrap; }
   .tab-btn{
     padding:8px 13px; border-radius:8px; font-size:12.5px; font-weight:700; cursor:pointer;
@@ -182,30 +183,6 @@
   }
   input[type="number"]:focus{ border-color: var(--brand); }
 
-  /* ---------- Desktop dashboard ---------- */
-  .desktop{
-    width:100%; max-width:1360px; height:820px;
-    background:var(--surface); border-radius:22px; box-shadow: var(--shadow);
-    display:flex; overflow:hidden;
-  }
-  .d-sidebar{
-    width:224px; flex-shrink:0; background:var(--brand-dark); color:#fff;
-    display:flex; flex-direction:column; padding:24px 0;
-  }
-  .d-nav-item{
-    display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:10px;
-    font-size:13.5px; font-weight:600; color:rgba(255,255,255,0.68); cursor:pointer;
-  }
-  .d-nav-item.active{ background:rgba(255,255,255,0.14); color:#fff; }
-  .d-center{ flex:1; min-width:0; overflow-y:auto; padding:28px 30px; }
-  .d-aside{ width:326px; flex-shrink:0; border-left:1px solid var(--border); overflow-y:auto; padding:28px 22px; }
-  .d-stat-row{ display:grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap:10px; }
-  .d-stat{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:13px 12px; }
-
-  @media (max-width: 860px){
-    .desktop{ display:none; }
-  }
-
   /* On a real phone, show the app itself full-screen — no studio canvas, no phone-frame chrome */
   @media (max-width: 700px){
     html, body{ height:100%; overflow:hidden; }
@@ -220,6 +197,22 @@
       background: transparent;
     }
   }
+
+  /* ---------- Shared inline looks (were repeated style="..." attributes) ---------- */
+  .field-label{ display:block; font-size:11px; font-weight:700; color:var(--ink-2); margin-bottom:4px; }
+  .modal-backdrop{ position:absolute; inset:0; background:rgba(11,11,11,0.45); display:flex; align-items:center; justify-content:center; padding:20px; z-index:50; }
+  .modal-box{ width:100%; max-width:340px; max-height:80%; overflow-y:auto; padding:18px; box-shadow:var(--shadow); }
+  .head-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .row-between{ display:flex; align-items:center; justify-content:space-between; }
+  .btn-plain-sm{ flex:1; padding:8px 0; border-radius:8px; background:var(--surface); border:1px solid var(--border); font-size:12px; font-weight:700; }
+  .btn-plain-lg{ flex:1; padding:12px 0; border-radius:12px; background:var(--surface); border:1px solid var(--border); font-size:13.5px; font-weight:700; }
+  .mini-tile{ background:var(--surface); border-radius:8px; padding:8px 4px; text-align:center; }
+  .mini-tile-sm{ background:var(--surface); border-radius:8px; padding:6px 4px; text-align:center; }
+  .sub-head{ font-size:12.5px; font-weight:700; margin-bottom:8px; }
+  .status-line{ text-align:center; font-size:12px; font-weight:700; color:var(--brand-dark); margin-bottom:10px; }
+  .check-row{ display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .icon-btn{ background:none; border:none; color:var(--muted); padding:2px; flex-shrink:0; }
+  .footer-bar{ flex-shrink:0; background:var(--card); border-top:1px solid var(--border); padding:12px 18px 16px 18px; }
 </style>
 </head>
 <body>
@@ -555,7 +548,7 @@ function scanOverlayHtml(sc){
   const header = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;flex-shrink:0;">
       <div style="font-size:16px;font-weight:800;">Scan barcode</div>
-      <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:#fff;padding:2px;">
+      <button onclick="App.backOneLevel()" style="background:none;border:none;color:#fff;padding:2px;">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
     </div>`;
@@ -570,8 +563,8 @@ function scanOverlayHtml(sc){
       <div style="padding:14px 18px 22px;background:#141414;flex-shrink:0;">
         <div id="scan-msg" style="font-size:12px;color:#bdbdbd;margin-bottom:10px;min-height:16px;">${(sc.noDetector || sc.err) ? '' : 'Hold the barcode inside the frame.'}</div>
         <div style="display:flex;gap:8px;">
-          <input id="scan-typed" type="text" inputmode="numeric" placeholder="Or type the barcode number" style="flex:1;min-width:0;padding:11px 12px;border-radius:10px;border:1px solid #3a3a3a;background:#1d1d1d;color:#fff;font-size:14px;font-family:inherit;text-align:left;"/>
-          <button onclick="App.scanSubmitTyped()" style="padding:0 18px;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Look up</button>
+          <input id="scan-typed" type="text" inputmode="numeric" placeholder="Or type the barcode number" style="flex:1;min-width:0;padding:11px 12px;border-radius:10px;border:1px solid #3a3a3a;background:#1d1d1d;color:#fff;font-size:14px;text-align:left;"/>
+          <button onclick="App.scanSubmitTyped()" style="padding:0 18px;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;">Look up</button>
         </div>
       </div>`;
   }
@@ -586,7 +579,7 @@ function scanOverlayHtml(sc){
         <div style="font-size:12px;color:#bdbdbd;margin-bottom:6px;">${esc(sc.code)}</div>
         <div style="font-size:16px;font-weight:800;margin-bottom:4px;">Already in your Memory</div>
         <div style="font-size:13px;color:#d6d6d6;line-height:1.5;margin-bottom:18px;">${esc(h.item.name)} &middot; ${where}</div>
-        <button onclick="App.openScannedExisting()" style="width:100%;padding:13px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px;">Open it</button>
+        <button onclick="App.openScannedExisting()" style="width:100%;padding:13px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;margin-bottom:10px;">Open it</button>
         <button onclick="App.scanAnother()" style="${secondaryBtn}">Scan another</button>
       </div>`;
   }
@@ -614,7 +607,7 @@ function scanOverlayHtml(sc){
       ${summary}
       <div style="font-size:12px;font-weight:700;color:#bdbdbd;margin:20px 0 8px;text-transform:uppercase;letter-spacing:0.04em;">Save to</div>
       ${kindDefs.map(([id,label,hint]) => `
-        <button onclick="App.chooseScanKind('${id}')" style="display:block;width:100%;text-align:left;padding:12px 14px;border-radius:12px;background:#222;color:#fff;border:1px solid #3a3a3a;cursor:pointer;font-family:inherit;margin-bottom:8px;">
+        <button onclick="App.chooseScanKind('${id}')" style="display:block;width:100%;text-align:left;padding:12px 14px;border-radius:12px;background:#222;color:#fff;border:1px solid #3a3a3a;margin-bottom:8px;">
           <div style="font-size:14px;font-weight:700;">${label}</div>
           <div style="font-size:11.5px;color:#a8a8a8;margin-top:2px;">${hint}</div>
         </button>`).join('')}
@@ -914,7 +907,6 @@ function normalizeWaterButtons(v){
 
 const App = {
   state: {
-    view: 'mobile',
     screen: 'today',
     today: { expandedStat:null, expandedMeal:null, waterMl:0, weightKg:null, confirmRemoveKey:null, expandedItemKey:null,
       dailyNote:'', noteSaved:false, meals: [], macroInfoOpen:false, dailyTag:null },
@@ -935,14 +927,12 @@ const App = {
     trends: { activeCat:'calories', range:'7d', activePoint:null },
     exportScreen: { mode:'day', offset:0, fallbackJson:null, dataStatus:null, recentExports:[], recentOpen:false, memoryStatus:null, memoryFallbackJson:null, memoryPasteText:'' },
     memoryImport: null,
-    desktop: { openMeal:'lunch' },
     settingsStatus: null,
     usdaApiKey: '', usdaKeyStatus: null,
     profile: { age:null, sex:null, heightCm:null, activity:'light' },
     maint: { open:false, adj:-300, confirmTarget:false, status:null, profileStatus:null, correctionOffset:0, tipsOpen:false },
   },
 
-  setView(v){ this.state.view = v; this.render(); },
   // Memory / Log-food sort. A re-render re-orders the rows; whatever is typed in the search box is put back and re-applied.
   setMemorySort(mode){
     this.state.memorySort = mode === 'newest' ? 'newest' : 'az';
@@ -954,12 +944,16 @@ const App = {
     const ai = document.getElementById('addfood-search-input');
     if (ai && addQ){ ai.value = addQ; this.filterAddFoodRows(addQ); }
   },
-  // Self-check page: runs on open (fixture data only), re-runs on "Run again".
+  // Self-check page: runs on open (fixture data only), re-runs on "Run again". Its code is in selftest.js.
   openSelfTest(){
-    __selfTestResults = runSelfTests();
-    if (this.state.view !== 'mobile') this.state.view = 'mobile';
-    if (this.state.screen !== 'selftest') this.setScreen('selftest'); else this.render();
-    fillSelfTestVersion();
+    loadSelfTest().then(() => {
+      __selfTestResults = runSelfTests();
+      if (this.state.screen !== 'selftest') this.setScreen('selftest'); else this.render();
+      fillSelfTestVersion();
+    }).catch(() => {
+      this.state.settingsStatus = 'Self-check could not load. Open the app once while online, then try again.';
+      this.render();
+    });
   },
   setScreen(s){
     if (this.state.screen === s) return;
@@ -2895,7 +2889,6 @@ const App = {
     } catch (e) { /* ignore corrupt/missing local data */ }
   },
 
-  setDesktopMeal(id){ const d=this.state.desktop; d.openMeal = d.openMeal===id ? null : id; this.render(); },
 
   render(){
     refreshCompositeFoodTotals();
@@ -2947,16 +2940,9 @@ function renderToolbar(){
     ['history','History'], ['trends','Trends'], ['exportScreen','Data'], ['settings','Settings'],
   ];
   document.getElementById('toolbar').innerHTML = `
-    <div class="seg">
-      <button class="seg-btn ${s.view==='mobile'?'active':''}" onclick="App.setView('mobile')">Mobile</button>
-      <button class="seg-btn ${s.view==='desktop'?'active':''}" onclick="App.setView('desktop')">Desktop</button>
+    <div class="tab-strip">
+      ${mobileTabs.map(([id,label]) => `<button class="tab-btn ${s.screen===id?'active':''}" onclick="App.setScreen('${id}')">${label}</button>`).join('')}
     </div>
-    ${s.view==='mobile' ? `
-      <div class="toolbar-div"></div>
-      <div class="tab-strip">
-        ${mobileTabs.map(([id,label]) => `<button class="tab-btn ${s.screen===id?'active':''}" onclick="App.setScreen('${id}')">${label}</button>`).join('')}
-      </div>
-    ` : ''}
   `;
 }
 
@@ -2967,30 +2953,27 @@ let __scrollTopNext = false;
 function renderStage(){
   const s = App.state;
   const stage = document.getElementById('stage');
-  const stageKey = s.view + ':' + s.screen;
+  const stageKey = s.screen;
   const samePlace = __lastStageKey === stageKey;
   const forceTop = __scrollTopNext;
   __scrollTopNext = false;
-  const scrollSelectors = ['.scroll-area', '.d-center', '.d-aside', '#trends-cat-chips'];
+  const scrollSelectors = ['.scroll-area', '#trends-cat-chips'];
   const prevScroll = (samePlace && !forceTop) ? scrollSelectors.map(sel => {
     const el = stage.querySelector(sel);
     return el ? { top: el.scrollTop, left: el.scrollLeft } : null;
   }) : null;
 
-  if (s.view === 'desktop'){
-    stage.innerHTML = renderDesktop();
-  } else {
-    let inner;
-    if (s.screen === 'today') inner = renderToday();
-    else if (s.screen === 'addfood') inner = renderAddFood();
-    else if (s.screen === 'library') inner = renderLibrary();
-    else if (s.screen === 'history') inner = renderHistory();
-    else if (s.screen === 'trends') inner = renderTrends();
-    else if (s.screen === 'settings') inner = renderSettings();
-    else if (s.screen === 'selftest') inner = renderSelfTest();
-    else inner = renderExport();
-    stage.innerHTML = `<div class="phone">${inner}</div>`;
-  }
+  let inner;
+  if (s.screen === 'today') inner = renderToday();
+  else if (s.screen === 'addfood') inner = renderAddFood();
+  else if (s.screen === 'library') inner = renderLibrary();
+  else if (s.screen === 'history') inner = renderHistory();
+  else if (s.screen === 'trends') inner = renderTrends();
+  else if (s.screen === 'settings') inner = renderSettings();
+  else if (s.screen === 'selftest' && typeof renderSelfTest === 'function') inner = renderSelfTest();
+  else if (s.screen === 'selftest') inner = renderSettings();
+  else inner = renderExport();
+  stage.innerHTML = `<div class="phone">${inner}</div>`;
 
   if (prevScroll){
     scrollSelectors.forEach((sel, i) => {
@@ -3045,24 +3028,24 @@ function buildTodayStats(consumed){
 function renderToday(){ return renderDayScreen(App.todayCtx()); }
 
 // The Water card's buttons: three quick amounts (the first takes water away) plus "Other", which opens
-// a panel to add/remove a typed amount or edit the quick amounts. Shared by Today, a past day and desktop.
+// a panel to add/remove a typed amount or edit the quick amounts. Shared by Today and a past day.
 function renderWaterControls(d){
   const [minus, a1, a2] = normalizeWaterButtons(App.state.waterButtons);
   const w = App.state.waterUi;
   const empty = (d.waterMl || 0) <= 0;
-  const base = 'text-align:center;padding:9px 0;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;';
+  const base = 'text-align:center;padding:9px 0;border-radius:10px;font-size:12.5px;font-weight:700;';
   const plain = base + 'background:var(--surface);color:var(--ink-2);border:1px solid var(--border);';
   const tint = base + 'background:var(--brand-tint);color:var(--brand-dark);border:none;';
   const off = empty ? 'disabled' : '';
   const dim = `opacity:${empty ? '0.5' : '1'};`;
-  const field = 'min-width:0;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;font-family:inherit;background:var(--card);color:var(--ink);box-sizing:border-box;text-align:left;';
+  const field = 'min-width:0;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;background:var(--card);color:var(--ink);box-sizing:border-box;text-align:left;';
   const clean = v => String(v ?? '').replace(/[^0-9.\-]/g, '');
   let panel = '';
   if (w.open){
     const body = w.editing ? `
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
           <span style="font-size:11.5px;font-weight:700;color:var(--ink-2);">Quick buttons (ml)</span>
-          <button onclick="App.resetWaterButtons()" style="padding:0;background:none;border:none;color:var(--brand-dark);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">Reset to default</button>
+          <button onclick="App.resetWaterButtons()" style="padding:0;background:none;border:none;color:var(--brand-dark);font-size:11.5px;font-weight:700;text-decoration:underline;">Reset to default</button>
         </div>
         <div style="display:flex;gap:8px;">
           ${['Take away', 'Add', 'Add'].map((lbl, i) => `<label style="flex:1;min-width:0;font-size:10.5px;font-weight:600;color:var(--ink-2);">${lbl}
@@ -3077,7 +3060,7 @@ function renderWaterControls(d){
           <button onclick="App.addWaterTyped(-1)" ${off} style="${plain}${dim}padding:9px 12px;">Remove</button>
           <button onclick="App.addWaterTyped(1)" style="${tint}padding:9px 16px;">Add</button>
         </div>
-        <button onclick="App.toggleWaterEdit()" style="margin-top:8px;padding:0;background:none;border:none;color:var(--brand-dark);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">Edit quick buttons</button>`;
+        <button onclick="App.toggleWaterEdit()" style="margin-top:8px;padding:0;background:none;border:none;color:var(--brand-dark);font-size:11.5px;font-weight:700;text-decoration:underline;">Edit quick buttons</button>`;
     panel = `
       <div style="margin-top:10px;padding:10px;border-radius:10px;background:var(--surface);border:1px solid var(--border);">${body}
         ${w.status ? `<div style="font-size:11.5px;color:var(--ink-2);margin-top:6px;">${w.status}</div>` : ''}
@@ -3135,7 +3118,7 @@ function renderDayScreen(c){
           <div style="font-size:13px;color:var(--ink-2);margin-top:2px;">${formatFullDate(App.state.dayLog.currentDate)}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <button onclick="App.setScreen('settings')" style="width:38px;height:38px;border-radius:12px;background:var(--card);border:1px solid var(--border);color:var(--ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer;">
+          <button onclick="App.setScreen('settings')" style="width:38px;height:38px;border-radius:12px;background:var(--card);border:1px solid var(--border);color:var(--ink-2);display:flex;align-items:center;justify-content:center;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V19a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H4a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H10a1.65 1.65 0 001-1.51V4a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V10a1.65 1.65 0 001.51 1H20a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </button>
         </div>
@@ -3151,8 +3134,8 @@ function renderDayScreen(c){
           <div style="font-size:12.5px;font-weight:700;color:var(--brand-dark);margin-bottom:3px;">Back up your data</div>
           <div style="font-size:11.5px;color:var(--ink-2);line-height:1.4;margin-bottom:10px;">${bs.never ? "You haven't saved a backup yet." : "Your last backup was " + bs.days + " days ago."} Your data lives only on this phone.</div>
           <div style="display:flex;gap:8px;">
-            <button onclick="App.backupNow()" style="flex:1;padding:9px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Back up now</button>
-            <button onclick="App.snoozeBackupNudge()" style="padding:9px 16px;border-radius:10px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Later</button>
+            <button onclick="App.backupNow()" style="flex:1;padding:9px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;">Back up now</button>
+            <button onclick="App.snoozeBackupNudge()" style="padding:9px 16px;border-radius:10px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:12.5px;font-weight:700;">Later</button>
           </div>
         </div>`;
       })()}
@@ -3161,7 +3144,7 @@ function renderDayScreen(c){
         <div class="card pad-sm" style="border-color:var(--warning);background:var(--warning-tint);margin-bottom:14px;">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
             <div style="font-size:12px;color:var(--warning);line-height:1.45;font-weight:600;">${App.state.storageAlert}</div>
-            <button onclick="App.dismissStorageAlert()" style="background:none;border:none;cursor:pointer;color:var(--warning);padding:2px;flex-shrink:0;">
+            <button onclick="App.dismissStorageAlert()" style="background:none;border:none;color:var(--warning);padding:2px;flex-shrink:0;">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             </button>
           </div>
@@ -3185,9 +3168,9 @@ function renderDayScreen(c){
       </div>
 
       <div class="card pad" style="margin-bottom:14px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="head-row">
           <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Macro split · share of calories</div>
-          <button onclick="App.openMacroInfo()" title="How this is calculated" style="width:22px;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--border);color:var(--ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;">
+          <button onclick="App.openMacroInfo()" title="How this is calculated" style="width:22px;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--border);color:var(--ink-2);display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1.15" fill="currentColor"/></svg>
           </button>
         </div>
@@ -3208,7 +3191,7 @@ function renderDayScreen(c){
         ${stats.map(sItem => {
           return `
           <div class="card pad-sm" style="cursor:pointer;" onclick="App.openStatDetail('${sItem.id}')">
-            <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div class="row-between">
               <div style="font-size:12px;color:var(--ink-2);font-weight:600;">${sItem.label}</div>
               <div class="pill ${pillClassFor(sItem.status)}">${sItem.statusLabel}</div>
             </div>
@@ -3218,9 +3201,9 @@ function renderDayScreen(c){
         }).join('')}
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div class="head-row">
         <div style="font-size:15px;font-weight:700;">Meal breakdown</div>
-        <button onclick="${c.past ? 'App.logFoodToPastDay()' : 'App.openAddFood()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${c.past ? '+ Log food to ' + formatShortDate(c.date) : '+ Log food'}</button>
+        <button onclick="${c.past ? 'App.logFoodToPastDay()' : 'App.openAddFood()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;">${c.past ? '+ Log food to ' + formatShortDate(c.date) : '+ Log food'}</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
         ${d.meals.length===0 ? `
@@ -3251,8 +3234,8 @@ function renderDayScreen(c){
                     <div style="padding:10px 0;border-bottom:1px solid var(--border);">
                       <div style="font-size:12px;font-weight:700;margin-bottom:8px;">Remove &ldquo;${item.name}&rdquo;?</div>
                       <div style="display:flex;gap:8px;">
-                        <button onclick="event.stopPropagation();App.cancelRemoveItem()" style="flex:1;padding:7px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-                        <button onclick="event.stopPropagation();App.confirmRemoveItem('${meal.id}',${idx})" style="flex:1;padding:7px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Remove</button>
+                        <button onclick="event.stopPropagation();App.cancelRemoveItem()" style="flex:1;padding:7px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;">Cancel</button>
+                        <button onclick="event.stopPropagation();App.confirmRemoveItem('${meal.id}',${idx})" style="flex:1;padding:7px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;">Remove</button>
                       </div>
                     </div>`;
                   }
@@ -3268,7 +3251,7 @@ function renderDayScreen(c){
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;padding-left:10px;">
                       <div class="num" style="font-size:12.5px;font-weight:700;">${item.kcal}</div>
-                      <button onclick="event.stopPropagation();App.requestRemoveItem('${meal.id}',${idx})" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:2px;">
+                      <button onclick="event.stopPropagation();App.requestRemoveItem('${meal.id}',${idx})" style="background:none;border:none;color:var(--muted);padding:2px;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                       </button>
                     </div>
@@ -3287,7 +3270,7 @@ function renderDayScreen(c){
       </div>
 
       <div class="card pad" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="head-row">
           <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Water</div>
           <div class="pill ${pillClassFor(waterStatus)}">${statusLabelFor('water', waterVal)}</div>
         </div>
@@ -3299,21 +3282,21 @@ function renderDayScreen(c){
       </div>
 
       <div class="card pad" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="head-row">
           <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Weight</div>
           ${hasWeight ? `<div class="pill ${pillClassFor(weightStatus)}">${statusLabelFor('weight', d.weightKg)}</div>` : ''}
         </div>
         <div class="num disp" style="font-size:22px;font-weight:800;">${hasWeight ? d.weightKg.toFixed(1)+' kg' : '<span style="font-size:14px;color:var(--muted);font-weight:600;">' + (c.past ? 'Not logged this day' : 'Not logged today') + '</span>'} <span style="font-size:12px;font-weight:600;color:var(--ink-2);">goal ${weightTarget.label}</span></div>
         <div style="display:flex;gap:8px;margin-top:12px;">
           <input id="weight-input" type="number" step="0.1" placeholder="e.g. 84.0" value="${hasWeight ? d.weightKg : ''}" style="flex:1;text-align:left;"/>
-          <button onclick="App.saveWeight()" style="flex-shrink:0;padding:9px 16px;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">Save</button>
+          <button onclick="App.saveWeight()" style="flex-shrink:0;padding:9px 16px;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;border:none;">Save</button>
         </div>
       </div>
 
       <div class="card pad">
         <div style="font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">${c.past ? 'Notes for this day' : "Today's notes"}</div>
-        <textarea id="daily-note-input" placeholder="Anything worth remembering about today — how you felt, what to adjust next time..." style="width:100%;min-height:70px;padding:10px 11px;border-radius:10px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;resize:vertical;">${(c.note||'').replace(/</g,'&lt;')}</textarea>
-        <button onclick="App.saveDailyNote()" style="margin-top:8px;padding:9px 16px;border-radius:10px;background:${st.noteSaved?'var(--good)':'var(--brand-tint)'};color:${st.noteSaved?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${st.noteSaved?'Saved ✓':'Save note'}</button>
+        <textarea id="daily-note-input" placeholder="Anything worth remembering about today — how you felt, what to adjust next time..." style="width:100%;min-height:70px;padding:10px 11px;border-radius:10px;border:1px solid var(--border);font-size:12.5px;resize:vertical;">${(c.note||'').replace(/</g,'&lt;')}</textarea>
+        <button onclick="App.saveDailyNote()" style="margin-top:8px;padding:9px 16px;border-radius:10px;background:${st.noteSaved?'var(--good)':'var(--brand-tint)'};color:${st.noteSaved?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;border:none;">${st.noteSaved?'Saved ✓':'Save note'}</button>
         <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.4;">Included in your PDF export for this day.</div>
         ${c.past ? renderDayTagBlock(d) : ''}
       </div>
@@ -3335,7 +3318,7 @@ function renderPastDayHeader(c){
   const days = App.allRealDays();
   const idx = days.findIndex(x => x.date === c.date);
   const canOlder = idx >= 1 && idx < days.length - 1, canNewer = idx > 1;
-  const btn = (onclick, on, title, path) => `<button onclick="${onclick}" ${on ? '' : 'disabled'} title="${title}" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,0.16);border:none;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;opacity:${on ? '1' : '0.35'};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="${path}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  const btn = (onclick, on, title, path) => `<button onclick="${onclick}" ${on ? '' : 'disabled'} title="${title}" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,0.16);border:none;color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;opacity:${on ? '1' : '0.35'};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="${path}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
   return `
       <div style="background:var(--brand-dark);color:#fff;border-radius:16px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;">
         ${btn('App.backOneLevel()', true, 'Back to Data', 'M19 12H5m0 0l6-6m-6 6l6 6')}
@@ -3350,13 +3333,13 @@ function renderPastDayHeader(c){
 }
 function renderPastEditWarning(c){
   return `
-    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
+    <div onclick="App.backOneLevel()" class="modal-backdrop">
       <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:320px;padding:18px;box-shadow:var(--shadow);">
         <div style="font-size:14.5px;font-weight:800;margin-bottom:8px;">Editing a past day</div>
         <div style="font-size:12.5px;color:var(--ink-2);line-height:1.5;margin-bottom:14px;">You're changing <strong>${formatFullDate(c.date)}</strong>, not today. This isn't the live Today tab &mdash; changes will update that day's totals.</div>
         <div style="display:flex;gap:8px;">
-          <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-          <button onclick="App.confirmPastEdit()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Continue</button>
+          <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:12.5px;font-weight:700;">Cancel</button>
+          <button onclick="App.confirmPastEdit()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;">Continue</button>
         </div>
       </div>
     </div>`;
@@ -3415,14 +3398,14 @@ function renderStatDetailModal(id, consumed, c){
     </div>`;
   })() : '';
   return `
-    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
-      <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:340px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
+    <div onclick="App.backOneLevel()" class="modal-backdrop">
+      <div onclick="event.stopPropagation()" class="modal-box card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
           <div style="display:flex;align-items:center;gap:8px;">
             <div style="font-size:14.5px;font-weight:800;">${label} ${c.past ? 'that day' : 'today'}</div>
             <div class="pill pill-${pillCls}">${statusLabelFor(id, statusValue)}</div>
           </div>
-          <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
+          <button onclick="App.backOneLevel()" class="icon-btn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
         </div>
@@ -3469,11 +3452,11 @@ function renderMacroInfoModal(consumed, macroCals, macro){
   const macroCalSum = Math.round(macroCals.protein + macroCals.carbs + macroCals.fat);
   const hasData = macroCalSum > 0;
   return `
-    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
+    <div onclick="App.backOneLevel()" class="modal-backdrop">
       <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:320px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="head-row">
           <div style="font-size:14.5px;font-weight:800;">How the macro split is calculated</div>
-          <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
+          <button onclick="App.backOneLevel()" class="icon-btn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
         </div>
@@ -3526,7 +3509,7 @@ function renderSavedFoodRow(f, st){
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-bottom:8px;border-bottom:1px dashed var(--border);">
             <div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">Whole recipe portion:</div>
-            ${[100,75,50,25].map(p => `<button data-recipe-chip="${f.id}" data-pct="${p}" onclick="App.scaleComposedRecipe('${f.id}',${p})" style="padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;border:1.5px solid ${p===100?'var(--brand)':'var(--border)'};background:${p===100?'var(--brand)':'transparent'};color:${p===100?'#fff':'var(--ink-2)'};font-family:inherit;">${p}%</button>`).join('')}
+            ${[100,75,50,25].map(p => `<button data-recipe-chip="${f.id}" data-pct="${p}" onclick="App.scaleComposedRecipe('${f.id}',${p})" style="padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;border:1.5px solid ${p===100?'var(--brand)':'var(--border)'};background:${p===100?'var(--brand)':'transparent'};color:${p===100?'#fff':'var(--ink-2)'};">${p}%</button>`).join('')}
             <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
               <input id="cf-recipe-pct-${f.id}" type="number" value="100" oninput="App.scaleComposedRecipe('${f.id}', parseFloat(this.value)||1)" style="width:48px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
               <div style="font-size:10.5px;color:var(--muted);">%</div>
@@ -3552,7 +3535,7 @@ function renderSavedFoodRow(f, st){
           }).join('')}
           <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px;">
             <div style="font-size:12.5px;font-weight:700;">Total: <span id="cf-total-${f.id}">${f.kcal}</span> kcal</div>
-            <button id="addbtn-foods-${f.id}" onclick="App.addComposedFoodToMeal('${f.id}')" ${(!st.targetMeal && st.flashId!==f.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal && st.flashId!==f.id)?'0.5':'1'};">${st.flashId===f.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
+            <button id="addbtn-foods-${f.id}" onclick="App.addComposedFoodToMeal('${f.id}')" ${(!st.targetMeal && st.flashId!==f.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===f.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;opacity:${(!st.targetMeal && st.flashId!==f.id)?'0.5':'1'};">${st.flashId===f.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
           </div>
         </div>
       ` : ''}
@@ -3577,7 +3560,7 @@ function renderSavedFoodRow(f, st){
     ${sel ? `
       <div onclick="event.stopPropagation()" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
         <div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">Portion:</div>
-        ${[100,75,50,25].map(p => `<button onclick="App.setSelectedPortion('${f.id}',${p})" style="padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;border:1.5px solid ${pct===p?'var(--brand)':'var(--border)'};background:${pct===p?'var(--brand)':'transparent'};color:${pct===p?'#fff':'var(--ink-2)'};font-family:inherit;">${p}%</button>`).join('')}
+        ${[100,75,50,25].map(p => `<button onclick="App.setSelectedPortion('${f.id}',${p})" style="padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;border:1.5px solid ${pct===p?'var(--brand)':'var(--border)'};background:${pct===p?'var(--brand)':'transparent'};color:${pct===p?'#fff':'var(--ink-2)'};">${p}%</button>`).join('')}
         <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
           <input id="sel-pct-${f.id}" type="number" value="${pct}" oninput="App.setSelectedPortion('${f.id}', parseFloat(this.value)||1, {live:true})" style="width:48px;padding:5px 6px;text-align:center;font-size:11.5px;border-radius:8px;border:1px solid var(--border);"/>
           <div style="font-size:10.5px;color:var(--muted);">%</div>
@@ -3602,7 +3585,7 @@ function renderIngredientAddRow(ing, st){
   const initW = ing.defaultAmount || 100;
   return `
   <div data-name="${ing.name.toLowerCase()}" class="card pad-sm">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div class="row-between">
       <div style="min-width:0;">
         <div style="font-size:13.5px;font-weight:700;">${srcTag('Ingredient','pill-neutral')}${ing.name}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:1px;">${ing.kcalPer100} kcal / 100${ing.unit}</div>
@@ -3612,7 +3595,7 @@ function renderIngredientAddRow(ing, st){
     <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
       <input id="w-ingredients-${ing.id}" type="number" value="${initW}" oninput="App.scaleRow('${ing.id}', ${ing.kcalPer100}, this)"/>
       <div style="font-size:12.5px;color:var(--muted);flex:1;">${ing.unit} used</div>
-      <button id="addbtn-ingredients-${ing.id}" onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" ${(!st.targetMeal && st.flashId!==ing.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal && st.flashId!==ing.id)?'0.5':'1'};">${st.flashId===ing.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
+      <button id="addbtn-ingredients-${ing.id}" onclick="App.addScaledItemToMeal('ingredients','${ing.id}', document.getElementById('w-ingredients-${ing.id}'))" ${(!st.targetMeal && st.flashId!==ing.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===ing.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;opacity:${(!st.targetMeal && st.flashId!==ing.id)?'0.5':'1'};">${st.flashId===ing.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
     </div>
     <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--muted);cursor:pointer;">
       <input type="checkbox" id="usual-ingredients-${ing.id}" style="width:14px;height:14px;accent-color:var(--brand);"/>
@@ -3625,7 +3608,7 @@ function renderUsdaAddRow(u, st){
   const initW = u.defaultAmount || 100;
   return `
   <div data-name="${u.name.toLowerCase()}" class="card pad-sm">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div class="row-between">
       <div style="min-width:0;">
         <div style="font-size:13.5px;font-weight:700;">${srcTag('USDA','pill-usda')}${u.name}</div>
         <div style="margin-top:4px;"><span class="pill pill-usda">Verified · ${u.fdc}</span></div>
@@ -3636,7 +3619,7 @@ function renderUsdaAddRow(u, st){
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
       <input id="w-usda-${u.id}" type="number" value="${initW}" oninput="App.scaleRow('${u.id}', ${u.kcalPer100}, this)"/>
       <div style="font-size:12.5px;color:var(--muted);flex:1;">g used</div>
-      <button id="addbtn-usda-${u.id}" onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" ${(!st.targetMeal && st.flashId!==u.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal && st.flashId!==u.id)?'0.5':'1'};">${st.flashId===u.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
+      <button id="addbtn-usda-${u.id}" onclick="App.addScaledItemToMeal('usda','${u.id}', document.getElementById('w-usda-${u.id}'))" ${(!st.targetMeal && st.flashId!==u.id)?'disabled':''} style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${st.flashId===u.id?'var(--good)':'var(--brand)'};color:#fff;border:none;font-size:12px;font-weight:700;opacity:${(!st.targetMeal && st.flashId!==u.id)?'0.5':'1'};">${st.flashId===u.id?'Added ✓':(st.targetMeal?'+ Add to '+st.targetMeal:'+ Select a meal')}</button>
     </div>
     <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--muted);cursor:pointer;">
       <input type="checkbox" id="usual-usda-${u.id}" style="width:14px;height:14px;accent-color:var(--brand);"/>
@@ -3667,15 +3650,15 @@ function renderAddFood(){
       <div id="addfood-quicklookup" class="card pad" style="margin-bottom:12px;display:${st.activeTab==='usda'?'block':'none'};">
         <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Need a food that isn't listed?</div>
         <div style="font-size:11.5px;color:var(--muted);line-height:1.4;margin-bottom:10px;">USDA search lives in Memory. Save the food you want there, then come back here to log it.</div>
-        <button onclick="App.goToUsdaSearch()" style="width:100%;padding:10px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Search USDA in Memory &rarr;</button>
+        <button onclick="App.goToUsdaSearch()" style="width:100%;padding:10px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;">Search USDA in Memory &rarr;</button>
       </div>`;
 
   const backdateEntry = st.targetDate ? (App.state.dayHistory.find(h => h.date === st.targetDate) || {waterMl:0, weightKg:null}) : null;
   const backdateBanner = st.targetDate ? `
     <div class="card pad" style="margin-bottom:12px;background:var(--brand-tint);border:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div class="head-row">
         <div style="font-size:12.5px;font-weight:800;color:var(--brand-dark);">Logging to ${formatShortDate(st.targetDate)}</div>
-        <button onclick="App.backOneLevel()" style="padding:6px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Done</button>
+        <button onclick="App.backOneLevel()" style="padding:6px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;">Done</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--brand-dark);font-weight:600;">Water</span>
@@ -3684,15 +3667,15 @@ function renderAddFood(){
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
         <span style="font-size:11px;color:var(--brand-dark);font-weight:600;">Weight (kg)</span>
-        <input id="backdate-weight-input" type="number" step="0.1" value="${backdateEntry.weightKg ?? ''}" placeholder="—" style="width:70px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;font-family:inherit;"/>
-        <button onclick="App.saveBackdateWeight()" style="padding:6px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button>
+        <input id="backdate-weight-input" type="number" step="0.1" value="${backdateEntry.weightKg ?? ''}" placeholder="—" style="width:70px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;"/>
+        <button onclick="App.saveBackdateWeight()" style="padding:6px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;">Save</button>
       </div>
     </div>` : '';
 
   return `
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-        <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
+        <button onclick="App.backOneLevel()" style="background:none;border:none;color:var(--ink);padding:0;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="disp" style="font-size:18px;font-weight:800;">Log food</div>
@@ -3724,16 +3707,16 @@ function renderAddFood(){
       `}
     </div>
 
-    <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;">
+    <div class="footer-bar">
       <div id="addfood-meal-chips" style="display:flex;gap:6px;margin-bottom:10px;overflow-x:auto;">
         ${mealDefs.map(m => `<button class="chip ${st.targetMeal===m?'active':''}" data-meal="${m}" onclick="App.setTargetMeal('${m}')">${m}</button>`).join('')}
       </div>
       ${st.activeTab==='quick' ? `
-      <button id="addfood-bottom-btn" onclick="App.quickAddLog()" ${!st.targetMeal?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${!st.targetMeal?'0.5':'1'};">
+      <button id="addfood-bottom-btn" onclick="App.quickAddLog()" ${!st.targetMeal?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;opacity:${!st.targetMeal?'0.5':'1'};">
         ${st.targetMeal ? `Log to ${st.targetMeal} · not saved to memory` : 'Select a meal above to continue'}
       </button>
       ` : `
-      <button id="addfood-bottom-btn" onclick="App.confirmAddSelectedFoods()" ${(!st.targetMeal || addCount===0)?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${(!st.targetMeal || addCount===0)?'0.5':'1'};">
+      <button id="addfood-bottom-btn" onclick="App.confirmAddSelectedFoods()" ${(!st.targetMeal || addCount===0)?'disabled':''} style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;opacity:${(!st.targetMeal || addCount===0)?'0.5':'1'};">
         ${st.targetMeal ? `Add to ${st.targetMeal} · ${addCount>0 ? addCount+' item'+(addCount>1?'s':'') : 'select items'}` : 'Select a meal above to continue'}
       </button>
       `}
@@ -3746,8 +3729,8 @@ function renderQuickAddForm(){
     <div class="card pad">
       <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:2px;">Log something once</div>
       <div style="font-size:10.5px;color:var(--muted);margin-bottom:12px;line-height:1.4;">For a one-off item you won't eat again — this is logged to today only and isn't saved to Memory.</div>
-      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Name</label>
-      <input id="quickadd-name" type="text" placeholder="e.g. Restaurant biryani" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
+      <label class="field-label">Name</label>
+      <input id="quickadd-name" type="text" placeholder="e.g. Restaurant biryani" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;"/>
       <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:8px;">
         ${fields.map(([id,label]) => `
           <div>
@@ -3762,7 +3745,7 @@ function renderQuickAddForm(){
 
 /* ---------- Library: shared add/edit form ---------- */
 function addMemoryButton(kind, label){
-  return `<button onclick="App.openAddForm('${kind}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px 0;border-radius:12px;border:1.5px dashed rgba(11,11,11,0.20);background:transparent;color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;margin-bottom:10px;font-family:inherit;">
+  return `<button onclick="App.openAddForm('${kind}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px 0;border-radius:12px;border:1.5px dashed rgba(11,11,11,0.20);background:transparent;color:var(--brand-dark);font-size:12.5px;font-weight:700;margin-bottom:10px;">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     ${label}
   </button>`;
@@ -3774,14 +3757,14 @@ function renderMemoryForm(f){
   const esc2 = s => String(s).replace(/"/g,'&quot;');
   return `
     <div class="card pad" style="margin-bottom:10px;border:1.5px solid var(--brand);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div class="head-row">
         <div style="font-size:13.5px;font-weight:800;">${title}</div>
-        <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;">
+        <button onclick="App.backOneLevel()" style="background:none;border:none;color:var(--muted);padding:2px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
       </div>
       ${f.notice ? `<div style="font-size:11.5px;line-height:1.45;padding:9px 11px;border-radius:9px;background:var(--brand-tint);color:var(--brand-dark);margin-bottom:12px;">${f.notice}</div>` : ''}
-      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Photo (optional)</label>
+      <label class="field-label">Photo (optional)</label>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
         <label style="display:flex;align-items:center;gap:7px;padding:9px 13px;border-radius:9px;border:1.5px dashed rgba(11,11,11,0.22);cursor:pointer;font-size:12.5px;font-weight:700;color:var(--ink-2);">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 012-2h2M4 16v2a2 2 0 002 2h2M20 8V6a2 2 0 00-2-2h-2M20 16v2a2 2 0 01-2 2h-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="currentColor" stroke-width="2"/></svg>
@@ -3790,23 +3773,23 @@ function renderMemoryForm(f){
         </label>
         ${f.photo ? `<img src="${f.photo}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"/>` : ''}
       </div>
-      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Barcode (optional)</label>
-      <input id="mf-barcode" type="text" inputmode="numeric" value="${esc2(g(f.barcode))}" placeholder="Filled in when you scan one" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
-      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Name</label>
-      <input id="mf-name" type="text" value="${esc2(g(f.name))}" placeholder="${isFoods?'e.g. Protein Shake':'e.g. Almarai Full Fat Milk'}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
+      <label class="field-label">Barcode (optional)</label>
+      <input id="mf-barcode" type="text" inputmode="numeric" value="${esc2(g(f.barcode))}" placeholder="Filled in when you scan one" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;"/>
+      <label class="field-label">Name</label>
+      <input id="mf-name" type="text" value="${esc2(g(f.name))}" placeholder="${isFoods?'e.g. Protein Shake':'e.g. Almarai Full Fat Milk'}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;"/>
       ${isFoods ? `
-        <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Recipe / description</label>
-        <input id="mf-desc" type="text" value="${esc2(g(f.desc))}" placeholder="What's in it, and how much" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
-        <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Total weight in grams (optional)</label>
-        <input id="mf-weight" type="number" step="1" value="${g(f.totalWeightG)}" placeholder="e.g. 300" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:4px;font-family:inherit;"/>
+        <label class="field-label">Recipe / description</label>
+        <input id="mf-desc" type="text" value="${esc2(g(f.desc))}" placeholder="What's in it, and how much" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;"/>
+        <label class="field-label">Total weight in grams (optional)</label>
+        <input id="mf-weight" type="number" step="1" value="${g(f.totalWeightG)}" placeholder="e.g. 300" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:4px;"/>
         <div style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Lets you log a partial portion by weight (e.g. "I ate 50g of this 300g meal") instead of only by percentage.</div>
       ` : `
         <div style="display:flex;gap:14px;margin-bottom:10px;">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;"><input type="radio" name="mf-unit" value="g" ${f.unit!=='ml'?'checked':''}/> per 100 g</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;"><input type="radio" name="mf-unit" value="ml" ${f.unit==='ml'?'checked':''}/> per 100 ml</label>
+          <label class="check-row"><input type="radio" name="mf-unit" value="g" ${f.unit!=='ml'?'checked':''}/> per 100 g</label>
+          <label class="check-row"><input type="radio" name="mf-unit" value="ml" ${f.unit==='ml'?'checked':''}/> per 100 ml</label>
         </div>
-        <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Source</label>
-        <input id="mf-source" type="text" value="${esc2(g(f.source))}" placeholder="${f.kind==='usda'?'e.g. FDC 123456':'e.g. Per label, Lab-tested'}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:12px;font-family:inherit;"/>
+        <label class="field-label">Source</label>
+        <input id="mf-source" type="text" value="${esc2(g(f.source))}" placeholder="${f.kind==='usda'?'e.g. FDC 123456':'e.g. Per label, Lab-tested'}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:12px;"/>
       `}
       <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:8px;margin-bottom:14px;">
         ${[['mf-kcal','Calories (kcal)',f.kcal],['mf-p','Protein (g)',f.p],['mf-c','Carbs (g)',f.c],['mf-f','Fat (g)',f.f],['mf-fib','Fiber (g)',f.fib],['mf-sugar','Sugar (g)',f.sugar],['mf-sodium','Sodium (mg)',f.sodium]].map(([id,label,v]) => `
@@ -3821,8 +3804,8 @@ function renderMemoryForm(f){
       </label>
       <div style="font-size:10.5px;color:var(--muted);margin-bottom:14px;line-height:1.4;">Doesn't apply to juice, dried fruit, smoothies, or sweetened versions — only the intact whole food.</div>
       <div style="display:flex;gap:8px;">
-        <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:inherit;">Cancel</button>
-        <button onclick="App.saveForm()" style="flex:2;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;font-size:13px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">${f.editId ? 'Save changes' : 'Add to memory'}</button>
+        <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);">Cancel</button>
+        <button onclick="App.saveForm()" style="flex:2;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;font-size:13px;font-weight:700;border:none;">${f.editId ? 'Save changes' : 'Add to memory'}</button>
       </div>
     </div>
   `;
@@ -3833,12 +3816,12 @@ function renderComposerComponentRow(comp){
   const live = isComponentLive(comp);
   return `
     <div class="card pad-sm" style="margin-bottom:6px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div class="row-between">
         <div style="min-width:0;">
           <div style="font-size:13px;font-weight:700;">${comp.name}</div>
           <div style="font-size:10px;color:var(--muted);margin-top:1px;">${live ? 'Linked — updates if you edit it later' : 'Fixed values'}</div>
         </div>
-        <button onclick="App.composerRemoveComponent('${comp.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;flex-shrink:0;">
+        <button onclick="App.composerRemoveComponent('${comp.id}')" style="background:none;border:none;color:var(--muted);padding:4px;flex-shrink:0;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
       </div>
@@ -3853,11 +3836,11 @@ function renderComposerManualForm(){
   const fields = [['composer-manual-kcal','Calories (kcal)'],['composer-manual-p','Protein (g)'],['composer-manual-c','Carbs (g)'],['composer-manual-f','Fat (g)'],['composer-manual-fib','Fiber (g)'],['composer-manual-sugar','Sugar (g)'],['composer-manual-sodium','Sodium (mg)']];
   return `
     <div class="card pad-sm" style="margin-top:8px;border:1px dashed var(--border);">
-      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Ingredient name</label>
-      <input id="composer-manual-name" type="text" placeholder="e.g. Haleem" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
+      <label class="field-label">Ingredient name</label>
+      <input id="composer-manual-name" type="text" placeholder="e.g. Haleem" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;"/>
       <div style="display:flex;gap:14px;margin-bottom:10px;">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;"><input type="radio" name="composer-manual-unit" value="g" checked/> per 100 g</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;cursor:pointer;"><input type="radio" name="composer-manual-unit" value="ml"/> per 100 ml</label>
+        <label class="check-row"><input type="radio" name="composer-manual-unit" value="g" checked/> per 100 g</label>
+        <label class="check-row"><input type="radio" name="composer-manual-unit" value="ml"/> per 100 ml</label>
       </div>
       <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:8px;margin-bottom:10px;">
         ${fields.map(([id,label]) => `
@@ -3871,7 +3854,7 @@ function renderComposerManualForm(){
         <input type="checkbox" id="composer-manual-savestandalone" checked/> Also save to my permanent Ingredients list
       </label>
       <div style="font-size:10.5px;color:var(--muted);margin-bottom:10px;line-height:1.4;">Leave this ticked to reuse it in other meals later, or untick to use it just this once. Either way, you still need to tap the button below to add it — filling this form alone doesn't save anything yet.</div>
-      <button onclick="App.composerAddManualComponent()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Add this to the meal</button>
+      <button onclick="App.composerAddManualComponent()" style="width:100%;padding:9px 0;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;">Add this to the meal</button>
     </div>`;
 }
 function renderComposerForm(c){
@@ -3883,16 +3866,16 @@ function renderComposerForm(c){
   const { total } = computeCompositeTotal({ components:c.components });
   return `
     <div class="card pad" style="margin-bottom:10px;border:1.5px solid var(--brand);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div class="head-row">
         <div style="font-size:13.5px;font-weight:800;">${isEdit ? 'Edit saved meal' : 'Build a saved meal from ingredients'}</div>
-        <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;">
+        <button onclick="App.backOneLevel()" style="background:none;border:none;color:var(--muted);padding:2px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
       </div>
-      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Meal name</label>
-      <input id="composer-name" type="text" value="${String(c.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Haleem with Roti" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;font-family:inherit;"/>
-      <label style="display:block;font-size:11px;font-weight:700;color:var(--ink-2);margin-bottom:4px;">Description</label>
-      <input id="composer-desc" type="text" value="${String(c.desc||'').replace(/"/g,'&quot;')}" placeholder="Auto-generated from components — edit if you like" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:14px;font-family:inherit;"/>
+      <label class="field-label">Meal name</label>
+      <input id="composer-name" type="text" value="${String(c.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Haleem with Roti" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:10px;"/>
+      <label class="field-label">Description</label>
+      <input id="composer-desc" type="text" value="${String(c.desc||'').replace(/"/g,'&quot;')}" placeholder="Auto-generated from components — edit if you like" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:14px;"/>
 
       <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Components</div>
       ${c.components.length === 0 ? `<div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">No components yet — add one below.</div>` : c.components.map(renderComposerComponentRow).join('')}
@@ -3914,14 +3897,14 @@ function renderComposerForm(c){
           </div>
         `).join('')}
       </div>
-      <button onclick="App.composerToggleManual()" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:9px 0;border-radius:10px;border:1.5px dashed rgba(11,11,11,0.20);background:transparent;color:var(--brand-dark);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+      <button onclick="App.composerToggleManual()" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:9px 0;border-radius:10px;border:1.5px dashed rgba(11,11,11,0.20);background:transparent;color:var(--brand-dark);font-size:12px;font-weight:700;">
         Can't find it? Add a new ingredient
       </button>
       ${c.manualOpen ? renderComposerManualForm() : ''}
 
       <div style="display:flex;gap:8px;margin-top:14px;">
-        <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:inherit;">Cancel</button>
-        <button onclick="App.saveComposer()" style="flex:2;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;font-size:13px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">${isEdit ? 'Save changes' : 'Save meal'}</button>
+        <button onclick="App.backOneLevel()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;font-weight:700;border:1px solid var(--border);">Cancel</button>
+        <button onclick="App.saveComposer()" style="flex:2;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;font-size:13px;font-weight:700;border:none;">${isEdit ? 'Save changes' : 'Save meal'}</button>
       </div>
     </div>
   `;
@@ -3965,29 +3948,29 @@ function memoryRowActions(kind, item){
 }
 function memoryConfirmCard(kind, item){
   return `<div class="card pad-sm" style="border-color:var(--critical);">
-    <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Remove &ldquo;${item.name}&rdquo; from memory?</div>
+    <div class="sub-head">Remove &ldquo;${item.name}&rdquo; from memory?</div>
     <div style="display:flex;gap:8px;">
-      <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-      <button onclick="App.confirmDelete('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Delete</button>
+      <button onclick="App.backOneLevel()" class="btn-plain-sm">Cancel</button>
+      <button onclick="App.confirmDelete('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;">Delete</button>
     </div>
   </div>`;
 }
 function memoryConfirmMoveCard(kind, item){
   const moveTo = kind === 'foods' ? 'Ingredients' : 'Saved foods';
   return `<div class="card pad-sm" style="border-color:var(--brand);">
-    <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Move &ldquo;${item.name}&rdquo; to ${moveTo}?</div>
+    <div class="sub-head">Move &ldquo;${item.name}&rdquo; to ${moveTo}?</div>
     <div style="display:flex;gap:8px;">
-      <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-      <button onclick="App.confirmMove('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Move</button>
+      <button onclick="App.backOneLevel()" class="btn-plain-sm">Cancel</button>
+      <button onclick="App.confirmMove('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;">Move</button>
     </div>
   </div>`;
 }
 function memoryConfirmArchiveCard(kind, item){
   return `<div class="card pad-sm" style="border-color:var(--brand);">
-    <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Archive &ldquo;${item.name}&rdquo;? You can reinstate it anytime from the Archive tab.</div>
+    <div class="sub-head">Archive &ldquo;${item.name}&rdquo;? You can reinstate it anytime from the Archive tab.</div>
     <div style="display:flex;gap:8px;">
-      <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-      <button onclick="App.confirmArchive('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Archive</button>
+      <button onclick="App.backOneLevel()" class="btn-plain-sm">Cancel</button>
+      <button onclick="App.confirmArchive('${kind}','${item.id}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;">Archive</button>
     </div>
   </div>`;
 }
@@ -4009,7 +3992,7 @@ function renderArchiveRow(kind, item){
         <button onclick="event.stopPropagation();App.requestDelete('${kind}','${item.id}')" title="Delete" style="${ROW_ACTION_BTN}">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button onclick="App.reinstateItem('${kind}','${item.id}')" style="flex-shrink:0;padding:7px 12px;border-radius:9px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Reinstate</button>
+        <button onclick="App.reinstateItem('${kind}','${item.id}')" style="flex-shrink:0;padding:7px 12px;border-radius:9px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:11.5px;font-weight:700;">Reinstate</button>
       </div>
     </div>
   </div>`;
@@ -4055,7 +4038,7 @@ function renderFoodLibraryRow(f, st){
         ` : `<div style="font-size:11px;color:var(--muted);margin:10px 0 6px 0;">${f.recipe}</div>`}
         <div style="display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:6px;">
           ${macrosArrayFrom(f).map(([l,v]) => `
-            <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;">
+            <div class="mini-tile-sm">
               <div class="num" style="font-size:12.5px;font-weight:700;">${v}</div>
               <div style="font-size:9.5px;color:var(--muted);margin-top:1px;">${l}</div>
             </div>
@@ -4071,7 +4054,7 @@ function renderIngredientLibraryRow(ing, st){
   if (st.confirmArchiveKey === 'ingredients:'+ing.id) return `<div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}">${memoryConfirmArchiveCard('ingredients', ing)}</div>`;
   return `
   <div id="lib-row-ingredients-${ing.id}" data-name="${ing.name.toLowerCase()}" class="card pad-sm">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div class="row-between">
       <div style="display:flex;align-items:center;gap:8px;min-width:0;">
         ${photoThumb(ing)}
         <div style="font-size:13.5px;font-weight:700;">${srcTag('Ingredient','pill-neutral')}${ing.name}</div>
@@ -4096,11 +4079,11 @@ function renderUsdaSearchRow(r, i){
         <div style="font-size:11px;color:var(--muted);margin-top:3px;">${rd(p.kcal)} kcal &middot; P ${rd(p.p)}g &middot; C ${rd(p.c)}g &middot; F ${rd(p.f)}g <span style="opacity:.8;">per 100g</span></div>
         ${r.missing.length ? `<div style="font-size:10.5px;color:var(--warning);font-weight:600;margin-top:2px;">No data for ${r.missing.join(', ')} (saved as 0)</div>` : ''}
       </div>
-      <button ${saved ? 'disabled' : ''} onclick="App.saveUsdaResult(${i})" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${saved ? 'var(--surface)' : 'var(--brand)'};color:${saved ? 'var(--brand-dark)' : '#fff'};border:none;font-size:12px;font-weight:700;cursor:${saved ? 'default' : 'pointer'};font-family:inherit;">${saved ? 'Saved ✓' : 'Save'}</button>
+      <button ${saved ? 'disabled' : ''} onclick="App.saveUsdaResult(${i})" style="flex-shrink:0;padding:8px 14px;border-radius:9px;background:${saved ? 'var(--surface)' : 'var(--brand)'};color:${saved ? 'var(--brand-dark)' : '#fff'};border:none;font-size:12px;font-weight:700;cursor:${saved ? 'default' : 'pointer'};">${saved ? 'Saved ✓' : 'Save'}</button>
     </div>`;
 }
 function renderUsdaSearchCard(st){
-  const notice = (bg, fg, msg, btn) => `<div style="margin-top:10px;padding:12px;background:var(--${bg}-tint);color:var(--${fg});border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">${msg}${btn ? `<button onclick="App.setScreen('settings')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--${fg});color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">${btn}</button>` : ''}</div>`;
+  const notice = (bg, fg, msg, btn) => `<div style="margin-top:10px;padding:12px;background:var(--${bg}-tint);color:var(--${fg});border-radius:10px;font-size:12px;font-weight:600;line-height:1.4;">${msg}${btn ? `<button onclick="App.setScreen('settings')" style="display:block;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;background:var(--${fg});color:#fff;border:none;font-size:12px;font-weight:700;">${btn}</button>` : ''}</div>`;
   const q = usdaEsc(st.usdaQuery);
   let body = '';
   if (st.usdaLoading){
@@ -4127,8 +4110,8 @@ function renderUsdaSearchCard(st){
     <div class="card pad" style="margin-bottom:12px;">
       <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Search USDA FoodData Central</div>
       <div style="display:flex;gap:8px;">
-        <input id="usda-search-input" type="text" value="${q}" placeholder="e.g. chicken, apple, basmati rice" onkeydown="if(event.key==='Enter')App.runUsdaSearch()" style="flex:1;min-width:0;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;font-family:inherit;"/>
-        <button onclick="App.runUsdaSearch()" style="padding:9px 16px;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Search</button>
+        <input id="usda-search-input" type="text" value="${q}" placeholder="e.g. chicken, apple, basmati rice" onkeydown="if(event.key==='Enter')App.runUsdaSearch()" style="flex:1;min-width:0;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;"/>
+        <button onclick="App.runUsdaSearch()" style="padding:9px 16px;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;">Search</button>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--ink-2);cursor:pointer;">
         <input id="usda-branded-toggle" type="checkbox" ${st.usdaIncludeBranded ? 'checked' : ''} onchange="App.toggleUsdaBranded()" style="width:16px;height:16px;accent-color:var(--brand);"/>
@@ -4143,7 +4126,7 @@ function renderUsdaLibraryRow(u, st){
   if (st.confirmArchiveKey === 'usda:'+u.id) return `<div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}">${memoryConfirmArchiveCard('usda', u)}</div>`;
   return `
   <div id="lib-row-usda-${u.id}" data-name="${u.name.toLowerCase()}" class="card pad-sm">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div class="row-between">
       <div style="display:flex;align-items:center;gap:8px;min-width:0;">
         ${photoThumb(u)}
         <div style="font-size:13.5px;font-weight:700;">${srcTag('USDA','pill-usda')}${u.name}</div>
@@ -4169,7 +4152,7 @@ function renderLibrary(){
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         ${addMemoryButton('foods','Add a saved food')}
       </div>
-      <button onclick="App.openComposer()" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px 0;border-radius:12px;border:1.5px dashed rgba(11,11,11,0.20);background:transparent;color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;margin-bottom:10px;font-family:inherit;">
+      <button onclick="App.openComposer()" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px 0;border-radius:12px;border:1.5px dashed rgba(11,11,11,0.20);background:transparent;color:var(--brand-dark);font-size:12.5px;font-weight:700;margin-bottom:10px;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         Build from ingredients
       </button>
@@ -4221,8 +4204,8 @@ function renderLibrary(){
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
         <div class="disp" style="font-size:20px;font-weight:800;">Memory &amp; library</div>
         <div style="display:flex;align-items:center;gap:12px;">
-          ${st.activeTab!=='archive' && !st.selectMode && !st.form && !st.composer ? `<button onclick="App.openScanner()" style="display:flex;align-items:center;gap:6px;background:var(--brand-tint);border:none;color:var(--brand-dark);font-size:12px;font-weight:700;cursor:pointer;padding:6px 11px;border-radius:9px;font-family:inherit;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Scan</button>` : ''}
-          ${st.activeTab!=='archive' ? `<button onclick="${st.selectMode ? 'App.backOneLevel()' : 'App.toggleLibrarySelectMode()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;cursor:pointer;">${st.selectMode ? 'Cancel' : 'Select'}</button>` : ''}
+          ${st.activeTab!=='archive' && !st.selectMode && !st.form && !st.composer ? `<button onclick="App.openScanner()" style="display:flex;align-items:center;gap:6px;background:var(--brand-tint);border:none;color:var(--brand-dark);font-size:12px;font-weight:700;padding:6px 11px;border-radius:9px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Scan</button>` : ''}
+          ${st.activeTab!=='archive' ? `<button onclick="${st.selectMode ? 'App.backOneLevel()' : 'App.toggleLibrarySelectMode()'}" style="background:none;border:none;color:var(--brand);font-size:12.5px;font-weight:700;">${st.selectMode ? 'Cancel' : 'Select'}</button>` : ''}
         </div>
       </div>
       <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px;">${st.selectMode ? 'Tap items to select, then share, archive or delete them together.' : 'Saved foods, ingredients &amp; learned rules — update anytime'}</div>
@@ -4244,25 +4227,25 @@ function renderLibrary(){
       </div>
     </div>
     <div class="scroll-area" style="padding:14px 18px 90px 18px;">
-      ${st.returnToLog ? `<button onclick="App.backToLogFromMemory()" style="display:block;width:100%;margin-bottom:10px;padding:10px 0;border-radius:11px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">&larr; Back to Log food</button>` : ''}
-      ${st.shareStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.shareStatus}</div>` : ''}
+      ${st.returnToLog ? `<button onclick="App.backToLogFromMemory()" style="display:block;width:100%;margin-bottom:10px;padding:10px 0;border-radius:11px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:12.5px;font-weight:700;">&larr; Back to Log food</button>` : ''}
+      ${st.shareStatus ? `<div class="status-line">${st.shareStatus}</div>` : ''}
       <div id="lib-extras">${extras}</div>
       ${groups}
     </div>
     ${st.selectMode ? `
-      <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;">
+      <div class="footer-bar">
         ${st.bulkAction ? renderBulkActionConfirm(st) : `
         <div style="display:flex;gap:7px;">
-          <button onclick="App.backOneLevel()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-          <button onclick="App.requestBulkAction('archive')" ${selectedCount===0?'disabled':''} style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);color:var(--ink-2);font-size:9.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
+          <button onclick="App.backOneLevel()" class="btn-plain-lg">Cancel</button>
+          <button onclick="App.requestBulkAction('archive')" ${selectedCount===0?'disabled':''} style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);color:var(--ink-2);font-size:9.5px;font-weight:700;opacity:${selectedCount===0?'0.5':'1'};">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 7h18M3 7l1-3h16l1 3M3 7v11a2 2 0 002 2h14a2 2 0 002-2V7M10 12h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Archive
           </button>
-          <button onclick="App.requestBulkAction('delete')" ${selectedCount===0?'disabled':''} style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--surface);border:1px solid var(--critical);color:var(--critical);font-size:9.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
+          <button onclick="App.requestBulkAction('delete')" ${selectedCount===0?'disabled':''} style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--surface);border:1px solid var(--critical);color:var(--critical);font-size:9.5px;font-weight:700;opacity:${selectedCount===0?'0.5':'1'};">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Delete
           </button>
-          <button onclick="App.requestBulkAction('share')" ${selectedCount===0?'disabled':''} style="flex:1.3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:9.5px;font-weight:700;cursor:pointer;font-family:inherit;opacity:${selectedCount===0?'0.5':'1'};">
+          <button onclick="App.requestBulkAction('share')" ${selectedCount===0?'disabled':''} style="flex:1.3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:9.5px;font-weight:700;opacity:${selectedCount===0?'0.5':'1'};">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Share
           </button>
@@ -4291,8 +4274,8 @@ function renderBulkActionConfirm(st){
   return `
     <div style="text-align:center;font-size:12.5px;font-weight:700;margin-bottom:10px;color:var(--ink);">${step===1?msgStep1:msgStep2}</div>
     <div style="display:flex;gap:8px;">
-      <button onclick="App.cancelBulkAction()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-      <button onclick="App.confirmBulkAction()" style="flex:1;padding:12px 0;border-radius:12px;background:${color};color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">${step===1 ? 'Continue' : label+' '+count+' '+noun}</button>
+      <button onclick="App.cancelBulkAction()" class="btn-plain-lg">Cancel</button>
+      <button onclick="App.confirmBulkAction()" style="flex:1;padding:12px 0;border-radius:12px;background:${color};color:#fff;border:none;font-size:13.5px;font-weight:700;">${step===1 ? 'Continue' : label+' '+count+' '+noun}</button>
     </div>
   `;
 }
@@ -4305,7 +4288,7 @@ function renderDayTagBlock(d){
     return `<div style="margin-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
       <span style="font-size:11px;color:var(--muted);">Reason:</span>
       <span class="pill" style="background:var(--brand-tint);color:var(--brand-dark);display:inline-flex;align-items:center;gap:6px;">${d.tag.replace(/</g,'&lt;')}
-        <button onclick="App.clearDayTag('${d.date}')" title="Remove reason" style="background:none;border:none;padding:0;cursor:pointer;color:var(--brand-dark);font-size:12px;line-height:1;font-family:inherit;">✕</button>
+        <button onclick="App.clearDayTag('${d.date}')" title="Remove reason" style="background:none;border:none;padding:0;color:var(--brand-dark);font-size:12px;line-height:1;">✕</button>
       </span>
     </div>`;
   }
@@ -4313,16 +4296,16 @@ function renderDayTagBlock(d){
     return `<div style="margin-top:10px;">
       <div style="font-size:11px;color:var(--muted);margin-bottom:5px;">What happened?</div>
       <div style="display:flex;gap:6px;">
-        <input id="day-tag-other-${d.date}" placeholder="e.g. Birthday dinner" style="flex:1;min-width:0;padding:7px 10px;border-radius:8px;border:1px solid var(--border);font-size:12px;font-family:inherit;"/>
-        <button onclick="App.saveDayTagOther('${d.date}')" style="flex-shrink:0;padding:7px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button>
+        <input id="day-tag-other-${d.date}" placeholder="e.g. Birthday dinner" style="flex:1;min-width:0;padding:7px 10px;border-radius:8px;border:1px solid var(--border);font-size:12px;"/>
+        <button onclick="App.saveDayTagOther('${d.date}')" style="flex-shrink:0;padding:7px 12px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;">Save</button>
       </div>
     </div>`;
   }
   return `<div style="margin-top:10px;">
     <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">What happened this day? (optional)</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;">
-      ${DAY_TAG_PRESETS.map(t => `<button onclick="App.setDayTag('${d.date}','${t}')" style="padding:6px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--ink-2);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">${t}</button>`).join('')}
-      <button onclick="App.openDayTagOther('${d.date}')" style="padding:6px 10px;border-radius:20px;border:1px dashed var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">Other</button>
+      ${DAY_TAG_PRESETS.map(t => `<button onclick="App.setDayTag('${d.date}','${t}')" style="padding:6px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--ink-2);font-size:11px;font-weight:600;">${t}</button>`).join('')}
+      <button onclick="App.openDayTagOther('${d.date}')" style="padding:6px 10px;border-radius:20px;border:1px dashed var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;">Other</button>
     </div>
   </div>`;
 }
@@ -4358,10 +4341,10 @@ function renderHistory(){
         ${realDays.map((d,i) => {
           if (st.confirmDeleteDate === d.date){
             return `<div class="card pad-sm" style="border-color:var(--critical);">
-              <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Permanently delete ${formatShortDate(d.date)}? This removes it from History, Trends and exports — it can't be undone.</div>
+              <div class="sub-head">Permanently delete ${formatShortDate(d.date)}? This removes it from History, Trends and exports — it can't be undone.</div>
               <div style="display:flex;gap:8px;">
-                <button onclick="App.backOneLevel()" style="flex:1;padding:8px 0;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-                <button onclick="App.deleteDay('${d.date}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Delete</button>
+                <button onclick="App.backOneLevel()" class="btn-plain-sm">Cancel</button>
+                <button onclick="App.deleteDay('${d.date}')" style="flex:1;padding:8px 0;border-radius:8px;background:var(--critical);color:#fff;border:none;font-size:12px;font-weight:700;">Delete</button>
               </div>
             </div>`;
           }
@@ -4384,18 +4367,18 @@ function renderHistory(){
             ${open ? `
               <div style="padding:0 13px 12px 13px;border-top:1px solid var(--border);">
                 <div style="display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:6px;margin-top:10px;">
-                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.carbs}g</div><div style="font-size:9.5px;color:var(--muted);">Carbs</div></div>
-                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.protein}g</div><div style="font-size:9.5px;color:var(--muted);">Protein</div></div>
-                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${d.fat}g</div><div style="font-size:9.5px;color:var(--muted);">Fat</div></div>
-                  <div style="background:var(--surface);border-radius:8px;padding:6px 4px;text-align:center;"><div class="num" style="font-size:12.5px;font-weight:700;">${Math.round(d.calories)}</div><div style="font-size:9.5px;color:var(--muted);">Calories</div></div>
+                  <div class="mini-tile-sm"><div class="num" style="font-size:12.5px;font-weight:700;">${d.carbs}g</div><div style="font-size:9.5px;color:var(--muted);">Carbs</div></div>
+                  <div class="mini-tile-sm"><div class="num" style="font-size:12.5px;font-weight:700;">${d.protein}g</div><div style="font-size:9.5px;color:var(--muted);">Protein</div></div>
+                  <div class="mini-tile-sm"><div class="num" style="font-size:12.5px;font-weight:700;">${d.fat}g</div><div style="font-size:9.5px;color:var(--muted);">Fat</div></div>
+                  <div class="mini-tile-sm"><div class="num" style="font-size:12.5px;font-weight:700;">${Math.round(d.calories)}</div><div style="font-size:9.5px;color:var(--muted);">Calories</div></div>
                 </div>
                 ${statusFor('calories', d.calories) !== 'good' ? renderDayTagBlock(d) : ''}
                 ${!d.isToday ? `
-                  <button onclick="App.startBackdateLog('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;border:none;background:var(--brand);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+                  <button onclick="App.startBackdateLog('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:10px;padding:9px 0;border-radius:9px;border:none;background:var(--brand);color:#fff;font-size:12px;font-weight:700;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
                     Log a forgotten item to this day
                   </button>
-                  <button onclick="App.requestDeleteDay('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:8px;padding:9px 0;border-radius:9px;border:1.5px dashed var(--critical);background:transparent;color:var(--critical);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+                  <button onclick="App.requestDeleteDay('${d.date}')" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:8px;padding:9px 0;border-radius:9px;border:1.5px dashed var(--critical);background:transparent;color:var(--critical);font-size:12px;font-weight:700;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     Delete this day
                   </button>
@@ -4456,9 +4439,9 @@ function renderHistory(){
               </div>
             </div>
             <div style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:6px;">
-              <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:15px;font-weight:800;">${avgCal}</div><div style="font-size:9.5px;color:var(--muted);">avg kcal</div></div>
-              <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:15px;font-weight:800;">${avgProtein}g</div><div style="font-size:9.5px;color:var(--muted);">avg protein</div></div>
-              <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:15px;font-weight:800;">${avgFiber}g</div><div style="font-size:9.5px;color:var(--muted);">avg fiber</div></div>
+              <div class="mini-tile"><div class="num disp" style="font-size:15px;font-weight:800;">${avgCal}</div><div style="font-size:9.5px;color:var(--muted);">avg kcal</div></div>
+              <div class="mini-tile"><div class="num disp" style="font-size:15px;font-weight:800;">${avgProtein}g</div><div style="font-size:9.5px;color:var(--muted);">avg protein</div></div>
+              <div class="mini-tile"><div class="num disp" style="font-size:15px;font-weight:800;">${avgFiber}g</div><div style="font-size:9.5px;color:var(--muted);">avg fiber</div></div>
             </div>
             ${w===0 && streak >= 2 ? `<div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:11.5px;font-weight:700;color:var(--brand-dark);">🔥 ${streak}-day streak in your calorie range</div>` : ''}
             <div style="font-size:11.5px;color:var(--ink-2);line-height:1.5;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">${narrativeParts.join(' ')}</div>
@@ -4498,7 +4481,7 @@ function renderHistory(){
       const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(st.selectedDayNum).padStart(2,'0')}`;
       const entry = byDate.get(iso);
       const isPast = iso < todayIso;
-      const logBtn = isPast ? `<button onclick="App.startBackdateLog('${iso}')" style="margin-top:8px;padding:7px 14px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;">${entry ? 'Log a forgotten item' : 'Log food to this day'}</button>` : '';
+      const logBtn = isPast ? `<button onclick="App.startBackdateLog('${iso}')" style="margin-top:8px;padding:7px 14px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:11.5px;font-weight:700;">${entry ? 'Log a forgotten item' : 'Log food to this day'}</button>` : '';
       if (!entry){
         selectedPanel = `<div class="card pad-sm" style="background:var(--brand-tint);border:none;margin-bottom:10px;"><div style="font-size:12.5px;font-weight:700;color:var(--brand-dark);">${formatShortDate(iso)} — nothing logged</div>${logBtn}</div>`;
       } else {
@@ -4771,7 +4754,7 @@ function renderMaintenanceCard(){
       : '';
     formulaRow = row('Formula estimate', `~${fmt(f.tdee)} kcal`, `Resting ${fmt(f.bmr)} kcal × ${f.level.label.toLowerCase()} activity (${f.level.mult}), at your latest logged weight of ${f.weightKg} kg.${calNote}`);
   } else {
-    formulaRow = row('Formula estimate', '—', `Needs your ${f.missing.join(', ')}. <button onclick="App.setScreen('settings')" style="background:none;border:none;padding:0;color:var(--brand);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;">Open Settings</button>`);
+    formulaRow = row('Formula estimate', '—', `Needs your ${f.missing.join(', ')}. <button onclick="App.setScreen('settings')" style="background:none;border:none;padding:0;color:var(--brand);font-size:11px;font-weight:700;">Open Settings</button>`);
   }
   let measuredRow;
   if (m.ready){
@@ -4807,11 +4790,11 @@ function renderMaintenanceCard(){
         <div style="margin-top:10px;padding:11px 12px;background:var(--brand-tint);border-radius:11px;">
           <div style="font-size:12.5px;font-weight:700;color:var(--brand-dark);margin-bottom:9px;">Replace ${cur.low.toLocaleString()}–${cur.high.toLocaleString()} with ${r.low.toLocaleString()}–${r.high.toLocaleString()} kcal?</div>
           <div style="display:flex;gap:8px;">
-            <button onclick="App.cancelMaintTarget()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);border:1px solid var(--border);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-            <button onclick="App.applyMaintTarget()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Yes, update</button>
+            <button onclick="App.cancelMaintTarget()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--surface);border:1px solid var(--border);font-size:12.5px;font-weight:700;">Cancel</button>
+            <button onclick="App.applyMaintTarget()" style="flex:1;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;">Yes, update</button>
           </div>
         </div>` : `
-        <button onclick="App.requestMaintTarget()" style="width:100%;margin-top:10px;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">Use ${r.low.toLocaleString()}–${r.high.toLocaleString()} as my calorie target</button>`}
+        <button onclick="App.requestMaintTarget()" style="width:100%;margin-top:10px;padding:10px 0;border-radius:10px;background:var(--brand);color:#fff;border:none;font-size:12.5px;font-weight:700;">Use ${r.low.toLocaleString()}–${r.high.toLocaleString()} as my calorie target</button>`}
       ${mt.status ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-top:10px;">${mt.status}</div>` : ''}`;
   }
 
@@ -4821,7 +4804,7 @@ function renderMaintenanceCard(){
         <div style="min-width:0;">
           <div style="display:flex;align-items:center;gap:5px;">
             <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Maintenance calories</div>
-            <button onclick="event.stopPropagation(); App.openMaintenanceTips()" title="Tips for a more accurate estimate" style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;flex-shrink:0;border-radius:50%;border:1.5px solid var(--muted);background:none;color:var(--muted);padding:0;cursor:pointer;">
+            <button onclick="event.stopPropagation(); App.openMaintenanceTips()" title="Tips for a more accurate estimate" style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;flex-shrink:0;border-radius:50%;border:1.5px solid var(--muted);background:none;color:var(--muted);padding:0;">
               <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M12 11v6M12 7.5v.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
             </button>
           </div>
@@ -4844,11 +4827,11 @@ function renderMaintenanceTipsModal(){
     ['A wide range or a number that keeps moving is normal early on', 'It means your data is still catching up, not that anything is wrong — it tightens as more consistent days come in.'],
   ];
   return `
-    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
-      <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:340px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
+    <div onclick="App.backOneLevel()" class="modal-backdrop">
+      <div onclick="event.stopPropagation()" class="modal-box card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
           <div style="font-size:14.5px;font-weight:800;">Getting a more accurate number</div>
-          <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
+          <button onclick="App.backOneLevel()" class="icon-btn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
         </div>
@@ -4893,7 +4876,7 @@ function renderProfileCard(){
         ${ACTIVITY_LEVELS.map(a => `<button class="chip ${p.activity===a.id?'active':''}" onclick="App.setProfileActivity('${a.id}')">${a.label}</button>`).join('')}
       </div>
       <div style="font-size:11px;color:var(--muted);margin:6px 0 10px 0;">${level.hint}</div>
-      <button onclick="App.saveProfile()" style="padding:9px 16px;border-radius:10px;background:${mt.profileStatus?'var(--good)':'var(--brand-tint)'};color:${mt.profileStatus?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${mt.profileStatus || 'Save profile'}</button>
+      <button onclick="App.saveProfile()" style="padding:9px 16px;border-radius:10px;background:${mt.profileStatus?'var(--good)':'var(--brand-tint)'};color:${mt.profileStatus?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;border:none;">${mt.profileStatus || 'Save profile'}</button>
     </div>`;
 }
 
@@ -5038,7 +5021,7 @@ function renderMemoryImportReview(){
   return `
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-        <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
+        <button onclick="App.backOneLevel()" style="background:none;border:none;color:var(--ink);padding:0;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="disp" style="font-size:18px;font-weight:800;">Review import</div>
@@ -5096,19 +5079,19 @@ function renderMemoryImportReview(){
       ` : ''}
     </div>
     <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;display:flex;gap:8px;">
-      <button onclick="App.backOneLevel()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
-      <button onclick="App.applyMemoryImport()" style="flex:2;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Apply import</button>
+      <button onclick="App.backOneLevel()" class="btn-plain-lg">Cancel</button>
+      <button onclick="App.applyMemoryImport()" style="flex:2;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;">Apply import</button>
     </div>
   `;
 }
 function renderRecentExportsModal(exports){
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   return `
-    <div onclick="App.backOneLevel()" style="position:absolute;inset:0;background:rgba(11,11,11,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
-      <div onclick="event.stopPropagation()" class="card" style="width:100%;max-width:340px;max-height:80%;overflow-y:auto;padding:18px;box-shadow:var(--shadow);">
+    <div onclick="App.backOneLevel()" class="modal-backdrop">
+      <div onclick="event.stopPropagation()" class="modal-box card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
           <div style="font-size:14.5px;font-weight:800;">Recent exports</div>
-          <button onclick="App.backOneLevel()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;flex-shrink:0;">
+          <button onclick="App.backOneLevel()" class="icon-btn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
         </div>
@@ -5229,9 +5212,9 @@ function renderRecentExportsModal(exports){
               }).join('')}
             </div>
             <div style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:6px;">
-              <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:14px;font-weight:800;">${avgCal}</div><div style="font-size:9px;color:var(--muted);">avg kcal</div></div>
-              <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:14px;font-weight:800;">${avgProtein}g</div><div style="font-size:9px;color:var(--muted);">avg protein</div></div>
-              <div style="background:var(--surface);border-radius:8px;padding:8px 4px;text-align:center;"><div class="num disp" style="font-size:14px;font-weight:800;">${inRange}/${weekChunk.length}</div><div style="font-size:9px;color:var(--muted);">in range</div></div>
+              <div class="mini-tile"><div class="num disp" style="font-size:14px;font-weight:800;">${avgCal}</div><div style="font-size:9px;color:var(--muted);">avg kcal</div></div>
+              <div class="mini-tile"><div class="num disp" style="font-size:14px;font-weight:800;">${avgProtein}g</div><div style="font-size:9px;color:var(--muted);">avg protein</div></div>
+              <div class="mini-tile"><div class="num disp" style="font-size:14px;font-weight:800;">${inRange}/${weekChunk.length}</div><div style="font-size:9px;color:var(--muted);">in range</div></div>
             </div>
           </div>
         </div>`;
@@ -5251,25 +5234,25 @@ function renderRecentExportsModal(exports){
     </div>
     <div class="scroll-area" style="padding:16px 18px 90px 18px;">
       <div class="card pad-sm" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <button onclick="App.stepExport(1)" ${canGoOlder?'':'disabled'} style="width:30px;height:30px;border-radius:8px;background:var(--surface);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:${canGoOlder?'1':'0.35'};">
+        <button onclick="App.stepExport(1)" ${canGoOlder?'':'disabled'} style="width:30px;height:30px;border-radius:8px;background:var(--surface);border:none;display:flex;align-items:center;justify-content:center;opacity:${canGoOlder?'1':'0.35'};">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div style="text-align:center;">
           <div style="font-size:13.5px;font-weight:700;">${periodLabel || '—'}</div>
           <div style="font-size:10.5px;color:${tagClass};font-weight:600;">${tagLabel || 'No data'}</div>
         </div>
-        <button onclick="App.stepExport(-1)" ${canGoNewer?'':'disabled'} style="width:30px;height:30px;border-radius:8px;background:var(--surface);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:${canGoNewer?'1':'0.35'};">
+        <button onclick="App.stepExport(-1)" ${canGoNewer?'':'disabled'} style="width:30px;height:30px;border-radius:8px;background:var(--surface);border:none;display:flex;align-items:center;justify-content:center;opacity:${canGoNewer?'1':'0.35'};">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
       ${preview}
-      ${st.mode === 'day' && entry ? `<button onclick="${entry.isToday ? "App.setScreen('today')" : `App.openPastDay('${entry.date}')`}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:12px 0;margin-bottom:10px;border-radius:13px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">${entry.isToday ? 'Open Today' : 'View full day'} &rarr;</button>` : ''}
+      ${st.mode === 'day' && entry ? `<button onclick="${entry.isToday ? "App.setScreen('today')" : `App.openPastDay('${entry.date}')`}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:12px 0;margin-bottom:10px;border-radius:13px;background:var(--brand-tint);color:var(--brand-dark);border:none;font-size:13.5px;font-weight:700;">${entry.isToday ? 'Open Today' : 'View full day'} &rarr;</button>` : ''}
       <div style="display:flex;gap:8px;margin-bottom:20px;">
-      <button onclick="App.exportPdf()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
+      <button onclick="App.exportPdf()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0;border-radius:13px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
         Export PDF
       </button>
-      <button onclick="App.openRecentExports()" style="flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 14px;border-radius:13px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">
+      <button onclick="App.openRecentExports()" style="flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 14px;border-radius:13px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:13px;font-weight:700;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Recent${st.recentExports && st.recentExports.length ? ` (${st.recentExports.length})` : ''}
       </button>
@@ -5302,7 +5285,7 @@ function renderRecentExportsModal(exports){
       <div class="card pad" style="margin-bottom:10px;">
         <div style="font-size:12.5px;font-weight:700;margin-bottom:4px;">Export all data</div>
         ${(() => { const bs = backupStatus(); return `<div style="font-size:11.5px;font-weight:600;margin-bottom:10px;color:${bs.overdue ? 'var(--warning)' : 'var(--ink-2)'};">${bs.label}${bs.overdue ? ' — time for a new one' : ''}</div>`; })()}
-        <button onclick="App.exportData()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 0;border-radius:11px;background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">
+        <button onclick="App.exportData()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 0;border-radius:11px;background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:700;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
           Save backup (.json)
         </button>
@@ -5312,14 +5295,14 @@ function renderRecentExportsModal(exports){
         ` : ''}
       </div>
       <div class="card pad" style="margin-bottom:10px;">
-        <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Import a backup</div>
+        <div class="sub-head">Import a backup</div>
         <label style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px 0;border-radius:11px;border:1.5px dashed rgba(11,11,11,0.22);color:var(--ink-2);font-size:12.5px;font-weight:700;cursor:pointer;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 20V9m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 6V5a1 1 0 011-1h12a1 1 0 011 1v1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           Choose backup file (.json)
           <input type="file" accept="application/json,.json" style="display:none;" onchange="App.handleImportFile(this)"/>
         </label>
       </div>
-      ${st.dataStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.dataStatus}</div>` : ''}
+      ${st.dataStatus ? `<div class="status-line">${st.dataStatus}</div>` : ''}
       <div style="font-size:10px;color:var(--muted);line-height:1.4;">Nothing here ever leaves this device on its own — export only sends data where you choose to save it.</div>
 
       <div style="height:1px;background:var(--border);margin:20px 0;"></div>
@@ -5327,8 +5310,8 @@ function renderRecentExportsModal(exports){
       <div style="font-size:15px;font-weight:700;margin-bottom:4px;">Share memory</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Export just your Saved foods, Ingredients &amp; USDA list — no day-to-day entries, weight, water, notes, targets or your USDA key — so you can share it with someone else without handing over your personal tracking data.</div>
       <div class="card pad" style="margin-bottom:10px;">
-        <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Export memory only</div>
-        <button onclick="App.exportMemoryOnly()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 0;border-radius:11px;background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">
+        <div class="sub-head">Export memory only</div>
+        <button onclick="App.exportMemoryOnly()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 0;border-radius:11px;background:var(--brand);color:#fff;border:none;font-size:13px;font-weight:700;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18v1a1 1 0 001 1h12a1 1 0 001-1v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
           Save memory (.json)
         </button>
@@ -5338,7 +5321,7 @@ function renderRecentExportsModal(exports){
         ` : ''}
       </div>
       <div class="card pad" style="margin-bottom:10px;">
-        <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Import memory</div>
+        <div class="sub-head">Import memory</div>
         <label style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px 0;border-radius:11px;border:1.5px dashed rgba(11,11,11,0.22);color:var(--ink-2);font-size:12.5px;font-weight:700;cursor:pointer;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 20V9m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 6V5a1 1 0 011-1h12a1 1 0 011 1v1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           Choose memory file (.json)
@@ -5352,9 +5335,9 @@ function renderRecentExportsModal(exports){
         </div>
         <div style="font-size:11px;color:var(--ink-2);margin-bottom:6px;">Got a shared item as a text message instead of a file? Paste it here:</div>
         <textarea id="memory-paste-input" placeholder="Paste shared item text here..." style="width:100%;height:70px;padding:8px;border-radius:8px;border:1px solid var(--border);font-size:11px;font-family:monospace;resize:vertical;">${(st.memoryPasteText||'').replace(/</g,'&lt;')}</textarea>
-        <button onclick="App.handleMemoryImportPaste()" style="width:100%;margin-top:8px;padding:9px 0;border-radius:9px;background:var(--surface);border:1px solid var(--border);color:var(--ink);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Import from pasted text</button>
+        <button onclick="App.handleMemoryImportPaste()" style="width:100%;margin-top:8px;padding:9px 0;border-radius:9px;background:var(--surface);border:1px solid var(--border);color:var(--ink);font-size:12px;font-weight:700;">Import from pasted text</button>
       </div>
-      ${st.memoryStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${st.memoryStatus}</div>` : ''}
+      ${st.memoryStatus ? `<div class="status-line">${st.memoryStatus}</div>` : ''}
     </div>
     ${bottomNav('exportScreen')}
     ${st.recentOpen ? renderRecentExportsModal(st.recentExports) : ''}
@@ -5390,7 +5373,7 @@ function settingsCard(id, label){
   }
   return `
     <div class="card pad-sm" style="margin-bottom:8px;">
-      <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">${label}</div>
+      <div class="sub-head">${label}</div>
       ${inputsHtml}
     </div>`;
 }
@@ -5402,7 +5385,7 @@ function renderSettings(){
   return `
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
-        <button onclick="App.setScreen('today')" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
+        <button onclick="App.setScreen('today')" style="background:none;border:none;color:var(--ink);padding:0;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="disp" style="font-size:18px;font-weight:800;">Settings</div>
@@ -5413,8 +5396,8 @@ function renderSettings(){
       <div class="card pad" style="margin-bottom:14px;">
         <div style="font-size:13px;font-weight:700;margin-bottom:4px;">USDA API key</div>
         <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px;">Needed for the USDA search in Memory (your saved foods still work without one). Get a free key at fdc.nal.usda.gov/api-key-signup.html — it's stored only on this device, never in the app's source code.</div>
-        <input id="usda-key-input" type="text" value="${(App.state.usdaApiKey||'').replace(/"/g,'&quot;')}" placeholder="Paste your USDA API key" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:12.5px;font-family:inherit;margin-bottom:8px;"/>
-        <button onclick="App.saveUsdaKey()" style="padding:9px 16px;border-radius:10px;background:${App.state.usdaKeyStatus?'var(--good)':'var(--brand-tint)'};color:${App.state.usdaKeyStatus?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">${App.state.usdaKeyStatus || 'Save key'}</button>
+        <input id="usda-key-input" type="text" value="${(App.state.usdaApiKey||'').replace(/"/g,'&quot;')}" placeholder="Paste your USDA API key" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:12.5px;margin-bottom:8px;"/>
+        <button onclick="App.saveUsdaKey()" style="padding:9px 16px;border-radius:10px;background:${App.state.usdaKeyStatus?'var(--good)':'var(--brand-tint)'};color:${App.state.usdaKeyStatus?'#fff':'var(--brand-dark)'};font-size:12.5px;font-weight:700;border:none;">${App.state.usdaKeyStatus || 'Save key'}</button>
       </div>
       ${renderProfileCard()}
       ${fields.map(([id,label]) => settingsCard(id,label)).join('')}
@@ -5424,499 +5407,29 @@ function renderSettings(){
         <div style="font-size:11px;color:var(--muted);line-height:1.4;margin-top:3px;">Runs quick tests of the app's own math on made-up sample data and shows what passed. Nothing of yours is read or changed.</div>
       </div>
     </div>
-    <div style="flex-shrink:0;background:var(--card);border-top:1px solid var(--border);padding:12px 18px 16px 18px;">
-      ${App.state.settingsStatus ? `<div style="text-align:center;font-size:12px;font-weight:700;color:var(--brand-dark);margin-bottom:10px;">${App.state.settingsStatus}</div>` : ''}
+    <div class="footer-bar">
+      ${App.state.settingsStatus ? `<div class="status-line">${App.state.settingsStatus}</div>` : ''}
       <div style="display:flex;gap:8px;">
-        <button onclick="App.resetTargets()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Reset defaults</button>
-        <button onclick="App.saveTargets()" style="flex:2;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Save changes</button>
+        <button onclick="App.resetTargets()" style="flex:1;padding:12px 0;border-radius:12px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border);font-size:13px;font-weight:700;">Reset defaults</button>
+        <button onclick="App.saveTargets()" style="flex:2;padding:12px 0;border-radius:12px;background:var(--brand);color:#fff;border:none;font-size:13.5px;font-weight:700;">Save changes</button>
       </div>
     </div>
   `;
 }
 
-/* ---------- Desktop dashboard ---------- */
-function renderDesktop(){
-  const dt = App.state.today;
-  const dd = App.state.desktop;
-  const consumed = computeConsumedTotals(dt.meals);
-  const targetMl = targetInfo('water').high * 1000;
-  const waterPct = Math.min(100, Math.round((dt.waterMl/targetMl)*100));
-  const waterL = formatLiters(dt.waterMl);
-  const waterVal = statusValueFor('water', dt);
-  const waterStatus = statusFor('water', waterVal);
 
-  const navDefs = ['Today','History','Trends','Library','Data'];
-  const macroCals = { protein: consumed.protein*4, carbs: consumed.carbs*4, fat: consumed.fat*9 };
-  const macroTotal = Math.max(1, macroCals.protein + macroCals.carbs + macroCals.fat);
-  const macroPct = {
-    protein: Math.round(macroCals.protein/macroTotal*100),
-    carbs: Math.round(macroCals.carbs/macroTotal*100),
-    fat: Math.round(macroCals.fat/macroTotal*100),
-  };
-  const realDaysDesktop = App.allRealDays();
-  function buildSpark(catId, bandLow, bandHigh){
-    const series = realDaysDesktop.slice(0,7).map(d => d[catId]).reverse();
-    if (series.length < 2) return null;
-    const targetVals = [bandLow, bandHigh].filter(v=>v!=null);
-    let min = Math.min(...series, ...targetVals), max = Math.max(...series, ...targetVals);
-    if (min===max){ min-=1; max+=1; }
-    const padAmt = (max-min)*0.15;
-    min = Math.max(0, min-padAmt); max = max+padAmt;
-    const yFor = (v) => 60 - ((v-min)/(max-min))*55;
-    const n = series.length;
-    const path = series.map((v,k) => `${k===0?'M':'L'} ${(n===1?130:(k/(n-1)*260)).toFixed(1)},${yFor(v).toFixed(1)}`).join(' ');
-    const avg = Math.round((series.reduce((a,v)=>a+v,0)/n)*10)/10;
-    return {path, bandY:yFor(bandHigh).toFixed(1), bandH:Math.max(2,(yFor(bandLow)-yFor(bandHigh))).toFixed(1), avg, count:n};
-  }
-  const calT = App.state.targets.calories, protT = App.state.targets.protein;
-  const calSpark = buildSpark('calories', calT.low, calT.high);
-  const protSpark = buildSpark('protein', protT.low, protT.high);
-
-  const savedShortcuts = [
-    ['Usual Breakfast','359 kcal'], ['Chapati, 90g','213 kcal'], ['Caramel Coffee','251 kcal'],
-    ['Plain Greek Yogurt /100g','63 kcal'], ['Home Made Sweet Corn /200g','293 kcal'],
-  ];
-
-  return `
-    <div class="desktop">
-      <div class="d-sidebar">
-        <div style="display:flex;align-items:center;gap:10px;padding:0 24px 28px 24px;">
-          <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,0.14);display:flex;align-items:center;justify-content:center;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.35-9.5-9C1 8 3 4 7 4c2 0 3.5 1.2 5 3 1.5-1.8 3-3 5-3 4 0 6 4 4.5 8-2.5 4.65-9.5 9-9.5 9z" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg>
-          </div>
-          <div class="disp" style="font-size:16px;font-weight:800;">Nourish</div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:2px;padding:0 12px;">
-          ${navDefs.map((label,idx) => `<div class="d-nav-item ${idx===0?'active':''}">${label}</div>`).join('')}
-        </div>
-        <div style="margin-top:auto;padding:0 24px;display:flex;align-items:center;gap:10px;">
-          <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,0.14);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">A</div>
-          <div style="font-size:12.5px;font-weight:600;opacity:0.85;">Ahmed · Al Ain, UAE</div>
-        </div>
-      </div>
-
-      <div class="d-center">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;">
-          <div>
-            <div class="disp" style="font-size:24px;font-weight:800;">Good morning, Ahmed</div>
-            <div style="font-size:13.5px;color:var(--ink-2);margin-top:3px;">${formatFullDate(App.state.dayLog.currentDate)} · today's intake so far</div>
-          </div>
-          <button onclick="App.setView('mobile'); App.openAddFood()" style="display:flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;background:var(--brand);color:#fff;font-size:13.5px;font-weight:700;border:none;cursor:pointer;font-family:inherit;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
-            Log food
-          </button>
-        </div>
-
-        <div class="d-stat-row" style="margin-bottom:20px;">
-          ${[
-            ['Calories', consumed.calories, 'calories'],
-            ['Protein', consumed.protein, 'protein'],
-            ['Carbs', consumed.carbs, 'carbs'],
-            ['Fat', consumed.fat, 'fat'],
-            ['Fiber', consumed.fiber, 'fiber'],
-            ['Sugar', consumed.sugar, 'sugar'],
-            ['Sodium', consumed.sodium, 'sodium'],
-          ].map(([label,rawValue,id]) => {
-            const info = targetInfo(id);
-            const s = statusFor(id, statusValueFor(id, consumed));
-            const color = s==='good' ? 'var(--good)' : (s==='warning' ? 'var(--warning)' : 'var(--critical)');
-            return [label, rawValue.toLocaleString(), info.unit, info.label, color];
-          }).map(([label,value,unit,target,color]) => `
-            <div class="d-stat">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                <div style="font-size:11px;color:var(--ink-2);font-weight:700;">${label}</div>
-                <div class="dot" style="width:7px;height:7px;background:${color};"></div>
-              </div>
-              <div class="num disp" style="font-size:17px;font-weight:800;">${value}<span style="font-size:10.5px;font-weight:600;color:var(--ink-2);"> ${unit}</span></div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;">${target}</div>
-            </div>
-          `).join('')}
-        </div>
-
-        <div style="display:grid;grid-template-columns:1.2fr 1.2fr 1fr;gap:12px;margin-bottom:20px;">
-          <div class="card pad">
-            <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Calories · trend</div>
-            ${calSpark ? `
-              <svg viewBox="0 0 260 70" width="100%" height="70">
-                <rect x="0" y="${calSpark.bandY}" width="260" height="${calSpark.bandH}" fill="rgba(38,87,255,0.10)" rx="3"/>
-                <path d="${calSpark.path}" fill="none" stroke="var(--protein)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <div style="font-size:11px;color:var(--muted);margin-top:4px;">avg ${calSpark.avg} kcal over ${calSpark.count} days · target ${calT.low.toLocaleString()}–${calT.high.toLocaleString()} kcal</div>
-            ` : `<div style="height:70px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;padding:0 10px;">Not enough data yet</div>`}
-          </div>
-          <div class="card pad">
-            <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:8px;">Protein · trend</div>
-            ${protSpark ? `
-              <svg viewBox="0 0 260 70" width="100%" height="70">
-                <rect x="0" y="${protSpark.bandY}" width="260" height="${protSpark.bandH}" fill="rgba(38,87,255,0.10)" rx="3"/>
-                <path d="${protSpark.path}" fill="none" stroke="var(--protein)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <div style="font-size:11px;color:var(--muted);margin-top:4px;">avg ${protSpark.avg}g over ${protSpark.count} days · target ${protT.low}–${protT.high}g</div>
-            ` : `<div style="height:70px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;padding:0 10px;">Not enough data yet</div>`}
-          </div>
-          <div class="card pad">
-            <div style="font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:10px;">Macro split</div>
-            <div style="height:12px;border-radius:6px;overflow:hidden;display:flex;">
-              <div style="width:${macroPct.protein}%;background:var(--protein);"></div><div style="width:${macroPct.carbs}%;background:var(--carbs);"></div><div style="width:${macroPct.fat}%;background:var(--fat);"></div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:5px;margin-top:10px;">
-              <div style="display:flex;justify-content:space-between;font-size:11.5px;"><span style="color:var(--ink-2);">● Protein</span><span class="num" style="font-weight:700;">${macroPct.protein}%</span></div>
-              <div style="display:flex;justify-content:space-between;font-size:11.5px;"><span style="color:var(--ink-2);">● Carbs</span><span class="num" style="font-weight:700;">${macroPct.carbs}%</span></div>
-              <div style="display:flex;justify-content:space-between;font-size:11.5px;"><span style="color:var(--ink-2);">● Fat</span><span class="num" style="font-weight:700;">${macroPct.fat}%</span></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" style="overflow:hidden;">
-          <div class="pad" style="border-bottom:1px solid var(--border);font-size:13.5px;font-weight:700;">Meal breakdown</div>
-          ${sortedMealsForDisplay(dt.meals).map(meal => {
-            const open = dd.openMeal === meal.id;
-            return `
-            <div style="border-bottom:1px solid var(--border);">
-              <div class="accordion-head" style="padding:12px 18px;gap:14px;" onclick="App.setDesktopMeal('${meal.id}')">
-                <div style="width:150px;flex-shrink:0;font-size:13px;font-weight:700;">${meal.name}</div>
-                <div style="flex:1;font-size:12px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${meal.subtitle}</div>
-                <div class="num" style="width:70px;flex-shrink:0;text-align:right;font-size:13px;font-weight:700;">${mealKcal(meal)} kcal</div>
-                <div class="chev ${open?'open':''}"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-              </div>
-              ${open ? `
-                <div style="padding:0 18px 12px 164px;">
-                  ${(() => { const fc = mealFiberCarbs(meal); return !fc ? '' : `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0 10px;font-size:12px;color:var(--ink-2);"><span>Fiber : Carbs ratio</span><span style="display:flex;align-items:center;gap:8px;"><span class="num" style="font-weight:700;">${fc.ratio===null ? 'No fiber' : '1 : '+fc.ratio}</span><span class="pill pill-${fc.tier}">${fc.label}</span></span></div>`; })()}
-                  ${meal.items.map((item, idx) => {
-                    const hasComps = Array.isArray(item.components) && item.components.length > 0;
-                    const dKey = meal.id + ':' + idx;
-                    const itemOpen = hasComps && dt.expandedItemKey === dKey;
-                    return `
-                    <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:12px;">
-                      <div ${hasComps ? `onclick="App.toggleItemExpand('${dKey}')"` : ''} style="color:var(--ink-2);${hasComps ? 'cursor:pointer;' : ''}">${item.name}${hasComps ? `<span style="color:var(--brand);font-size:10.5px;font-weight:600;margin-left:8px;">${itemOpen ? '&#9662; Hide' : '&#9656; Show'} ${item.components.length} ingredient${item.components.length>1?'s':''}</span>` : ''}</div>
-                      <div style="display:flex;gap:14px;">
-                        <div style="color:var(--muted);">P ${item.p}g · C ${item.c}g · F ${item.f}g</div>
-                        <div class="num" style="font-weight:700;width:40px;text-align:right;">${item.kcal}</div>
-                      </div>
-                    </div>
-                    ${itemOpen ? item.components.map(cp => `
-                    <div style="display:flex;justify-content:space-between;padding:2px 0 2px 14px;font-size:11.5px;color:var(--muted);">
-                      <div>${cp.name}, ${cp.weight}${cp.unit}</div>
-                      <div class="num" style="width:40px;text-align:right;">${cp.kcal}</div>
-                    </div>`).join('') : ''}`;
-                  }).join('')}
-                </div>
-              ` : ''}
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-
-      <div class="d-aside">
-        <div class="card pad" style="margin-bottom:16px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-            <div style="font-size:13px;font-weight:700;color:var(--ink-2);">Water</div>
-            <div class="pill ${pillClassFor(waterStatus)}">${statusLabelFor('water', waterVal)}</div>
-          </div>
-          <div class="num disp" style="font-size:22px;font-weight:800;">${waterL} L <span style="font-size:12px;font-weight:600;color:var(--ink-2);">of ${targetInfo('water').label}</span></div>
-          <div style="height:8px;border-radius:5px;background:var(--border);margin-top:10px;overflow:hidden;">
-            <div style="height:100%;width:${waterPct}%;border-radius:5px;background:var(--brand);"></div>
-          </div>
-          ${renderWaterControls(dt)}
-        </div>
-
-        <div style="font-size:13px;font-weight:700;margin-bottom:10px;">Memory · saved foods</div>
-        <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:18px;">
-          ${savedShortcuts.map(([name,kcal]) => `
-            <div style="display:flex;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:10px 12px;">
-              <div style="font-size:12.5px;font-weight:600;">${name}</div>
-              <div class="num" style="font-size:12px;color:var(--ink-2);font-weight:700;">${kcal}</div>
-            </div>
-          `).join('')}
-        </div>
-
-        <div style="background:var(--note-bg);border:1px solid var(--note-border);border-radius:14px;padding:14px;">
-          <div style="font-size:12.5px;font-weight:800;margin-bottom:4px;">Bone ratio memory</div>
-          <div style="font-size:11.5px;color:var(--ink-2);margin-bottom:8px;line-height:1.4;">Running average from weighed entries, kept up to date automatically.</div>
-          <div class="num disp" style="font-size:22px;font-weight:800;color:var(--brand-dark);">22.6%</div>
-          <div style="font-size:10.5px;color:var(--muted);">across 4 weighed entries</div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-/* ================= SELF-CHECK PAGE (Settings > Self-check, or open the app with #selftest) ================= */
-// Runs the app's own math against a throw-away copy of the state filled with sample data - never the
-// real log - and writes nothing. Results live only in this variable until the page is closed.
-let __selfTestResults = null;
-function runSelfTests(){
-  const out = [];
-  const realState = App.state;
-  const snap = () => { try { return JSON.stringify(realState.today) + '|' + localStorage.getItem(LOCAL_STORAGE_KEY); } catch (e){ return 'n/a'; } };
-  const before = snap();
-  const check = (group, name, fn) => {
-    let res;
-    try { res = fn(); } catch (e){ res = 'Error: ' + ((e && e.message) || e); }
-    out.push({ group, name, ok: res === true, detail: res === true ? '' : String(res) });
-  };
-  const eq = (got, want) => JSON.stringify(got) === JSON.stringify(want) ? true : 'got ' + JSON.stringify(got) + ', expected ' + JSON.stringify(want);
-  // Fixture state: the real state with default targets and sample data swapped in (shallow copy; nothing here mutates the real parts).
-  const mk = (meals, history) => Object.assign({}, realState, {
-    targets: defaultTargets(), view:'mobile', screen:'today', dayHistory: history || [],
-    today: Object.assign({}, realState.today, { meals, waterMl:0, weightKg:null, expandedStat:null, macroInfoOpen:false, expandedMeal:null, confirmRemoveKey:null }),
-    history: Object.assign({}, realState.history, { view:'day', openIdx:null, confirmDeleteDate:null }),
+// The Self-check page's code lives in selftest.js and is fetched the first time the page is opened.
+let __selfTestLoading = null;
+function loadSelfTest(){
+  if (typeof runSelfTests === 'function') return Promise.resolve();
+  if (!__selfTestLoading) __selfTestLoading = new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = 'selftest.js';
+    el.onload = resolve;
+    el.onerror = () => { __selfTestLoading = null; el.remove(); reject(new Error('selftest.js failed to load')); };
+    document.head.appendChild(el);
   });
-  const withFixture = (meals, history, fn) => { App.state = mk(meals, history); try { return fn(App.state); } finally { App.state = realState; } };
-
-  const item = (name, kcal, sugar, extra) => Object.assign({ name, kcal, p:1, c:10, f:1, fib:1, sugar, sodium:10 }, extra || {});
-  const meal = (name, items) => ({ id:name.toLowerCase(), name, subtitle:'Sample', items });
-  const dish = item('Sample dish, 300g', 250, 30, { sugarCounted:8, components:[
-    { name:'Mango', weight:100, unit:'g', kcal:60, p:1, c:15, f:0, fib:2, sugar:22, sodium:0, wholeProduce:true },
-    { name:'Yoghurt', weight:200, unit:'g', kcal:190, p:9, c:20, f:8, fib:0, sugar:8, sodium:80, wholeProduce:false } ] });
-  // Day A: lots of whole fruit - 75 g true sugar but only 20 g counted, so it must read "in range" (ceiling 50 g).
-  const mealsA = [ meal('Breakfast', [item('Banana', 105, 14, { wholeProduce:true }), item('Apple', 95, 19, { wholeProduce:true })]), meal('Lunch', [dish, item('Yoghurt tub', 120, 12)]) ];
-  // Day B: the same plus a dessert - 115 g true, 60 g counted, so it must read "over".
-  const mealsB = mealsA.concat([meal('Dinner', [item('Dessert', 300, 40)])]);
-  const day = (date, sugar, counted) => { const d = { date, calories:1600, protein:140, carbs:170, fat:60, fiber:32, sugar, sodium:2200, waterMl:2500, weightKg:null, meals:[], note:'', tag:null }; if (counted !== undefined) d.sugarCounted = counted; return d; };
-  const hist = [day('2026-01-01', 60), day('2026-01-02', 40), day('2026-01-03', 75, 20)];
-
-  // ---- Totals ----
-  const T = computeConsumedTotals;
-  check('Totals', 'A plain item counts fully toward counted sugar', () => eq(T([meal('Lunch', [item('Biscuit', 100, 10)])]).sugarCounted, 10));
-  check('Totals', 'Whole fruit adds to the true total but not the counted sugar', () => { const t = T([meal('Breakfast', [item('Banana', 105, 14, { wholeProduce:true })])]); return eq([t.sugar, t.sugarCounted], [14, 0]); });
-  check('Totals', 'A dish row counts only its non-fruit part', () => { const t = T([meal('Lunch', [dish])]); return eq([t.sugar, t.sugarCounted], [30, 8]); });
-  check('Totals', 'An old logged item with no counted figure falls back to its sugar', () => eq(T([meal('Lunch', [item('Old', 100, 9)])]).sugarCounted, 9));
-  check('Totals', 'Sample day A: 75 g true sugar, 20 g counted', () => { const t = T(mealsA); return eq([t.sugar, t.sugarCounted], [75, 20]); });
-  check('Totals', 'Sample day A: calories add up', () => eq(T(mealsA).calories, 570));
-
-  // ---- The one shared rule ----
-  check('Shared sugar rule', 'Sugar is judged on the counted figure', () => eq(statusValueFor('sugar', { sugar:75, sugarCounted:20 }), 20));
-  check('Shared sugar rule', 'A counted figure of 0 is respected, not treated as missing', () => eq(statusValueFor('sugar', { sugar:14, sugarCounted:0 }), 0));
-  check('Shared sugar rule', 'An old stored day with no counted figure uses its sugar', () => eq(statusValueFor('sugar', { sugar:42 }), 42));
-  check('Shared sugar rule', 'Other stats are judged on their own value', () => eq(statusValueFor('protein', { protein:140, sugar:5 }), 140));
-
-  // ---- Status rules (default targets) ----
-  const st = (id, v) => withFixture([], [], () => statusFor(id, v));
-  check('Status rules', 'Calories 1500 and 1700 are both in range', () => eq([st('calories', 1500), st('calories', 1700)], ['good', 'good']));
-  check('Status rules', 'Calories 1499 is under and 1701 is over', () => eq([st('calories', 1499), st('calories', 1701)], ['warning', 'critical']));
-  check('Status rules', 'Sugar 50 g is fine, 50.1 g is over', () => eq([st('sugar', 50), st('sugar', 50.1)], ['good', 'critical']));
-  check('Status rules', 'Fiber 30 g is fine, 29.9 g is under', () => eq([st('fiber', 30), st('fiber', 29.9)], ['good', 'warning']));
-  check('Status rules', 'Labels read Under / In range / Over', () => withFixture([], [], () => eq([statusLabelFor('calories', 1000), statusLabelFor('calories', 1600), statusLabelFor('calories', 2000)], ['Under', 'In range', 'Over'])));
-  check('Status rules', 'Old sodium ceiling 2300 becomes the 2000-2500 range', () => { const t = { sodium:{ kind:'ceiling', value:2300 } }; migrateSodiumTarget(t); return eq([t.sodium.kind, t.sodium.low, t.sodium.high], ['range', 2000, 2500]); });
-  check('Status rules', 'A custom old sodium ceiling stays as the upper bound', () => { const t = { sodium:{ kind:'ceiling', value:2000 } }; migrateSodiumTarget(t); return eq([t.sodium.low, t.sodium.high], [1300, 2000]); });
-
-  // ---- Does every screen show the same sugar verdict? ----
-  const doc = html => new DOMParser().parseFromString(html, 'text/html');
-  const goodOfLabel = t => /in range/i.test(t);
-  const goodOfDot = el => /--good/.test((el && el.getAttribute('style')) || '');
-  const gather = (meals, history) => withFixture(meals, history, s => {
-    const r = {};
-    const safe = (k, f) => { try { r[k] = f(); } catch (e){ r[k] = 'Error: ' + ((e && e.message) || e); } };
-    const consumed = computeConsumedTotals(s.today.meals);
-    safe('tile', () => { const c = [...doc(renderToday()).querySelectorAll('.card[onclick]')].find(x => x.getAttribute('onclick').indexOf("'sugar'") >= 0); return { good: goodOfLabel(c.querySelector('.pill').textContent), shown: c.querySelector('.num').textContent }; });
-    safe('modal', () => goodOfLabel(doc(renderStatDetailModal('sugar', consumed)).querySelector('.pill').textContent));
-    safe('desktop', () => goodOfDot([...doc(renderDesktop()).querySelectorAll('.d-stat')].find(x => /^\s*Sugar/.test(x.textContent)).querySelector('.dot')));
-    return r;
-  });
-  const A = gather(mealsA, hist), B = gather(mealsB, hist);
-  [['A', A, true, 75, 20], ['B', B, false, 115, 60]].forEach(([k, r, good, raw, cnt]) => {
-    const g = 'Sugar verdict matches on every screen';
-    const tag = 'Day ' + k + ' (' + raw + ' g true, ' + cnt + ' g counted) ';
-    const want = good ? 'in range' : 'over';
-    check(g, tag + '- Today tile says ' + want, () => r.tile && r.tile.good === good ? true : 'got ' + JSON.stringify(r.tile));
-    check(g, tag + '- tile still shows the true total', () => r.tile && r.tile.shown && r.tile.shown.replace(/,/g, '').indexOf(String(raw)) >= 0 ? true : 'got ' + JSON.stringify(r.tile));
-    check(g, tag + '- breakdown popup says ' + want, () => r.modal === good ? true : 'got ' + JSON.stringify(r.modal));
-    check(g, tag + '- desktop dashboard dot says ' + want, () => r.desktop === good ? true : 'got ' + JSON.stringify(r.desktop));
-  });
-  // ---- History day view: the four dots and the four tiles are Carbs, Protein, Fat, Calories (no sugar) ----
-  const dayWith = (date, over) => Object.assign(day(date, 10), over);
-  const histDays = [dayWith('2026-02-01', { carbs:250 }), dayWith('2026-02-02', { protein:100 }), dayWith('2026-02-03', { fat:120 }), dayWith('2026-02-04', { calories:2600 }), dayWith('2026-02-05', {})];
-  const histRun = withFixture([], histDays, s => {
-    const days = App.allRealDays();
-    const dots = {};
-    [...doc(renderHistory()).querySelectorAll('.accordion-head')].forEach((h, i) => { dots[days[i].date] = [...h.querySelectorAll('.dot')].map(goodOfDot); });
-    s.history.openIdx = days.findIndex(d => d.date === '2026-02-05');
-    const card = [...doc(renderHistory()).querySelectorAll('.accordion-head')][s.history.openIdx].parentElement;
-    const tiles = [...card.querySelectorAll('div[style*="grid-template-columns"] > div')].map(x => [x.lastElementChild.textContent.trim(), x.firstElementChild.textContent.trim()]);
-    return { dots, tiles, hasSugar: /sugar/i.test(card.textContent) };
-  });
-  const hg = 'History day view';
-  check(hg, 'Carbs off: only the 1st dot is red', () => eq(histRun.dots['2026-02-01'], [false, true, true, true]));
-  check(hg, 'Protein off: only the 2nd dot is red', () => eq(histRun.dots['2026-02-02'], [true, false, true, true]));
-  check(hg, 'Fat off: only the 3rd dot is red', () => eq(histRun.dots['2026-02-03'], [true, true, false, true]));
-  check(hg, 'Calories off: only the 4th dot is red', () => eq(histRun.dots['2026-02-04'], [true, true, true, false]));
-  check(hg, 'A day inside every range: all four dots green', () => eq(histRun.dots['2026-02-05'], [true, true, true, true]));
-  check(hg, 'Opened day shows Carbs, Protein, Fat, Calories in that order', () => eq(histRun.tiles, [['Carbs', '170g'], ['Protein', '140g'], ['Fat', '60g'], ['Calories', '1600']]));
-  check(hg, 'Opened day does not mention sugar', () => histRun.hasSugar === false ? true : 'sugar still shown');
-  // ---- Log food: the green "Added" flash must end by patching one button, never by redrawing the screen (a redraw closes the keyboard) ----
-  const flashRun = (flashId, endId, targetMeal) => withFixture([], [], s => {
-    s.addfood = Object.assign({}, s.addfood, { flashId, targetMeal });
-    const btn = document.createElement('button');
-    btn.id = 'addbtn-ingredients-x'; btn.textContent = 'Added ✓'; btn.style.background = 'var(--good)';
-    document.body.appendChild(btn);
-    const realRender = App.render; let renders = 0;
-    App.render = () => { renders++; };
-    try { App.clearAddFlash('ingredients', endId); return { renders, flashId: s.addfood.flashId, text: btn.textContent, disabled: btn.disabled, bg: btn.style.background }; }
-    finally { App.render = realRender; btn.remove(); }
-  });
-  const fg = 'Log food flash';
-  check(fg, 'Ending the flash does not redraw the screen', () => flashRun('x', 'x', 'Lunch').renders === 0 ? true : 'screen was redrawn');
-  check(fg, 'The row button goes back to "+ Add to <meal>"', () => { const r = flashRun('x', 'x', 'Lunch'); return eq([r.text, r.disabled, r.bg], ['+ Add to Lunch', false, 'var(--brand)']); });
-  check(fg, 'With no meal chosen it reads "+ Select a meal" and is disabled', () => { const r = flashRun('x', 'x', null); return eq([r.text, r.disabled], ['+ Select a meal', true]); });
-  check(fg, 'An older timer does not cancel a newer row\'s flash', () => { const r = flashRun('y', 'x', 'Lunch'); return eq([r.flashId, r.renders], ['y', 0]); });
-  // ---- Past day (Data tab -> View full day): Today's layout for a saved day; the first change asks, and edits touch that day only ----
-  const pastRun = fn => withFixture(mealsA, [day('2026-02-28', 10), Object.assign(day('2026-03-01', 10), { meals: JSON.parse(JSON.stringify(mealsB)), waterMl: 1000 })], s => {
-    s.screen = 'exportScreen'; s.memoryImport = null;
-    s.exportScreen = Object.assign({}, s.exportScreen, { mode:'day', offset:1, pastDay:null, recentOpen:false });
-    s.addfood = Object.assign({}, s.addfood, { targetDate:null, returnTo:null });
-    s.library = Object.assign({}, s.library); s.maint = Object.assign({}, s.maint);
-    const realRender = App.render, realSave = App.saveLocal;
-    App.render = () => {}; App.saveLocal = () => {};
-    try { App.openPastDay('2026-03-01'); return fn(s, s.dayHistory[1]); }
-    finally { App.render = realRender; App.saveLocal = realSave; }
-  });
-  const pg = 'Past day view';
-  check(pg, 'Shows the "Past day" strip and that day\'s meals, without the live-only parts', () => pastRun(s => { const h = renderExport(); return eq([h.indexOf('Past day') >= 0, h.indexOf('Dinner') >= 0, h.indexOf('Log food to') >= 0, h.indexOf('class="fab"') >= 0], [true, true, true, false]); }));
-  check(pg, 'Today itself is unchanged', () => pastRun(s => { const h = renderToday(); return eq([h.indexOf('Past day') >= 0, h.indexOf('class="fab"') >= 0, h.indexOf('Dinner') >= 0], [false, true, false]); }));
-  check(pg, 'The first change asks first and changes nothing yet', () => pastRun((s, e) => { App.addWater(250); return eq([s.exportScreen.pastDay.pendingEdit, e.waterMl, s.today.waterMl, renderExport().indexOf('Editing a past day') >= 0], [{ action:'addWater', args:[250] }, 1000, 0, true]); }));
-  check(pg, 'After Continue, water and weight go to that day, not today', () => pastRun((s, e) => { s.exportScreen.pastDay.editOk = true; App.addWater(500); App.saveWeight(80.24); return eq([e.waterMl, e.weightKg, s.today.waterMl, s.today.weightKg], [1500, 80.2, 0, null]); }));
-  check(pg, 'Removing a food updates that day\'s totals only', () => pastRun((s, e) => { s.exportScreen.pastDay.editOk = true; App.confirmRemoveItem('dinner', 0); return eq([e.calories, e.meals.length, s.today.meals.length], [570, 2, 2]); }));
-  check(pg, 'Arrows step between saved days and stop before today', () => pastRun(s => { const seen = []; [-1, -1, 1, 1].forEach(dir => { App.stepPastDay(dir); seen.push(s.exportScreen.pastDay.date + '@' + s.exportScreen.offset); }); return eq(seen, ['2026-02-28@2', '2026-02-28@2', '2026-03-01@1', '2026-03-01@1']); }));
-  check(pg, 'Back closes the warning first, then the past day', () => pastRun(s => { const pd = s.exportScreen.pastDay; const d1 = App.overlayDepth(); pd.pendingEdit = { action:'addWater', args:[250] }; const d2 = App.overlayDepth(); App.closeOpenOverlay(); const still = !!s.exportScreen.pastDay; App.closeOpenOverlay(); return eq([d1, d2, still, s.exportScreen.pastDay], [1, 2, true, null]); }));
-  check(pg, 'Log food from a past day logs to that day and comes back to it', () => pastRun(s => { s.exportScreen.pastDay.editOk = true; App.logFoodToPastDay(); const r = [s.screen, s.addfood.targetDate, App.overlayDepth()]; App.exitAddFood(); return eq(r.concat([s.screen, s.exportScreen.pastDay && s.exportScreen.pastDay.date]), ['addfood', '2026-03-01', 2, 'exportScreen', '2026-03-01']); }));
-  check(pg, 'Data tab offers "View full day" for a past day and "Open Today" for today', () => pastRun(s => { s.exportScreen.pastDay = null; const past = renderExport().indexOf("App.openPastDay('2026-03-01')") >= 0; s.exportScreen.offset = 0; return eq([past, renderExport().indexOf('Open Today') >= 0], [true, true]); }));
-  // ---- Water: same verdict on Today and the desktop dashboard (above 3 L must read "Over", not "Under") ----
-  const waterOn = ml => withFixture(mealsA, hist, s => {
-    s.today.waterMl = ml;
-    const pillOf = html => { const c = [...doc(html).querySelectorAll('.card.pad')].find(x => x.firstElementChild && /^\s*Water/.test(x.firstElementChild.textContent)); return c && c.querySelector('.pill').textContent.trim(); };
-    return { today: pillOf(renderToday()), desktop: pillOf(renderDesktop()) };
-  });
-  [[1000, 'Under'], [2500, 'In range'], [3000, 'In range'], [3500, 'Over']].forEach(([ml, want]) => {
-    const r = waterOn(ml);
-    check('Water verdict matches on every screen', (ml / 1000) + ' L: Today and desktop both say ' + want, () => eq([r.today, r.desktop], [want, want]));
-  });
-
-  // ---- Water quick buttons: custom amounts, typed amounts, never below 0, kept in backups ----
-  const waterRun = fn => withFixture(mealsA, [], s => {
-    s.waterUi = { open:true, editing:false, draft:'', editDraft:null, status:null };
-    s.addfood = Object.assign({}, s.addfood, { targetDate:null, returnTo:null });
-    s.exportScreen = Object.assign({}, s.exportScreen, { pastDay:null });
-    const realRender = App.render, realSave = App.saveLocal;
-    App.render = () => {}; App.saveLocal = () => {};
-    try { return fn(s); }
-    finally { App.render = realRender; App.saveLocal = realSave; }
-  });
-  const wq = 'Water quick buttons';
-  check(wq, 'Default buttons are − 250, + 250 and + 500 ml', () => waterRun(s => { s.waterButtons = undefined; const h = renderToday(); return eq(['App.addWater(-250)', 'App.addWater(250)', 'App.addWater(500)', 'App.toggleWaterOther()'].map(x => h.indexOf(x) >= 0), [true, true, true, true]); }));
-  check(wq, 'Custom amounts show on Today and on the Log food backdate chips', () => waterRun(s => { s.waterButtons = [100, 300, 750]; const h = renderToday(); s.addfood.targetDate = '2026-03-01'; const a = renderAddFood(); return eq([h.indexOf('App.addWater(-100)') >= 0, h.indexOf('+ 750 ml') >= 0, a.indexOf('setBackdateWater(300)') >= 0, a.indexOf('setBackdateWater(750)') >= 0], [true, true, true, true]); }));
-  check(wq, 'A typed amount adds, Remove never goes below 0, bad input changes nothing', () => waterRun(s => { s.today.waterMl = 300; App.addWaterTyped(1, '450'); const a = s.today.waterMl; App.addWaterTyped(-1, '2000'); const b = s.today.waterMl; App.addWaterTyped(1, '0'); App.addWaterTyped(1, '6000'); App.addWaterTyped(1, '12.5'); return eq([a, b, s.today.waterMl, !!s.waterUi.status], [750, 0, 0, true]); }));
-  check(wq, 'Saving checks each amount is 50-2000 ml; Reset restores the defaults', () => waterRun(s => { s.waterButtons = [250, 250, 500]; App.saveWaterButtons(['10', '300', '750']); const bad = s.waterButtons.slice(); App.saveWaterButtons(['100', '300', '750']); const good = s.waterButtons.slice(); App.resetWaterButtons(); return eq([bad, good, s.waterButtons], [[250, 250, 500], [100, 300, 750], [250, 250, 500]]); }));
-  check(wq, 'The amounts go into backups, and bad saved values fall back to the defaults', () => waterRun(s => { s.waterButtons = [100, 300, 750]; return eq([App.buildBackupPayload().waterButtons, normalizeWaterButtons([10, 300, 750]), normalizeWaterButtons(undefined), normalizeWaterButtons([100, 300])], [[100, 300, 750], [250, 250, 500], [250, 250, 500], [250, 250, 500]]); }));
-
-  // ---- Memory sorting ----
-  const sortNames = mode => withFixture([], [], s => { s.memorySort = mode; return sortMemoryItems(names0.map(n => ({ name:n }))).map(x => x.name); });
-  const names0 = ['banana', 'Apple', 'egg', 'Rice 10', 'Rice 2', '\u00c9clair'];
-  check('Memory sorting', 'A-Z ignores capitals and accents, and puts Rice 2 before Rice 10', () => eq(sortNames('az'), ['Apple', 'banana', '\u00c9clair', 'egg', 'Rice 2', 'Rice 10']));
-  check('Memory sorting', 'Newest first reverses the saved order', () => eq(sortNames('newest'), names0.slice().reverse()));
-  check('Memory sorting', 'Sorting never changes the stored list', () => { const l = names0.map(n => ({ name:n })); withFixture([], [], () => sortMemoryItems(l)); return eq(l.map(x => x.name), names0); });
-  const food = (id, name) => ({ id, name, unit:'g', kcal:100, p:1, c:10, f:1, fib:1, sugar:2, sodium:10, desc:'', recipe:'Sample recipe', updated:'Just now' });
-  const memoryOrder = (mode, fn, groupSel) => withFixture([], [], s => {
-    s.memorySort = mode;
-    s.memory = Object.assign({}, realState.memory, { foods:[food('a1', 'Banana bread'), food('a2', 'apple pie'), food('a3', 'Cheese toast')] });
-    return [...doc(fn()).querySelectorAll(groupSel + ' [data-name]')].map(r => r.getAttribute('data-name').toLowerCase());
-  });
-  check('Memory sorting', 'Memory > Saved foods follows A-Z', () => eq(memoryOrder('az', renderLibrary, '#lib-groups [data-kind="foods"]'), ['apple pie', 'banana bread', 'cheese toast']));
-  check('Memory sorting', 'Memory > Saved foods follows Newest first', () => eq(memoryOrder('newest', renderLibrary, '#lib-groups [data-kind="foods"]'), ['cheese toast', 'apple pie', 'banana bread']));
-  check('Memory sorting', 'The log-food picker follows the same setting', () => eq([memoryOrder('az', renderAddFood, '#addfood-groups [data-kind="saved"]'), memoryOrder('newest', renderAddFood, '#addfood-groups [data-kind="saved"]')], [['apple pie', 'banana bread', 'cheese toast'], ['cheese toast', 'apple pie', 'banana bread']]));
-  check('Memory sorting', 'Both screens show the sort control', () => withFixture([], [], () => eq([renderLibrary().indexOf('id="memsort-az"') >= 0, renderAddFood().indexOf('id="memsort-az"') >= 0], [true, true])));
-
-  // ---- Every screen still draws ----
-  [['Today', renderToday], ['History', renderHistory], ['Trends', renderTrends], ['Data', renderExport], ['Settings', renderSettings], ['Memory', renderLibrary], ['Add food', renderAddFood], ['Desktop dashboard', renderDesktop]].forEach(([n, fn]) => {
-    check('Screens draw', n + ' screen renders', () => withFixture(mealsA, hist, () => { const h = fn(); return typeof h === 'string' && h.length > 200 ? true : 'rendered ' + (typeof h === 'string' ? h.length + ' characters' : typeof h); }));
-  });
-
-  // ---- Search ----
-  const nm = 'Hazelnut Coffee - Home Made';
-  check('Search', 'Words in the saved order: "hazelnut coffee"', () => eq(nameMatches(nm, 'hazelnut coffee'), true));
-  check('Search', 'Words in any order: "home made hazelnut"', () => eq(nameMatches(nm, 'home made hazelnut'), true));
-  check('Search', 'Words in any order: "home made coffee"', () => eq(nameMatches(nm, 'home made coffee'), true));
-  check('Search', 'Part-words work: "haz cof"', () => eq(nameMatches(nm, 'haz cof'), true));
-  check('Search', 'Punctuation is ignored: "coffee-home"', () => eq(nameMatches(nm, 'coffee-home'), true));
-  check('Search', 'A word that is not there fails: "hazelnut tea"', () => eq(nameMatches(nm, 'hazelnut tea'), false));
-  check('Search', 'An empty search shows everything', () => eq(nameMatches(nm, '  '), true));
-
-  // ---- Barcodes ----
-  check('Barcodes', 'Leading zeros are ignored when comparing', () => eq(sameBarcode('00012345', '12345'), true));
-  check('Barcodes', 'Different codes do not match', () => eq(sameBarcode('12345', '12346'), false));
-  check('Barcodes', 'Two empty codes do not match', () => eq(sameBarcode('', ''), false));
-  check('Barcodes', 'A 12-digit code is also tried with a leading zero', () => eq(barcodeVariants('123456789012'), ['0123456789012']));
-  check('Barcodes', 'A 13-digit code starting with 0 is also tried without it', () => eq(barcodeVariants('0123456789012'), ['123456789012']));
-  check('Barcodes', 'Other codes have no second form to try', () => eq([barcodeVariants('6281007012345'), barcodeVariants('12345678')], [[], []]));
-  check('Barcodes', 'Spaces and dashes are stripped', () => eq(normalizeBarcode('64 1234-5'), '6412345'));
-  check('Barcodes', 'Open Food Facts product is read correctly (name, unit, values)', () => {
-    const p = parseOffProduct({ product_name:'Fresh Milk', brands:'Almarai, Other', quantity:'1 L', nutriments:{ 'energy-kcal_100g':60, 'proteins_100g':3.2, 'carbohydrates_100g':4.8, 'fat_100g':3.3, 'sugars_100g':4.8, 'sodium_100g':0.044 } });
-    return eq([p.name, p.unit, p.vals.kcal, p.vals.sodium, p.missing], ['Almarai Fresh Milk', 'ml', 60, 44, ['fiber']]);
-  });
-  check('Barcodes', 'The brand is not repeated when the name already has it', () => eq(parseOffProduct({ product_name:'Almarai Milk', brands:'Almarai', nutriments:{} }).name, 'Almarai Milk'));
-  check('Barcodes', 'Calories fall back to kilojoules', () => eq(parseOffProduct({ product_name:'X', nutriments:{ 'energy-kj_100g':418.4 } }).vals.kcal, 100));
-  check('Barcodes', 'Sodium falls back to salt', () => eq(parseOffProduct({ product_name:'X', nutriments:{ salt_100g:1 } }).vals.sodium, 400));
-  check('Barcodes', 'Missing nutrients are listed, not guessed', () => eq(parseOffProduct({ product_name:'Y' }).missing.length, 7));
-
-  // ---- Backup reminder ----
-  const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString();
-  const bk = (last, nDays) => withFixture([], Array.from({ length:nDays }, (_, i) => day('2026-01-0' + (i + 1), 10)), s => { s.lastBackupAt = last; return backupStatus(); });
-  check('Backup reminder', 'No backup yet with 2 logged days: no nag', () => eq(bk(null, 2).overdue, false));
-  check('Backup reminder', 'No backup yet with 3 logged days: nag', () => eq(bk(null, 3).overdue, true));
-  check('Backup reminder', 'Backed up 2 days ago: fine, label says so', () => { const b = bk(daysAgo(2), 5); return eq([b.overdue, b.label], [false, 'Last backup: 2 days ago']); });
-  check('Backup reminder', 'Backed up 3 days ago: overdue (the reminder comes after 3 days)', () => eq(bk(daysAgo(3), 5).overdue, true));
-  check('Backup reminder', 'Backed up 8 days ago: still overdue', () => eq(bk(daysAgo(8), 5).overdue, true));
-  check('Backup reminder', 'The Today banner shows when overdue and hides while snoozed', () => withFixture(mealsA, hist, s => { s.lastBackupAt = daysAgo(5); s.backupSnoozeUntil = 0; const shown = renderToday().indexOf('Back up your data') >= 0; s.backupSnoozeUntil = Date.now() + 3600000; const hidden = renderToday().indexOf('Back up your data') < 0; return eq([shown, hidden], [true, true]); }));
-  check('Backup reminder', 'Settings: reminder after 3 days, Later hides it for 1 day', () => eq([BACKUP_OVERDUE_DAYS, BACKUP_SNOOZE_DAYS], [3, 1]));
-  check('Backup reminder', 'Backed up just now: label says today', () => eq(bk(daysAgo(0), 5).label, 'Last backup: today'));
-
-  // ---- Safety ----
-  check('Safety', 'Your real log and saved copy were not touched by these checks', () => App.state === realState && snap() === before ? true : 'the real state changed during the checks');
-  return out;
-}
-function renderSelfTest(){
-  const r = __selfTestResults || [];
-  const bad = r.filter(x => !x.ok);
-  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const groups = [];
-  r.forEach(x => { let g = groups.find(y => y.name === x.group); if (!g){ g = { name:x.group, rows:[] }; groups.push(g); } g.rows.push(x); });
-  const tone = bad.length ? 'var(--critical)' : 'var(--good)';
-  return `
-    <div class="topbar">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
-        <button onclick="App.setScreen('settings')" style="background:none;border:none;cursor:pointer;color:var(--ink);padding:0;">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <div class="disp" style="font-size:18px;font-weight:800;">Self-check</div>
-      </div>
-      <div style="font-size:12px;color:var(--ink-2);padding-left:34px;">The app tests its own math on sample data. Nothing of yours is read or changed.</div>
-    </div>
-    <div class="scroll-area" style="padding:16px 18px 24px 18px;">
-      <div class="card pad" style="margin-bottom:14px;border-color:${tone};">
-        <div class="disp" style="font-size:20px;font-weight:800;color:${tone};">${bad.length ? bad.length + (bad.length === 1 ? ' check failed' : ' checks failed') : 'All ' + r.length + ' checks passed'}</div>
-        <div style="font-size:12px;color:var(--ink-2);margin-top:4px;">${r.length - bad.length} of ${r.length} passed</div>
-        <div id="selftest-version" style="font-size:11px;color:var(--muted);margin-top:6px;">&nbsp;</div>
-        <button onclick="App.openSelfTest()" style="margin-top:10px;padding:9px 16px;border-radius:10px;background:var(--brand-tint);color:var(--brand-dark);font-size:12.5px;font-weight:700;cursor:pointer;border:none;font-family:inherit;">Run again</button>
-      </div>
-      ${groups.map(g => `
-        <div class="card pad" style="margin-bottom:12px;">
-          <div style="font-size:13px;font-weight:700;margin-bottom:6px;">${esc(g.name)}</div>
-          ${g.rows.map(x => `
-            <div style="display:flex;gap:9px;align-items:flex-start;padding:5px 0;font-size:12px;line-height:1.35;">
-              <div class="dot" style="margin-top:4px;flex-shrink:0;background:${x.ok ? 'var(--good)' : 'var(--critical)'};"></div>
-              <div style="min-width:0;"><div>${esc(x.name)}</div>${x.ok ? '' : `<div style="color:var(--critical);font-weight:600;margin-top:2px;word-break:break-word;">${esc(x.detail)}</div>`}</div>
-            </div>`).join('')}
-        </div>`).join('')}
-    </div>
-  `;
-}
-// Shows which app version this phone is actually running (the cache name changes with every release).
-function fillSelfTestVersion(){
-  if (!window.caches) return;
-  caches.keys().then(keys => {
-    const el = document.getElementById('selftest-version');
-    if (el) el.textContent = 'App version on this device: ' + (keys.filter(k => /v[0-9]+$/.test(k)).join(', ') || 'not cached yet');
-  }).catch(() => {});
+  return __selfTestLoading;
 }
 
 /* ================= BOOT ================= */
