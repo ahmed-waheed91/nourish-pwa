@@ -903,6 +903,28 @@ function normalizeWaterButtons(v){
   return Array.isArray(v) && v.length === 3 && v.every(validWaterButton) ? v.slice() : WATER_BUTTONS_DEFAULT.slice();
 }
 
+// Labels often give nutrition per serving (e.g. per 30 g) rather than per 100. Memory always stores
+// per 100; these convert the label's numbers on save, and back again when the item is edited.
+const LABEL_NUTRIENT_KEYS = ['kcal','p','c','f','fib','sugar','sodium'];
+function validLabelServing(n){ return typeof n === 'number' && isFinite(n) && n > 0 && n <= 5000; }
+function labelToPer100(vals, serving){
+  const k = validLabelServing(serving) ? 100 / serving : 1;
+  const out = {};
+  LABEL_NUTRIENT_KEYS.forEach(key => { out[key] = Math.round((Number(vals[key]) || 0) * k * 100) / 100; });
+  return out;
+}
+function per100ToLabel(vals, serving){
+  const k = validLabelServing(serving) ? serving / 100 : 1;
+  const out = {};
+  LABEL_NUTRIENT_KEYS.forEach(key => { out[key] = Math.round((Number(vals[key]) || 0) * k * 10) / 10; });
+  return out;
+}
+function servingPreviewText(serving, kcal, unit){
+  if (!validLabelServing(serving)) return 'Enter the size the label lists (above 0). Until then the numbers are treated as per 100 ' + unit + '.';
+  if (serving === 100) return 'If the label only lists a serving (e.g. 30 ' + unit + '), enter that size and copy its numbers as printed.';
+  return kcal > 0 ? '= ' + Math.round(kcal * 100 / serving) + ' kcal per 100 ' + unit + ' (worked out when you save)' : 'Copy the label\'s numbers as printed; they are converted to per 100 ' + unit + ' when you save.';
+}
+
 /* ================= APP STATE ================= */
 
 const App = {
@@ -1750,7 +1772,7 @@ const App = {
   },
   openAddForm(kind){
     this.state.library.activeTab = kind;
-    this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', wholeProduce:false, photo:null, barcode:'', notice:null };
+    this.state.library.form = { kind, editId:null, name:'', desc:'', unit:'g', source:'', kcal:'', p:'', c:'', f:'', fib:'', sugar:'', sodium:'', wholeProduce:false, photo:null, barcode:'', notice:null, labelServing:100 };
     this.state.library.composer = null;
     __scrollTopNext = true;
     this.render();
@@ -1759,10 +1781,13 @@ const App = {
     const item = this.state.memory[kind].find(x => x.id === id);
     if (!item) return;
     this.state.library.activeTab = kind;
+    // Saved with a label serving: show the label's own numbers again, so they can be checked against the packet.
+    const shown = kind !== 'foods' && validLabelServing(item.labelServing) ? per100ToLabel(item, item.labelServing) : item;
     this.state.library.form = {
       kind, editId:id, name:item.name, desc:item.recipe||'', unit:item.unit||'g',
       source: item.source || item.fdc || '', totalWeightG: item.totalWeightG || null,
-      kcal:item.kcal, p:item.p, c:item.c, f:item.f, fib:item.fib, sugar:item.sugar, sodium:item.sodium,
+      kcal:shown.kcal, p:shown.p, c:shown.c, f:shown.f, fib:shown.fib, sugar:shown.sugar, sodium:shown.sodium,
+      labelServing: validLabelServing(item.labelServing) ? item.labelServing : 100,
       wholeProduce: !!item.wholeProduce,
       photo:item.photo||null, barcode:item.barcode||'', notice:null,
     };
@@ -1770,6 +1795,13 @@ const App = {
     this.render();
   },
   closeForm(){ this.state.library.form = null; __scrollTopNext = true; this.render(); },
+  updateServingPreview(){
+    const unit = document.querySelector('input[name="mf-unit"]:checked')?.value || 'g';
+    const u = document.getElementById('mf-serving-unit');
+    if (u) u.textContent = unit;
+    const el = document.getElementById('mf-serving-preview');
+    if (el) el.textContent = servingPreviewText(parseFloat(document.getElementById('mf-serving')?.value), parseFloat(document.getElementById('mf-kcal')?.value) || 0, unit);
+  },
   handlePhotoSelect(inputEl){
     const file = inputEl.files && inputEl.files[0];
     if (!file) return;
@@ -1797,6 +1829,9 @@ const App = {
     } else {
       const unit = document.querySelector('input[name="mf-unit"]:checked')?.value || 'g';
       data.unit = unit;
+      const serving = parseFloat(document.getElementById('mf-serving')?.value);
+      if (validLabelServing(serving) && serving !== 100){ Object.assign(data, labelToPer100(data, serving)); data.labelServing = serving; }
+      else data.labelServing = null;
       data.kcalPer100 = data.kcal;
       const tag = val('mf-source') || (f.kind === 'usda' ? 'Manual entry' : 'Per label');
       if (f.kind === 'ingredients') data.source = tag; else data.fdc = tag;
@@ -3784,10 +3819,17 @@ function renderMemoryForm(f){
         <input id="mf-weight" type="number" step="1" value="${g(f.totalWeightG)}" placeholder="e.g. 300" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:4px;"/>
         <div style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.4;">Lets you log a partial portion by weight (e.g. "I ate 50g of this 300g meal") instead of only by percentage.</div>
       ` : `
+        <label class="field-label">Measured in</label>
         <div style="display:flex;gap:14px;margin-bottom:10px;">
-          <label class="check-row"><input type="radio" name="mf-unit" value="g" ${f.unit!=='ml'?'checked':''}/> per 100 g</label>
-          <label class="check-row"><input type="radio" name="mf-unit" value="ml" ${f.unit==='ml'?'checked':''}/> per 100 ml</label>
+          <label class="check-row"><input type="radio" name="mf-unit" value="g" ${f.unit!=='ml'?'checked':''} onchange="App.updateServingPreview()"/> grams (g)</label>
+          <label class="check-row"><input type="radio" name="mf-unit" value="ml" ${f.unit==='ml'?'checked':''} onchange="App.updateServingPreview()"/> millilitres (ml)</label>
         </div>
+        <label class="field-label">Label values are per</label>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <input id="mf-serving" type="number" step="any" inputmode="decimal" value="${g(f.labelServing) || 100}" oninput="App.updateServingPreview()" style="width:96px;text-align:left;"/>
+          <span id="mf-serving-unit" style="font-size:13px;font-weight:700;color:var(--ink-2);">${f.unit==='ml'?'ml':'g'}</span>
+        </div>
+        <div id="mf-serving-preview" style="font-size:10.5px;color:var(--muted);margin-bottom:12px;line-height:1.4;">${servingPreviewText(Number(f.labelServing) || 100, Number(f.kcal) || 0, f.unit==='ml'?'ml':'g')}</div>
         <label class="field-label">Source</label>
         <input id="mf-source" type="text" value="${esc2(g(f.source))}" placeholder="${f.kind==='usda'?'e.g. FDC 123456':'e.g. Per label, Lab-tested'}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);font-size:13px;text-align:left;margin-bottom:12px;"/>
       `}
@@ -3795,7 +3837,7 @@ function renderMemoryForm(f){
         ${[['mf-kcal','Calories (kcal)',f.kcal],['mf-p','Protein (g)',f.p],['mf-c','Carbs (g)',f.c],['mf-f','Fat (g)',f.f],['mf-fib','Fiber (g)',f.fib],['mf-sugar','Sugar (g)',f.sugar],['mf-sodium','Sodium (mg)',f.sodium]].map(([id,label,v]) => `
           <div>
             <label style="display:block;font-size:10.5px;color:var(--muted);margin-bottom:3px;">${label}</label>
-            <input id="${id}" type="number" step="0.1" value="${g(v)}" style="width:100%;text-align:left;"/>
+            <input id="${id}" type="number" step="0.1" value="${g(v)}"${id==='mf-kcal' && !isFoods ? ' oninput="App.updateServingPreview()"' : ''} style="width:100%;text-align:left;"/>
           </div>
         `).join('')}
       </div>

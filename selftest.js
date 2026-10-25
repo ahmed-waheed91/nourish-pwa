@@ -168,6 +168,28 @@ function runSelfTests(){
   check(wq, 'Saving checks each amount is 50-2000 ml; Reset restores the defaults', () => waterRun(s => { s.waterButtons = [250, 250, 500]; App.saveWaterButtons(['10', '300', '750']); const bad = s.waterButtons.slice(); App.saveWaterButtons(['100', '300', '750']); const good = s.waterButtons.slice(); App.resetWaterButtons(); return eq([bad, good, s.waterButtons], [[250, 250, 500], [100, 300, 750], [250, 250, 500]]); }));
   check(wq, 'The amounts go into backups, and bad saved values fall back to the defaults', () => waterRun(s => { s.waterButtons = [100, 300, 750]; return eq([App.buildBackupPayload().waterButtons, normalizeWaterButtons([10, 300, 750]), normalizeWaterButtons(undefined), normalizeWaterButtons([100, 300])], [[100, 300, 750], [250, 250, 500], [250, 250, 500], [250, 250, 500]]); }));
 
+  // ---- Label serving size: a label given per serving is stored per 100, and shown as printed when edited ----
+  const servingRun = fn => withFixture([], [], s => {
+    s.memory = Object.assign({}, realState.memory, { ingredients:[] });
+    s.library = Object.assign({}, realState.library, { form:null, composer:null });
+    const realRender = App.render, realSave = App.saveLocal;
+    App.render = () => {}; App.saveLocal = () => {};
+    const box = document.createElement('div'); box.style.display = 'none';
+    document.body.appendChild(box);
+    const fill = vals => { box.innerHTML = renderMemoryForm(s.library.form); Object.entries(vals).forEach(([id, v]) => { box.querySelector('#' + id).value = v; }); };
+    try { return fn(s, fill, box); }
+    finally { App.render = realRender; App.saveLocal = realSave; box.remove(); }
+  });
+  const sv = 'Label serving size';
+  check(sv, 'Label numbers per 30 g become per-100 numbers', () => eq(labelToPer100({ kcal:120, p:3, c:15, f:4.5, fib:1.2, sugar:6, sodium:90 }, 30), { kcal:400, p:10, c:50, f:15, fib:4, sugar:20, sodium:300 }));
+  check(sv, 'Per 100, or a blank / 0 / negative size, leaves the numbers alone', () => { const v = { kcal:120, p:3, c:15, f:4.5, fib:1.2, sugar:6, sodium:90 }; return eq([100, NaN, 0, -5].map(n => labelToPer100(v, n).kcal), [120, 120, 120, 120]); });
+  check(sv, 'Converting back gives the label\'s numbers again', () => { const v = { kcal:95, p:2.7, c:13.3, f:3.1, fib:0.8, sugar:4.4, sodium:65 }; return eq(per100ToLabel(labelToPer100(v, 45), 45), v); });
+  check(sv, 'The preview line shows the per-100 calories', () => eq([servingPreviewText(30, 120, 'g').indexOf('400 kcal per 100 g') >= 0, servingPreviewText(250, 100, 'ml').indexOf('40 kcal per 100 ml') >= 0], [true, true]));
+  check(sv, 'Saving a "per 30 g" label stores per 100 and remembers the 30', () => servingRun((s, fill) => { App.openAddForm('ingredients'); fill({ 'mf-name':'Protein bar', 'mf-serving':'30', 'mf-kcal':'120', 'mf-p':'3' }); App.saveForm(); const it = s.memory.ingredients[0]; return eq([it.kcal, it.kcalPer100, it.p, it.labelServing], [400, 400, 10, 30]); }));
+  check(sv, 'Editing it shows 30 and the label\'s numbers; saving again changes nothing', () => servingRun((s, fill) => { App.openAddForm('ingredients'); fill({ 'mf-name':'Protein bar', 'mf-serving':'30', 'mf-kcal':'120', 'mf-p':'3' }); App.saveForm(); const id = s.memory.ingredients[0].id; App.editMemoryItem('ingredients', id); const f = s.library.form; const shown = [f.labelServing, f.kcal, f.p]; fill({}); App.saveForm(); const it = s.memory.ingredients[0]; return eq(shown.concat([it.kcal, it.p, it.labelServing]), [30, 120, 3, 400, 10, 30]); }));
+  check(sv, 'Left at 100, the numbers are saved exactly as typed', () => servingRun((s, fill) => { App.openAddForm('ingredients'); fill({ 'mf-name':'Milk', 'mf-kcal':'45', 'mf-p':'3.1' }); App.saveForm(); const it = s.memory.ingredients[0]; return eq([it.kcal, it.p, it.labelServing], [45, 3.1, null]); }));
+  check(sv, 'Saved foods (whole dishes) do not get the box', () => servingRun((s, fill, box) => { App.openAddForm('foods'); fill({}); const a = !!box.querySelector('#mf-serving'); App.openAddForm('ingredients'); fill({}); return eq([a, !!box.querySelector('#mf-serving')], [false, true]); }));
+
   // ---- Memory sorting ----
   const sortNames = mode => withFixture([], [], s => { s.memorySort = mode; return sortMemoryItems(names0.map(n => ({ name:n }))).map(x => x.name); });
   const names0 = ['banana', 'Apple', 'egg', 'Rice 10', 'Rice 2', '\u00c9clair'];
