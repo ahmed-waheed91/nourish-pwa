@@ -4,7 +4,9 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-10-24 (item 63: Data tab "View full day" opens any past day in the Today layout,
+_Last updated 2026-10-25 (items 64-66: customizable water buttons + typed amount; tidy-up that removed
+the desktop dashboard, moved Self-check into `selftest.js` and shared repeated styles -- `index.html`
+~337 KB; Self-check is now 94 checks). Before that, 2026-10-24 (item 63: Data tab "View full day" opens any past day in the Today layout,
 editable behind a warning; Self-check is now 92 checks). Before that, 2026-10-23 (item 62: logging food no longer drops the search-bar focus / keyboard; items
 56-61 phone-confirmed; Self-check is now 83 checks). Before that, 2026-10-18 (tenth checkpoint, plus items 60-61: the History day view now shows Carbs /
 Protein / Fat / Calories on both its dots and tiles with no sugar, and BilliFit's exported file names say
@@ -2211,6 +2213,45 @@ opened from the **Data tab only**, **editable** behind a warning, and visibly di
 - Navigating the preview to a new hash on the same URL doesn't reload; call `location.reload()`.
   `App.setScreen('today')` can defer via `history.go`, so tests set `App.state.screen` then `App.render()`.
 - Dev-preview servers 8791 (Nourish) / 8792 (BilliFit); always remove the three localStorage keys after.
+
+### 64. Water card: customizable quick buttons + typed amount (both apps, 2026-10-25, commits `bf0fcfd` / `e33f89e`)
+User: the three water buttons were hard-coded; wanted them customizable plus a box to type any ml.
+- `state.waterButtons` = `[take-away, add, add]` ml (default `WATER_BUTTONS_DEFAULT` 250/250/500), each
+  50-2000; `normalizeWaterButtons()` falls back to the defaults for anything malformed. Saved in
+  `buildBackupPayload` and restored by **both** loadLocal and the backup import.
+- `renderWaterControls(d)` draws the row (`− a`, `+ b`, `+ c`, **Other**) for Today and the past-day
+  screen. **Other** opens a panel: number box (1-5000 ml) with **Add** / **Remove** (never below 0; Enter
+  adds) and an **Edit quick buttons** link -> three boxes, Cancel / Save, "Reset to default" link.
+  Transient UI in `state.waterUi` (closed by `setScreen`). Typed amounts go through `addWater`, so the
+  past-day warning still applies. Log food's backdate water chips use the two add amounts.
+- Self-check +5, group "Water quick buttons". `CACHE_NAME` nourish-v16 / billifit-v9.
+
+### 65. Tidy-up for size (both apps, 2026-10-25, commits `47665fa` / `c85fd1c`)
+User asked what fills `index.html` and chose three clean-ups; ~388 KB -> **~337 KB (344,858 bytes)**.
+- **Desktop dashboard removed** (user never uses a big screen): `renderDesktop`, its CSS, the
+  Mobile/Desktop toolbar toggle, `state.view` / `state.desktop`, `setView`, `setDesktopMeal`, and the 3
+  desktop-only Self-check checks. ~16 KB. The studio toolbar keeps only its tab strip.
+- **Self-check moved to `selftest.js`** (~29 KB): `loadSelfTest()` injects it the first time
+  `openSelfTest()` runs; it's in the service worker's PRECACHE so it works offline. From the console:
+  `await loadSelfTest(); runSelfTests()`. `App` is a top-level `const`, so another script (or an
+  iframe parent) reaches it as `App` / `win.eval('App')`, never `window.App`.
+- **Styles:** a global `button{cursor;font-family}` / `input,textarea,select{font-family}` rule replaced
+  those declarations on 110 elements, and 14 repeated inline styles became classes at the end of the CSS
+  (`field-label`, `modal-backdrop`, `modal-box`, `head-row`, `row-between`, `btn-plain-sm/-lg`,
+  `mini-tile(-sm)`, `sub-head`, `status-line`, `check-row`, `icon-btn`, `footer-bar`). Only ~7 KB --
+  my 25-35 KB estimate was wrong: most repetition is inside `${}`-dynamic styles. Verified by serving
+  old and new side by side (two same-origin iframes) and diffing computed styles of every element on
+  19 screens/popups: identical except a few buttons/inputs that never set a font (browser default
+  Arial on Windows) now use the app font. Utility classes sit last in the CSS so they beat equal-
+  specificity class rules the way the inline style did; never move an `input[type=number]` style into a
+  class (that element rule has higher specificity).
+- Self-check **94 checks**. `CACHE_NAME` nourish-v17 / billifit-v10.
+
+### 66. Self-check failed on the phone when Log food was left on Quick (2026-10-25, commits `0880d59` / `024a5f9`)
+Two "Memory sorting" checks drew Log food on the user's last-used tab; Quick hides the sort row by
+design, so they failed on the phone (pre-existing since item 59, not caused by 65). The fixture `mk`
+now pins `addfood` to the Saved tab. Verified 94/94 with Log food on every tab. Lesson: fixtures must
+pin every piece of UI state a render depends on. `CACHE_NAME` nourish-v18 / billifit-v11.
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -2249,7 +2290,9 @@ bytes)** — ~4.6 KB more; still well under the ~2x trigger, not flagged. **Afte
 deleted), leaving only the two jsPDF files (~0.4 MB). Still far below the ~2x trigger. **After the tenth
 checkpoint (2026-10-16: shared status helpers, Self-check page, water fix, barcode retry, Memory sort):
 `index.html` ~365 KB (373,150 bytes)** -- ~25 KB more, of which the Self-check page is ~14 KB; still under
-the ~2x (~420 KB) trigger, not flagged.
+the ~2x (~420 KB) trigger, not flagged. **2026-10-25:** reached ~388 KB (~93%) after items 63-64, then
+the item-65 tidy-up (desktop removed, Self-check split out, shared styles) brought it to **~337 KB
+(344,858 bytes, ~82%)** plus a separate 29 KB `selftest.js` loaded only on demand.
 ## Immediate next steps (pick up here)
 
 No feature is in progress. **Everything through item 61 is confirmed working by the user on a real
@@ -2259,10 +2302,12 @@ phone (2026-10-23: "everything you are waiting for feedback on is working well")
 History day view (Carbs / Protein / Fat / Calories dots + tiles) and BilliFit's `billifit-` file names.
 The profile has **not reset again** as of 2026-10-23 (root cause still never proven -- see items 47 and
 52; if it recurs, ask *when*). History Week/Month views still show avg fiber; the user did not ask to
-change them, so they stay as is. Only **item 62** (Log food flash no longer steals search focus, pushed
-2026-10-23) and **item 63** (Data tab "View full day", pushed 2026-10-24) await phone feedback: does
-tapping search right after logging now keep the keyboard open, and how does the past-day screen feel?
-Size watch: `index.html` is ~380 KB, ~93% of the ~420 KB trigger -- mention it before the next big addition.
+change them, so they stay as is. Awaiting phone feedback: **item 62** (Log food flash no longer steals
+search focus), **item 63** (Data tab "View full day"), **item 64** (custom water buttons + Other panel)
+and **item 66** (Self-check should now read 94/94 on the phone with app version nourish-v18 /
+billifit-v11). Item 65 (tidy-up) should look unchanged. The History tab's "Log a forgotten item" stays:
+it is the only way to log to a day with nothing logged (View full day only reaches days with data).
+Size watch: `index.html` is ~337 KB, ~82% of the ~420 KB trigger.
 
 **Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
 CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
