@@ -21,6 +21,7 @@ function runSelfTests(){
     targets: defaultTargets(), screen:'today', dayHistory: history || [],
     today: Object.assign({}, realState.today, { meals, waterMl:0, weightKg:null, expandedStat:null, macroInfoOpen:false, expandedMeal:null, confirmRemoveKey:null }),
     history: Object.assign({}, realState.history, { view:'day', openIdx:null, confirmDeleteDate:null }),
+    addfood: Object.assign({}, realState.addfood, { activeTab:'saved', targetDate:null, returnTo:null }),   // checks must not depend on the last-used Log food tab
   });
   const withFixture = (meals, history, fn) => { App.state = mk(meals, history); try { return fn(App.state); } finally { App.state = realState; } };
 
