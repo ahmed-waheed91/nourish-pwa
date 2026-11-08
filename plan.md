@@ -4,7 +4,9 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-10-26 (item 67: Memory form's "Label values are per [100] g/ml" box -- per-serving
+_Last updated 2026-11-08 (item 68: a Saved food can be an ingredient inside another Saved food, as a live
+link; items 62-68 all confirmed working on the phone; Self-check is now 111 checks; `index.html` ~343 KB).
+Before that, 2026-10-26 (item 67: Memory form's "Label values are per [100] g/ml" box -- per-serving
 label numbers are converted to per 100 on save; Self-check is now 102 checks; `index.html` ~340 KB).
 Before that, 2026-10-25 (items 64-66: customizable water buttons + typed amount; tidy-up that removed
 the desktop dashboard, moved Self-check into `selftest.js` and shared repeated styles -- `index.html`
@@ -2270,6 +2272,24 @@ User: labels often list nutrition per serving, not per 100 g, and the Ingredient
 - Self-check **102 checks** (new group "Label serving size": maths, round trip, preview, save/edit flow via
   a hidden copy of the form, Saved foods have no box). `CACHE_NAME` nourish-v19 / billifit-v12.
 - Offered but not built: a "1 serving" button when logging such an ingredient.
+
+### 68. Saved food inside a Saved food, as a live link (2026-11-08, commits `2e71030` / `e5fb694`)
+- Asked: a sauce made from ingredients needs to go into a burger, but the recipe builder only offered
+  Ingredients and USDA. User chose the **live** option (inner food edits update every food using it).
+- Found while checking: ingredient links in recipes were **already live** (`resolveComponentPer100` re-reads
+  the linked item on every render, keeping `comp.per100` as a frozen fallback). Item 68 extends that.
+- `compositePer100(food, seen)`: a food's per-100 = its recipe totals / total weight (ml counted as g),
+  worked out recursively each time, any depth. `seen` stops a loop (falls back to the frozen numbers).
+  Also returns `sugarCounted` so whole fruit/veg sugar inside the inner food stays uncounted; it is
+  carried onto the logged component in `addComposedFoodToMeal`.
+- `foodContainsFood(food, id)`: the picker (`renderComposerForm`) lists non-archived Saved foods tagged
+  "Saved food", never the food being edited or one that contains it; `composerAddComponentFromRef`
+  refuses the same. New component: `refKind:'foods'`, unit g, 100 g.
+- Deleting / moving the inner food keeps its last numbers; past logged days never change.
+- Also fixed: `filterRows` set `display:''` on match, wiping each picker row's inline `display:flex`
+  (calories dropped under the name while searching). It now remembers the row's own display.
+- Self-check **111 checks** (new group "Saved food inside a saved food", 9 checks). `CACHE_NAME`
+  nourish-v20 / billifit-v13. `index.html` ~343 KB (~84%). **Phone-confirmed 2026-11-08.**
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -2320,12 +2340,10 @@ phone (2026-10-23: "everything you are waiting for feedback on is working well")
 History day view (Carbs / Protein / Fat / Calories dots + tiles) and BilliFit's `billifit-` file names.
 The profile has **not reset again** as of 2026-10-23 (root cause still never proven -- see items 47 and
 52; if it recurs, ask *when*). History Week/Month views still show avg fiber; the user did not ask to
-change them, so they stay as is. Awaiting phone feedback: **item 62** (Log food flash no longer steals
-search focus), **item 63** (Data tab "View full day"), **item 64** (custom water buttons + Other panel)
-**item 66** (Self-check fix) and **item 67** (label serving-size box in the Memory form) -- Self-check
-should now read **102/102** on the phone with app version nourish-v19 / billifit-v12. Item 65 (tidy-up) should look unchanged. The History tab's "Log a forgotten item" stays:
+change them, so they stay as is. **Items 62-68 were all confirmed working on the phone on 2026-11-08** -- nothing awaits feedback.
+Self-check should read **111/111** with app version nourish-v20 / billifit-v13. The History tab's "Log a forgotten item" stays:
 it is the only way to log to a day with nothing logged (View full day only reaches days with data).
-Size watch: `index.html` is ~340 KB (348,227 bytes, 2026-10-26), ~83% of the ~420 KB trigger.
+Size watch: `index.html` is ~343 KB (351,339 bytes, 2026-11-08), ~84% of the ~420 KB trigger.
 
 **Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
 CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
