@@ -190,6 +190,35 @@ function runSelfTests(){
   check(sv, 'Left at 100, the numbers are saved exactly as typed', () => servingRun((s, fill) => { App.openAddForm('ingredients'); fill({ 'mf-name':'Milk', 'mf-kcal':'45', 'mf-p':'3.1' }); App.saveForm(); const it = s.memory.ingredients[0]; return eq([it.kcal, it.p, it.labelServing], [45, 3.1, null]); }));
   check(sv, 'Saved foods (whole dishes) do not get the box', () => servingRun((s, fill, box) => { App.openAddForm('foods'); fill({}); const a = !!box.querySelector('#mf-serving'); App.openAddForm('ingredients'); fill({}); return eq([a, !!box.querySelector('#mf-serving')], [false, true]); }));
 
+  // ---- Saved food inside a saved food: a live link that follows the inner food's recipe ----
+  const nestRun = fn => withFixture([], [], s => {
+    const ing = (id, kcal, sugar, extra) => Object.assign({ id, name:id, unit:'g', kcalPer100:kcal, kcal, p:1, c:4, f:1, fib:0, sugar, sodium:10 }, extra || {});
+    const ref = (id, refKind, refId, weight) => ({ id, refKind, refId, name:refId, unit:'g', weight, per100:{ kcal:0, p:0, c:0, f:0, fib:0, sugar:0, sodium:0 } });
+    s.memory = Object.assign({}, realState.memory, {
+      ingredients:[ ing('st_mayo', 600, 4), ing('st_tom', 20, 3, { wholeProduce:true }), ing('st_bun', 250, 5) ], usda:[],
+      foods:[
+        { id:'st_sauce', name:'Sauce', recipe:'', components:[ ref('k1', 'ingredients', 'st_mayo', 50), ref('k2', 'ingredients', 'st_tom', 50) ] },
+        { id:'st_burger', name:'Burger', recipe:'', components:[ ref('k3', 'ingredients', 'st_bun', 100), ref('k4', 'foods', 'st_sauce', 40) ] },
+        { id:'st_plain', name:'Plain bun', recipe:'', components:[ ref('k5', 'ingredients', 'st_bun', 80) ] },
+      ] });
+    s.library = Object.assign({}, realState.library, { form:null, composer:null });
+    const realRender = App.render, realSave = App.saveLocal, realScreen = App.setScreen;
+    App.render = () => {}; App.saveLocal = () => {}; App.setScreen = () => {};
+    const food = id => s.memory.foods.find(x => x.id === id);
+    try { return fn(s, food); }
+    finally { App.render = realRender; App.saveLocal = realSave; App.setScreen = realScreen; }
+  });
+  const nf = 'Saved food inside a saved food';
+  check(nf, 'A sauce inside a burger counts from the sauce\'s own recipe', () => nestRun((s, food) => eq(computeCompositeTotal(food('st_burger')).total.kcal, 374)));
+  check(nf, 'Editing the sauce updates the burger straight away', () => nestRun((s, food) => { food('st_sauce').components[0].weight = 150; refreshCompositeFoodTotals(); return eq(food('st_burger').kcal, 432); }));
+  check(nf, 'Works more than one level deep (burger inside a meal)', () => nestRun((s, food) => { s.memory.foods.push({ id:'st_meal', name:'Meal', components:[{ id:'k6', refKind:'foods', refId:'st_burger', name:'Burger', unit:'g', weight:140, per100:{} }] }); const a = computeCompositeTotal(food('st_meal')).total.kcal; food('st_sauce').components[0].weight = 150; return eq([a, computeCompositeTotal(food('st_meal')).total.kcal], [374, 432]); }));
+  check(nf, 'A food that contains itself stops instead of freezing', () => nestRun((s, food) => { food('st_sauce').components.push({ id:'k7', refKind:'foods', refId:'st_burger', name:'Burger', unit:'g', weight:10, per100:{ kcal:100 } }); refreshCompositeFoodTotals(); const k = computeCompositeTotal(food('st_burger')).total.kcal; return typeof k === 'number' && isFinite(k) && k > 0 ? true : 'got ' + k; }));
+  check(nf, 'Deleting the sauce keeps its last numbers in the burger', () => nestRun((s, food) => { refreshCompositeFoodTotals(); s.memory.foods = s.memory.foods.filter(x => x.id !== 'st_sauce'); return eq(computeCompositeTotal(food('st_burger')).total.kcal, 374); }));
+  check(nf, 'Whole fruit/veg sugar inside the sauce is still not counted when logged', () => nestRun((s, food) => { s.addfood = Object.assign({}, s.addfood, { targetMeal:'Lunch', targetDate:null }); s.today = Object.assign({}, s.today, { meals:[] }); App.addComposedFoodToMeal('st_burger'); const it = s.today.meals[0].items[0]; return eq([it.kcal, it.sugar, it.sugarCounted], [374, 6.4, 5.8]); }));
+  check(nf, 'The recipe picker offers saved foods, but never the food itself or one that contains it', () => nestRun(() => { const h = renderComposerForm({ editId:'st_sauce', name:'Sauce', desc:'', components:[], manualOpen:false }); return eq(["'foods','st_plain'", "'foods','st_sauce'", "'foods','st_burger'"].map(x => h.indexOf(x) >= 0), [true, false, false]); }));
+  check(nf, 'Searching the recipe picker keeps each row\'s layout', () => nestRun(() => { const box = document.createElement('div'); box.style.display = 'none'; box.innerHTML = renderComposerForm({ editId:null, name:'', desc:'', components:[], manualOpen:false }); document.body.appendChild(box); try { App.filterRows('composer-pick-list', 'sauce'); const rows = [...box.querySelectorAll('#composer-pick-list [data-name]')]; const shown = rows.filter(r => r.style.display !== 'none'); App.filterRows('composer-pick-list', ''); return eq([shown.map(r => r.style.display), rows.every(r => r.style.display === 'flex')], [['flex'], true]); } finally { box.remove(); } }));
+  check(nf, 'Adding a saved food in the recipe builder links it live, and a loop is refused', () => nestRun(s => { s.library.composer = { editId:null, name:'', desc:'', components:[], manualOpen:false }; App.composerAddComponentFromRef('foods', 'st_sauce'); const cp = s.library.composer.components[0]; s.library.composer = { editId:'st_sauce', name:'Sauce', desc:'', components:[], manualOpen:false }; App.composerAddComponentFromRef('foods', 'st_burger'); return eq([cp.refKind, cp.refId, cp.per100.kcal, cp.unit, cp.weight, s.library.composer.components.length], ['foods', 'st_sauce', 310, 'g', 100, 0]); }));
+
   // ---- Memory sorting ----
   const sortNames = mode => withFixture([], [], s => { s.memorySort = mode; return sortMemoryItems(names0.map(n => ({ name:n }))).map(x => x.name); });
   const names0 = ['banana', 'Apple', 'egg', 'Rice 10', 'Rice 2', '\u00c9clair'];
