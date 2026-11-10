@@ -4,7 +4,8 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-11-08 (item 68: a Saved food can be an ingredient inside another Saved food, as a live
+_Last updated 2026-11-10 (item 69: shared memory items are compact text so long recipe foods survive
+WhatsApp; phone-confirmed; Self-check 116 checks). Before that, 2026-11-08 (item 68: a Saved food can be an ingredient inside another Saved food, as a live
 link; items 62-68 all confirmed working on the phone; Self-check is now 111 checks; `index.html` ~343 KB).
 Before that, 2026-10-26 (item 67: Memory form's "Label values are per [100] g/ml" box -- per-serving
 label numbers are converted to per 100 on save; Self-check is now 102 checks; `index.html` ~340 KB).
@@ -2290,6 +2291,19 @@ User: labels often list nutrition per serving, not per 100 g, and the Ingredient
   (calories dropped under the name while searching). It now remembers the row's own display.
 - Self-check **111 checks** (new group "Saved food inside a saved food", 9 checks). `CACHE_NAME`
   nourish-v20 / billifit-v13. `index.html` ~343 KB (~84%). **Phone-confirmed 2026-11-08.**
+### 69. Sharing recipe foods as text arrived cut off (2026-11-10, commits `16c36d5` / `2511579`)
+- Reported: pasting a shared recipe food (Nourish to Nourish, two phones, via WhatsApp) failed with
+  "isn't valid JSON"; single foods worked. The pasted text stopped mid-recipe (~3.7 KB in) -- the
+  pretty-printed JSON (~20 lines per ingredient) was too long to survive the chat copy.
+- `compactShareItem(item)`: share text (single + bulk) is one-line JSON without `id`, `updated`,
+  null/''/false fields, component ids, or the recipe line when it equals the auto line. A 7-ingredient
+  food went ~4,260 -> ~1,610 characters. `restoreSharedItem` (in `processMemoryImportText`) gives
+  components new ids and rebuilds the auto recipe line. Old long-format shares still import.
+- A paste that starts with `{` but lacks its end gets "the text looks cut off before its end".
+- Nested Saved food inside a shared food keeps its frozen numbers on the other phone (not re-linked).
+- Self-check **116 checks** (new group "Sharing a recipe food", 5). `CACHE_NAME` nourish-v21 /
+  billifit-v14. `index.html` ~345 KB (353,260 bytes, ~84%). **Phone-confirmed 2026-11-10.**
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -2340,10 +2354,10 @@ phone (2026-10-23: "everything you are waiting for feedback on is working well")
 History day view (Carbs / Protein / Fat / Calories dots + tiles) and BilliFit's `billifit-` file names.
 The profile has **not reset again** as of 2026-10-23 (root cause still never proven -- see items 47 and
 52; if it recurs, ask *when*). History Week/Month views still show avg fiber; the user did not ask to
-change them, so they stay as is. **Items 62-68 were all confirmed working on the phone on 2026-11-08** -- nothing awaits feedback.
-Self-check should read **111/111** with app version nourish-v20 / billifit-v13. The History tab's "Log a forgotten item" stays:
+change them, so they stay as is. **Items 62-68 were all confirmed working on the phone on 2026-11-08, item 69 on 2026-11-10** -- nothing awaits feedback.
+Self-check should read **116/116** with app version nourish-v21 / billifit-v14. The History tab's "Log a forgotten item" stays:
 it is the only way to log to a day with nothing logged (View full day only reaches days with data).
-Size watch: `index.html` is ~343 KB (351,339 bytes, 2026-11-08), ~84% of the ~420 KB trigger.
+Size watch: `index.html` is ~345 KB (353,260 bytes, 2026-11-10), ~84% of the ~420 KB trigger.
 
 **Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
 CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
