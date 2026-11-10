@@ -219,6 +219,27 @@ function runSelfTests(){
   check(nf, 'Searching the recipe picker keeps each row\'s layout', () => nestRun(() => { const box = document.createElement('div'); box.style.display = 'none'; box.innerHTML = renderComposerForm({ editId:null, name:'', desc:'', components:[], manualOpen:false }); document.body.appendChild(box); try { App.filterRows('composer-pick-list', 'sauce'); const rows = [...box.querySelectorAll('#composer-pick-list [data-name]')]; const shown = rows.filter(r => r.style.display !== 'none'); App.filterRows('composer-pick-list', ''); return eq([shown.map(r => r.style.display), rows.every(r => r.style.display === 'flex')], [['flex'], true]); } finally { box.remove(); } }));
   check(nf, 'Adding a saved food in the recipe builder links it live, and a loop is refused', () => nestRun(s => { s.library.composer = { editId:null, name:'', desc:'', components:[], manualOpen:false }; App.composerAddComponentFromRef('foods', 'st_sauce'); const cp = s.library.composer.components[0]; s.library.composer = { editId:'st_sauce', name:'Sauce', desc:'', components:[], manualOpen:false }; App.composerAddComponentFromRef('foods', 'st_burger'); return eq([cp.refKind, cp.refId, cp.per100.kcal, cp.unit, cp.weight, s.library.composer.components.length], ['foods', 'st_sauce', 310, 'g', 100, 0]); }));
 
+  // ---- Sharing a recipe food as message text: short enough to survive a chat app ----
+  const shareRun = fn => nestRun((s, food) => {
+    s.exportScreen = Object.assign({}, realState.exportScreen, { memoryStatus:null, memoryPasteText:'' });
+    s.memoryImport = null;
+    refreshCompositeFoodTotals();
+    const hadOwn = Object.prototype.hasOwnProperty.call(navigator, 'share'), realShare = navigator.share;
+    let sent = null;
+    navigator.share = d => { sent = d.text; return Promise.resolve(); };
+    const share = id => { sent = null; App.shareMemoryItem('foods', id); return sent; };
+    try { return fn(s, food, share); }
+    finally { if (hadOwn) navigator.share = realShare; else delete navigator.share; }
+  });
+  const jsonOf = text => text.slice(text.indexOf('{'));
+  const autoRecipe = f => f.components.map(fc => `${fc.weight}${fc.unit} ${fc.name}`).join(', ');
+  const sh = 'Sharing a recipe food';
+  check(sh, 'The shared text is one compact line without ids or the auto recipe line', () => shareRun((s, food, share) => { food('st_burger').recipe = autoRecipe(food('st_burger')); const j = jsonOf(share('st_burger')); return eq([j.indexOf('\n'), j.indexOf('"id"'), j.indexOf('"recipe"'), j.indexOf('"updated"')], [-1, -1, -1, -1]); }));
+  check(sh, 'A recipe line you typed yourself is kept', () => shareRun((s, food, share) => { food('st_burger').recipe = 'My burger'; return eq(JSON.parse(jsonOf(share('st_burger'))).memory.foods[0].recipe, 'My burger'); }));
+  check(sh, 'Pasting it on another phone brings the food back whole', () => shareRun((s, food, share) => { food('st_burger').recipe = autoRecipe(food('st_burger')); const want = autoRecipe(food('st_burger')); const text = share('st_burger'); s.memory.foods = s.memory.foods.filter(x => x.id !== 'st_burger'); App.processMemoryImportText(jsonOf(text), 'pasted text', 'x', 'y'); App.applyMemoryImport(); const f = s.memory.foods.find(x => x.name === 'Burger'); refreshCompositeFoodTotals(); return eq([f.components.length, f.components.every(c => !!c.id), new Set(f.components.map(c => c.id)).size, f.recipe, f.kcal], [2, true, 2, want, 374]); }));
+  check(sh, 'A message cut off before its end says so', () => shareRun((s, food, share) => { const j = jsonOf(share('st_burger')); App.processMemoryImportText(j.slice(0, j.length - 40), 'pasted text', "that isn't valid JSON.", 'y'); return eq([s.memoryImport, /cut off/.test(s.exportScreen.memoryStatus)], [null, true]); }));
+  check(sh, 'Old long-format shares still import', () => shareRun((s, food) => { const old = JSON.stringify({ app:'x', type:'memory', version:1, memory:{ foods:[JSON.parse(JSON.stringify(food('st_plain')))], ingredients:[], usda:[] } }, null, 2); s.memory.foods = s.memory.foods.filter(x => x.id !== 'st_plain'); App.processMemoryImportText(old, 'pasted text', 'x', 'y'); App.applyMemoryImport(); const f = s.memory.foods.find(x => x.name === 'Plain bun'); return eq([!!f, f && f.components[0].id], [true, 'k5']); }));
+
   // ---- Memory sorting ----
   const sortNames = mode => withFixture([], [], s => { s.memorySort = mode; return sortMemoryItems(names0.map(n => ({ name:n }))).map(x => x.name); });
   const names0 = ['banana', 'Apple', 'egg', 'Rice 10', 'Rice 2', '\u00c9clair'];

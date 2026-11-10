@@ -366,6 +366,33 @@ function foodContainsFood(food, targetId, seen){
   return food.components.some(comp => comp.refKind === 'foods' && !!comp.refId && (comp.refId === targetId ||
     foodContainsFood((App.state.memory.foods||[]).find(x => x.id === comp.refId), targetId, inner)));
 }
+// A shared item travels as message text (WhatsApp etc.), and long recipe foods were arriving cut off.
+// So the share leaves out what the other phone rebuilds itself: ids, the edit stamp, empty/false
+// fields and an auto-made recipe line. restoreSharedItem puts the missing pieces back on import.
+function compactShareItem(item){
+  const strip = (obj, extra) => {
+    const out = {};
+    Object.keys(obj).forEach(k => {
+      const v = obj[k];
+      if (k === 'id' || extra.includes(k) || v === null || v === undefined || v === '' || v === false) return;
+      out[k] = v;
+    });
+    return out;
+  };
+  const out = strip(item, ['updated']);
+  if (Array.isArray(item.components)){
+    out.components = item.components.map(comp => strip(comp, []));
+    const auto = item.components.map(fc => `${fc.weight}${fc.unit} ${fc.name}`).join(', ');
+    if (out.recipe === auto) delete out.recipe;
+  }
+  return out;
+}
+function restoreSharedItem(item){
+  if (!item || !Array.isArray(item.components)) return item;
+  const components = item.components.map(comp => comp.id ? comp : { ...comp, id:App.genId(comp.name||'part') });
+  const recipe = item.recipe || components.map(fc => `${fc.weight}${fc.unit} ${fc.name}`).join(', ');
+  return { ...item, components, recipe };
+}
 function resolveComponentPer100(comp, seen){
   if (comp.refId && comp.refKind === 'foods'){
     const live = (App.state.memory.foods||[]).find(x => x.id === comp.refId);
@@ -2661,8 +2688,8 @@ const App = {
   shareMemoryItem(kind, id){
     const item = this.state.memory[kind].find(x => x.id === id);
     if (!item) return;
-    const payload = { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:{ foods:[], ingredients:[], usda:[], [kind]:[item] } };
-    const json = JSON.stringify(payload, null, 2);
+    const payload = { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:{ foods:[], ingredients:[], usda:[], [kind]:[compactShareItem(item)] } };
+    const json = JSON.stringify(payload);
     const slug = (item.name||kind).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || kind;
     const fileName = `nourish-${slug}.json`;
     const shareIntro = `${item.name} — shared from Nourish. To bring it into your own Nourish, paste this whole message into Memory & Library → Data → Import memory → "Import from pasted text".`;
@@ -2692,12 +2719,12 @@ const App = {
     Object.keys(st.selected).forEach(key => {
       const [kind, id] = key.split(':');
       const item = this.state.memory[kind] && this.state.memory[kind].find(x => x.id === id);
-      if (item) grouped[kind].push(item);
+      if (item) grouped[kind].push(compactShareItem(item));
     });
     const count = grouped.foods.length + grouped.ingredients.length + grouped.usda.length;
     if (!count) return;
     const payload = { app:'Nourish', type:'memory', version:1, exportedAt:new Date().toISOString(), memory:grouped };
-    const json = JSON.stringify(payload, null, 2);
+    const json = JSON.stringify(payload);
     const stamp = new Date().toISOString().slice(0,10);
     const fileName = `nourish-${count}-items-${stamp}.json`;
     const shareIntro = `${count} item${count===1?'':'s'} — shared from Nourish. To bring ${count===1?'it':'them'} into your own Nourish, paste this whole message into Memory & Library → Data → Import memory → "Import from pasted text".`;
@@ -2792,7 +2819,12 @@ const App = {
     let data;
     try { data = JSON.parse(rawText); }
     catch (err) {
-      this.state.exportScreen.memoryStatus = `Import failed — ${invalidJsonMsg}`;
+      // a long message that lost its end (e.g. copied from a chat) gets its own, clearer message
+      const t = String(rawText||'').trim();
+      const cutOff = t.startsWith('{') && (!t.endsWith('}') || (t.match(/\{/g)||[]).length > (t.match(/\}/g)||[]).length);
+      this.state.exportScreen.memoryStatus = cutOff
+        ? 'Import failed — the text looks cut off before its end. Copy the whole message and try again.'
+        : `Import failed — ${invalidJsonMsg}`;
       this.render();
       return;
     }
@@ -2806,7 +2838,7 @@ const App = {
     const conflicts = [];
     kinds.forEach(kind => {
       const existingList = this.state.memory[kind];
-      (data.memory[kind]||[]).forEach(incoming => {
+      (data.memory[kind]||[]).map(restoreSharedItem).forEach(incoming => {
         const match = existingList.find(x => x.name && incoming.name && x.name.trim().toLowerCase() === incoming.name.trim().toLowerCase());
         if (match) conflicts.push({ kind, incoming, existingId:match.id, choice:'skip' });
         else newItems.push({ kind, item:incoming, include:true });
