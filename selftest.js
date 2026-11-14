@@ -240,6 +240,29 @@ function runSelfTests(){
   check(sh, 'A message cut off before its end says so', () => shareRun((s, food, share) => { const j = jsonOf(share('st_burger')); App.processMemoryImportText(j.slice(0, j.length - 40), 'pasted text', "that isn't valid JSON.", 'y'); return eq([s.memoryImport, /cut off/.test(s.exportScreen.memoryStatus)], [null, true]); }));
   check(sh, 'Old long-format shares still import', () => shareRun((s, food) => { const old = JSON.stringify({ app:'x', type:'memory', version:1, memory:{ foods:[JSON.parse(JSON.stringify(food('st_plain')))], ingredients:[], usda:[] } }, null, 2); s.memory.foods = s.memory.foods.filter(x => x.id !== 'st_plain'); App.processMemoryImportText(old, 'pasted text', 'x', 'y'); App.applyMemoryImport(); const f = s.memory.foods.find(x => x.name === 'Plain bun'); return eq([!!f, f && f.components[0].id], [true, 'k5']); }));
 
+  // ---- Body measurements: a logbook; pins choose Today's two tiles; edits touch one metric on one date ----
+  const bodyRun = (body, fn) => withFixture([], [], s => {
+    s.body = normalizeBody(body);
+    s.bodyUi = { range:'30d', chooseOpen:false, form:{ date:todayISO(), draft:{}, error:null }, detail:null, status:null };
+    s.screen = 'body';
+    const realRender = App.render, realSave = App.saveLocal;
+    App.render = () => {}; App.saveLocal = () => {};
+    try { return fn(s); }
+    finally { App.render = realRender; App.saveLocal = realSave; }
+  });
+  const bm = 'Body measurements';
+  const dAgo = n => isoShift(todayISO(), -n);
+  check(bm, 'Saving keeps only what you filled, and a second save that day merges in', () => bodyRun(null, s => { App.saveBodyEntry('2026-03-01', { waist:'95', fat:'' }); s.bodyUi.form = { draft:{} }; App.saveBodyEntry('2026-03-01', { fat:'24,5' }); return eq([s.body.entries, s.bodyUi.form.error, !!s.bodyUi.status], [[{ date:'2026-03-01', values:{ waist:95, fat:24.5 } }], null, true]); }));
+  check(bm, 'Blank, out-of-range or future entries save nothing and say why', () => bodyRun(null, s => { const errs = [[todayISO(), {}], [todayISO(), { waist:'5' }], [todayISO(), { fat:'abc' }], [isoShift(todayISO(), 1), { waist:'90' }]].map(([d, v]) => { App.saveBodyEntry(d, v); return !!(s.bodyUi.form && s.bodyUi.form.error); }); return eq([errs, s.body.entries.length], [[true, true, true, true], 0]); }));
+  check(bm, "Today's card shows waist and body fat until you pin others; a third pin replaces the oldest", () => bodyRun(null, s => { const a = bodyCardKeys(); App.toggleBodyPin('biceps'); const b = bodyCardKeys(); App.toggleBodyPin('neck'); const c = bodyCardKeys(); App.toggleBodyPin('biceps'); App.toggleBodyPin('neck'); const d = bodyCardKeys(); App.toggleBodyMetric('waist'); return eq([a, b, c, d, bodyCardKeys()], [['waist','fat'], ['fat','biceps'], ['biceps','neck'], ['waist','fat'], ['fat']]); }));
+  check(bm, 'The last metric switched on cannot be switched off', () => bodyRun({ enabled:['neck'] }, s => { App.toggleBodyMetric('neck'); return eq([s.body.enabled, !!s.bodyUi.status], [['neck'], true]); }));
+  check(bm, 'Scale readings trend on a 7-day average; tape readings use the number as typed', () => bodyRun({ entries:[{ date:dAgo(3), values:{ fat:25, waist:96 } }, { date:dAgo(1), values:{ fat:23, waist:95 } }] }, () => { const f = bodySummary('fat', 'start'), w = bodySummary('waist', 'start'); return eq([f.latest, f.change, w.change], [23, -1, -1]); }));
+  check(bm, '30-day change starts from the last reading before the 30 days', () => bodyRun({ entries:[{ date:dAgo(60), values:{ waist:100 } }, { date:dAgo(40), values:{ waist:98 } }, { date:dAgo(10), values:{ waist:96.5 } }] }, () => { const a = bodySummary('waist', '30d'), b = bodySummary('waist', 'start'); return eq([a.change, a.shown.length, b.change], [-1.5, 2, -3.5]); }));
+  check(bm, 'Editing or deleting a reading changes only that metric on that date', () => bodyRun({ entries:[{ date:'2026-03-01', values:{ waist:95, fat:24 } }] }, s => { App.openBodyDetail('waist'); App.editBodyReading('2026-03-01'); App.saveBodyEdit('500'); const bad = s.body.entries[0].values.waist; App.saveBodyEdit('93'); const edited = Object.assign({}, s.body.entries[0].values); App.askDeleteBodyReading('2026-03-01'); App.confirmDeleteBodyReading(); const left = Object.assign({}, s.body.entries[0].values); App.openBodyDetail('fat'); App.askDeleteBodyReading('2026-03-01'); App.confirmDeleteBodyReading(); return eq([bad, edited, left, s.body.entries.length], [95, { fat:24, waist:93 }, { fat:24 }, 0]); }));
+  check(bm, 'Measurements go into backups, and bad saved values are cleaned up', () => bodyRun({ entries:[{ date:'2026-03-01', values:{ waist:95 } }], pinned:['neck'] }, () => { const n = normalizeBody({ entries:[{ date:'bad', values:{ waist:90 } }, { date:'2026-03-02', values:{ waist:'x', arms:30, neck:40 } }, { date:'2026-03-02', values:{ hips:100 } }], enabled:[], pinned:['neck','neck','zz'] }); return eq([App.buildBackupPayload().body.entries, n.entries, n.enabled.length, n.pinned, normalizeBody(undefined).pinned], [[{ date:'2026-03-01', values:{ waist:95 } }], [{ date:'2026-03-02', values:{ neck:40, hips:100 } }], 8, ['neck'], ['waist','fat']]); }));
+  check(bm, 'Today shows the Body card with the pinned metrics; a past day does not', () => bodyRun({ entries:[{ date:dAgo(2), values:{ biceps:37, waist:94 } }], pinned:['biceps'] }, s => { s.screen = 'today'; const h = renderToday(); const card = doc(h).querySelector('#body-card'); return eq([!!card, card && /Biceps/.test(card.textContent), card && /Waist/.test(card.textContent), /37\.0/.test(card ? card.textContent : '')], [true, true, false, true]); }));
+  check(bm, 'The Body screen, the add form and a metric page all draw', () => bodyRun({ entries:[{ date:dAgo(9), values:{ fat:24, waist:95 } }, { date:dAgo(2), values:{ fat:23.5, waist:94 } }] }, s => { s.bodyUi.form = null; const main = renderBody(); s.bodyUi.form = { date:todayISO(), draft:{}, error:null }; const form = renderBody(); s.bodyUi.form = null; App.openBodyDetail('fat'); const det = renderBody(); return eq([/Choose metrics/.test(main), /id="body-in-neck"/.test(form) && /id="body-date"/.test(form), (det.match(/>Edit</g) || []).length, /<svg viewBox/.test(det)], [true, true, 2, true]); }));
+
   // ---- Memory sorting ----
   const sortNames = mode => withFixture([], [], s => { s.memorySort = mode; return sortMemoryItems(names0.map(n => ({ name:n }))).map(x => x.name); });
   const names0 = ['banana', 'Apple', 'egg', 'Rice 10', 'Rice 2', '\u00c9clair'];
@@ -258,7 +281,7 @@ function runSelfTests(){
   check('Memory sorting', 'Both screens show the sort control', () => withFixture([], [], () => eq([renderLibrary().indexOf('id="memsort-az"') >= 0, renderAddFood().indexOf('id="memsort-az"') >= 0], [true, true])));
 
   // ---- Every screen still draws ----
-  [['Today', renderToday], ['History', renderHistory], ['Trends', renderTrends], ['Data', renderExport], ['Settings', renderSettings], ['Memory', renderLibrary], ['Add food', renderAddFood]].forEach(([n, fn]) => {
+  [['Today', renderToday], ['History', renderHistory], ['Trends', renderTrends], ['Data', renderExport], ['Settings', renderSettings], ['Memory', renderLibrary], ['Add food', renderAddFood], ['Body', renderBody]].forEach(([n, fn]) => {
     check('Screens draw', n + ' screen renders', () => withFixture(mealsA, hist, () => { const h = fn(); return typeof h === 'string' && h.length > 200 ? true : 'rendered ' + (typeof h === 'string' ? h.length + ' characters' : typeof h); }));
   });
 
