@@ -4,7 +4,8 @@
 doing anything else.** It exists specifically because chat history does not follow the user
 between machines (see "Cross-machine continuity" below); this file is the hand-off.
 
-_Last updated 2026-11-10 (item 69: shared memory items are compact text so long recipe foods survive
+_Last updated 2026-11-14 (item 70: Body measurements logbook -- pushed, awaiting phone feedback;
+Self-check 127 checks). Before that, 2026-11-10 (item 69: shared memory items are compact text so long recipe foods survive
 WhatsApp; phone-confirmed; Self-check 116 checks). Before that, 2026-11-08 (item 68: a Saved food can be an ingredient inside another Saved food, as a live
 link; items 62-68 all confirmed working on the phone; Self-check is now 111 checks; `index.html` ~343 KB).
 Before that, 2026-10-26 (item 67: Memory form's "Label values are per [100] g/ml" box -- per-serving
@@ -2304,6 +2305,30 @@ User: labels often list nutrition per serving, not per 100 g, and the Ingredient
 - Self-check **116 checks** (new group "Sharing a recipe food", 5). `CACHE_NAME` nourish-v21 /
   billifit-v14. `index.html` ~345 KB (353,260 bytes, ~84%). **Phone-confirmed 2026-11-10.**
 
+### 70. Body measurements (2026-11-14, commits `69d6774` / `6ba7666`)
+- Asked: track body composition (body fat %, muscle mass) and tape measurements. Built as a **logbook
+  only** -- nothing feeds calorie targets or the maintenance estimate (the 2026-10 BIA analysis showed
+  scale fat % swings with water; that analysis is what was dropped, not logging).
+- Data: `state.body = { entries:[{date, values:{key:number}}], enabled:[keys], pinned:[<=2 keys] }`, in
+  backups (`buildBackupPayload().body`), loaded/cleaned by `normalizeBody` (bad dates/values dropped,
+  same-date entries merged, default pins waist+fat). UI state `state.bodyUi` (range, chooseOpen, form,
+  detail, status). Metrics `BODY_METRICS`: fat %, muscle kg (both `scale:true`), waist, chest, **biceps**
+  (user's pick instead of "arms"), hips, thighs, neck -- all cm.
+- Today (not past days): "Body" card under Weight with the 2 pinned metrics + 30-day change, "Add
+  measurements" and "See all". `bodyCardKeys()`: pins -> else waist+fat -> else first two switched on;
+  a third pin replaces the oldest.
+- Body screen (`screen:'body'`): 30 days / Since start chips, Choose metrics (at least one stays on),
+  row per metric with sparkline + change (green only in the helpful direction: `dir`), pin button.
+- Metric page: chart (3 months / 1 year / All; dots = readings, line = trend), all readings newest first
+  with change vs previous, Edit / Delete (asks; removes only that metric on that date, empty day removed).
+- Scale metrics trend on a 7-day trailing average (`bodySeries` `.s`); 30-day change starts from the last
+  reading before the 30 days (`bodySummary`).
+- Add form: date (no future) + enabled metrics, last values as placeholders, blanks skipped, ranges checked,
+  same date merges. Save closes via `backOneLevel()` -- closing directly left a dead back press.
+- Self-check **127 checks** (group "Body measurements", 10, + "Body screen renders"). `CACHE_NAME`
+  nourish-v22 / billifit-v15. `index.html` ~372 KB (380,555 bytes, **~90%** of the watch line).
+- **Pushed 2026-11-14, awaiting phone feedback.**
+
 ## Standing watch item: app size / build weight (started 2026-08-28)
 
 User asked whether the desktop dashboard was worth removing to save resources — measured it
@@ -2354,13 +2379,13 @@ phone (2026-10-23: "everything you are waiting for feedback on is working well")
 History day view (Carbs / Protein / Fat / Calories dots + tiles) and BilliFit's `billifit-` file names.
 The profile has **not reset again** as of 2026-10-23 (root cause still never proven -- see items 47 and
 52; if it recurs, ask *when*). History Week/Month views still show avg fiber; the user did not ask to
-change them, so they stay as is. **Items 62-68 were all confirmed working on the phone on 2026-11-08, item 69 on 2026-11-10** -- nothing awaits feedback.
-Self-check should read **116/116** with app version nourish-v21 / billifit-v14. The History tab's "Log a forgotten item" stays:
+change them, so they stay as is. **Items 62-68 were all confirmed working on the phone on 2026-11-08, item 69 on 2026-11-10**. **Item 70 (Body measurements) is pushed and awaits phone feedback.**
+Self-check should read **127/127** with app version nourish-v22 / billifit-v15. The History tab's "Log a forgotten item" stays:
 it is the only way to log to a day with nothing logged (View full day only reaches days with data).
-Size watch: `index.html` is ~345 KB (353,260 bytes, 2026-11-10), ~84% of the ~420 KB trigger.
+Size watch: `index.html` is ~372 KB (380,555 bytes, 2026-11-14), ~90% of the ~420 KB trigger -- flag before the next addition.
 
-**Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat tracking** (no more
-CSV re-analysis; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
+**Roadmap: everything agreed is done.** Dropped by the user on 2026-10-16: **body-fat analysis** (no more
+CSV re-analysis -- plain body logging was added later as item 70; the old `Monthly Measurements.csv` thread and its memory note are gone), "barcode on an
 existing item", and (earlier) repeat logging. Declined for now: typo-tolerant search, splitting the
 single `index.html`. The one-time scheduled task `maintenance-calories-reminder` fired on 2026-10-02 and
 is disabled. Nothing else is queued -- ask what's next rather than assuming.
